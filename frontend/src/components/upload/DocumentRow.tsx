@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Eye, Loader2, Trash2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2, Trash2 } from "lucide-react";
 import type { FileInfo } from "../../stores/appStore";
 import { displayName, fileStatusLabel, formatDate, formatSize } from "../../utils/fileMeta";
 import FileIcon from "./FileIcon";
@@ -7,12 +7,20 @@ interface Props {
   file: FileInfo & { progress?: number };
   demo?: boolean;
   deleting: boolean;
+  parsedActive?: boolean;
   onDelete: (filename: string) => void;
-  onViewParsed?: (filename: string) => void;
+  onViewParsed?: (filename: string, label: string) => void;
 }
 
 // Implemented: icon, filename, size/date metadata, status pill, delete action, and parsed-MD action.
-export default function DocumentRow({ file, demo = false, deleting, onDelete, onViewParsed }: Props) {
+export default function DocumentRow({
+  file,
+  demo = false,
+  deleting,
+  parsedActive = false,
+  onDelete,
+  onViewParsed,
+}: Props) {
   // Demo rows look real, but stay read-only so users do not delete sample data.
   const status = file.status ?? "done";
   const canViewParsed = !demo && file.file_extension === ".md" && onViewParsed;
@@ -39,11 +47,12 @@ export default function DocumentRow({ file, demo = false, deleting, onDelete, on
       </span>
       {canViewParsed && (
         <button
-          className="row-action"
-          aria-label={`View parsed Markdown for ${displayName(file)}`}
-          onClick={() => onViewParsed(file.filename)}
+          className={`row-action ${parsedActive ? "active" : ""}`}
+          aria-label={`${parsedActive ? "Hide" : "View"} parsed Markdown for ${displayName(file)}`}
+          aria-pressed={parsedActive}
+          onClick={() => onViewParsed(file.filename, displayName(file))}
         >
-          <Eye size={17} />
+          {parsedActive ? <EyeOff size={17} /> : <Eye size={17} />}
         </button>
       )}
       {!demo && (

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { useUpload } from "../hooks/useUpload";
 import {
@@ -8,7 +8,6 @@ import {
   type ParsedMarkdownSummary,
 } from "../services/api";
 import { useAppStore } from "../stores/appStore";
-import { demoFiles } from "../utils/fileMeta";
 import DocumentList, { type StatusFilter } from "./upload/DocumentList";
 import DocumentOverview from "./upload/DocumentOverview";
 import UploadDropzone from "./upload/UploadDropzone";
@@ -19,6 +18,8 @@ export default function UploadPanel() {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [parsed, setParsed] = useState<ParsedMarkdownSummary | null>(null);
   const [parsedError, setParsedError] = useState("");
+  const [parsedLabel, setParsedLabel] = useState("");
+  const [parsedFilename, setParsedFilename] = useState("");
   const [loadingParsed, setLoadingParsed] = useState(false);
   const { uploads, uploadMany } = useUpload();
   const { files, setFiles, removeFile } = useAppStore();
@@ -30,25 +31,36 @@ export default function UploadPanel() {
       .catch(() => setFiles([]));
   }, [setFiles]);
 
-  const shownFiles = useMemo(() => {
-    if (files.length) return files;
-    if (uploads.length) return [];
-    return demoFiles;
-  }, [files, uploads.length]);
-
   const handleDelete = async (filename: string) => {
     setDeleting(filename);
     try {
       await deleteDocument(filename);
       removeFile(filename);
+      if (parsedFilename === filename) {
+        setParsed(null);
+        setParsedError("");
+        setParsedLabel("");
+        setParsedFilename("");
+      }
     } finally {
       setDeleting(null);
     }
   };
 
-  const handleViewParsed = async (filename: string) => {
+  const handleViewParsed = async (filename: string, label: string) => {
+    if (parsedFilename === filename && (loadingParsed || parsed || parsedError)) {
+      setParsed(null);
+      setParsedError("");
+      setParsedLabel("");
+      setParsedFilename("");
+      return;
+    }
+
+    setParsed(null);
     setLoadingParsed(true);
     setParsedError("");
+    setParsedLabel(label);
+    setParsedFilename(filename);
     try {
       setParsed(await getParsedDocument(filename));
     } catch {
@@ -62,13 +74,14 @@ export default function UploadPanel() {
   return (
     <div className="documents-panel">
       <UploadDropzone onFiles={uploadMany} />
-      <DocumentOverview files={shownFiles} uploads={uploads} />
+      <DocumentOverview files={files} uploads={uploads} />
       <DocumentList
-        files={shownFiles}
+        files={files}
         uploads={uploads}
         filter={filter}
-        demo={files.length === 0}
+        demo={false}
         deleting={deleting}
+        activeParsedFilename={parsedFilename}
         onFilterChange={setFilter}
         onDelete={handleDelete}
         onViewParsed={handleViewParsed}
@@ -78,7 +91,7 @@ export default function UploadPanel() {
           <header>
             <div>
               <span className="section-heading">Markdown structure</span>
-              <strong>{parsed?.title ?? "Parsed Markdown"}</strong>
+              <strong>{parsedLabel || "Parsed Markdown"}</strong>
             </div>
             <button
               type="button"
@@ -86,6 +99,8 @@ export default function UploadPanel() {
               onClick={() => {
                 setParsed(null);
                 setParsedError("");
+                setParsedLabel("");
+                setParsedFilename("");
               }}
             >
               <X size={17} />
@@ -107,6 +122,7 @@ export default function UploadPanel() {
               <span>Code blocks <strong>{parsed.code_blocks_count}</strong></span>
               <span>Words <strong>{parsed.word_count}</strong></span>
               <span>Reading <strong>{parsed.reading_time} min</strong></span>
+              <span>Title <strong>{parsed.title || "none"}</strong></span>
               <span>Languages <strong>{parsed.languages.join(", ") || "none"}</strong></span>
             </div>
           )}

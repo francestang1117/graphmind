@@ -5,7 +5,7 @@ import FileIcon from "./FileIcon";
 
 function uploadStatusLabel(upload: UploadState) {
   // The label mirrors the backend pipeline names without exposing internals.
-  if (upload.status === "error") return "Error";
+  if (upload.status === "error") return upload.errorKind === "unsupported" ? "Unsupported" : "Failed";
   if (upload.status === "done") return "Done";
   if (upload.progress >= 80 || upload.step === "Indexing") return "Indexing";
   return `${upload.progress}%`;
@@ -21,7 +21,7 @@ export default function UploadRow({ upload }: { upload: UploadState }) {
         : "done";
 
   return (
-    <div className="document-row upload-row">
+    <div className={`document-row upload-row ${upload.status === "error" ? "error-row" : ""}`}>
       <FileIcon ext={upload.file_extension} />
       <div className="document-main">
         <strong>{upload.filename}</strong>

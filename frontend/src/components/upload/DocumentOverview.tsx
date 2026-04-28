@@ -8,10 +8,10 @@ interface Props {
   uploads: UploadState[];
 }
 
-// Implemented: small dashboard for total files, indexed files, active uploads, and stored size.
+// Implemented: small dashboard for total files, ready files, active uploads, and stored size.
 export default function DocumentOverview({ files, uploads }: Props) {
   // These numbers mix saved files and in-flight uploads to match what the user sees.
-  const doneCount = files.filter((file) => (file.status ?? "done") === "done").length;
+  const readyCount = files.filter((file) => (file.status ?? "done") === "done").length;
   const indexingCount =
     files.filter((file) => (file.status ?? "done") === "processing").length +
     uploads.filter((upload) => upload.status === "uploading").length;
@@ -21,7 +21,7 @@ export default function DocumentOverview({ files, uploads }: Props) {
 
   const cards = [
     { label: "Total files", value: files.length + uploads.length, icon: FileText, tone: "violet" },
-    { label: "Indexed", value: doneCount, icon: CheckCircle2, tone: "green" },
+    { label: "Ready", value: readyCount, icon: CheckCircle2, tone: "green" },
     { label: "Active", value: indexingCount, icon: Activity, tone: "blue" },
     { label: "Stored", value: formatSize(totalBytes), icon: Database, tone: "amber" },
   ];

@@ -1,3 +1,4 @@
+import { FileCode2, FileText, Layers3 } from "lucide-react";
 import type { FileInfo } from "../../stores/appStore";
 import type { UploadState } from "../../hooks/useUpload";
 import DocumentRow from "./DocumentRow";
@@ -11,9 +12,10 @@ interface Props {
   filter: StatusFilter;
   demo: boolean;
   deleting: string | null;
+  activeParsedFilename: string;
   onFilterChange: (filter: StatusFilter) => void;
   onDelete: (filename: string) => void;
-  onViewParsed?: (filename: string) => void;
+  onViewParsed?: (filename: string, label: string) => void;
 }
 
 const filters: Array<{ value: StatusFilter; label: string }> = [
@@ -22,13 +24,57 @@ const filters: Array<{ value: StatusFilter; label: string }> = [
   { value: "processing", label: "Indexing" },
 ];
 
-// Implemented: saved-file rows, in-flight upload rows, status filtering, delete, and Markdown viewer entry.
+function EmptyDocuments() {
+  return (
+    <div className="document-empty document-empty-intro">
+      <div className="empty-stack" aria-hidden="true">
+        <div className="empty-card empty-card-md">
+          <FileText size={18} />
+          <span>Markdown</span>
+        </div>
+        <div className="empty-card empty-card-code">
+          <FileCode2 size={18} />
+          <span>Code</span>
+        </div>
+        <div className="empty-card empty-card-pdf">
+          <Layers3 size={18} />
+          <span>PDF</span>
+        </div>
+      </div>
+      <div className="empty-copy">
+        <strong>Your workspace is ready</strong>
+        <p>Drop in a document to validate, store, and prepare it for parsing.</p>
+        <div className="empty-chips" aria-label="Supported file types">
+          <span>.md</span>
+          <span>.pdf</span>
+          <span>.txt</span>
+          <span>.docx</span>
+          <span>.py</span>
+          <span>.js</span>
+          <span>.ts</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyFilter() {
+  return (
+    <div className="document-empty document-empty-filter">
+      <strong>No files in this view</strong>
+      <p>Switch filters or upload another document.</p>
+    </div>
+  );
+}
+
+// Implemented: saved-file rows, in-flight upload rows, empty state, filtering, delete, and Markdown viewer entry.
 export default function DocumentList({
   files,
   uploads,
   filter,
   demo,
   deleting,
+  activeParsedFilename,
   onFilterChange,
   onDelete,
   onViewParsed,
@@ -38,6 +84,15 @@ export default function DocumentList({
     if (filter === "all") return true;
     return (file.status ?? "done") === filter;
   });
+  const filteredUploads = uploads.filter((upload) => {
+    if (filter === "all") return true;
+    return filter === "processing" && upload.status === "uploading";
+  });
+  const isEmpty = uploads.length === 0 && files.length === 0;
+  const hasNoFilteredFiles =
+    files.length + uploads.length > 0 &&
+    filteredFiles.length === 0 &&
+    filteredUploads.length === 0;
 
   return (
     <section className="document-list-section">
@@ -58,7 +113,9 @@ export default function DocumentList({
       </div>
 
       <div className="document-list">
-        {uploads.map((upload) => (
+        {isEmpty && <EmptyDocuments />}
+        {hasNoFilteredFiles && <EmptyFilter />}
+        {filteredUploads.map((upload) => (
           <UploadRow upload={upload} key={upload.id} />
         ))}
         {filteredFiles.map((file) => (
@@ -67,6 +124,7 @@ export default function DocumentList({
             key={file.filename}
             demo={demo}
             deleting={deleting === file.filename}
+            parsedActive={activeParsedFilename === file.filename}
             onDelete={onDelete}
             onViewParsed={onViewParsed}
           />

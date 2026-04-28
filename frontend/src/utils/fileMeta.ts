@@ -1,52 +1,16 @@
-import { Code2, File, FileText } from "lucide-react";
+import { Braces, Code2, File, FileText, Pilcrow } from "lucide-react";
 import type { FileInfo } from "../stores/appStore";
 
-// File visuals are centralized so upload rows and saved rows stay in sync.
+// File visuals stay centralized so upload rows, saved rows, and future viewers agree.
 export const fileTypeMeta: Record<string, { icon: typeof File; tone: string }> = {
   ".pdf": { icon: FileText, tone: "red" },
-  ".md": { icon: FileText, tone: "blue" },
+  ".md": { icon: Pilcrow, tone: "blue" },
   ".txt": { icon: FileText, tone: "gray" },
-  ".docx": { icon: FileText, tone: "blue" },
+  ".docx": { icon: FileText, tone: "cyan" },
   ".py": { icon: Code2, tone: "green" },
-  ".js": { icon: Code2, tone: "amber" },
-  ".ts": { icon: Code2, tone: "violet" },
+  ".js": { icon: Braces, tone: "amber" },
+  ".ts": { icon: Braces, tone: "violet" },
 };
-
-export const demoFiles: Array<FileInfo & { progress?: number }> = [
-  {
-    filename: "neural-networks.pdf",
-    original_filename: "neural-networks.pdf",
-    file_size: 2_300_000,
-    file_extension: ".pdf",
-    created_at: new Date(Date.now() - 3 * 86_400_000).toISOString(),
-    status: "done",
-  },
-  {
-    filename: "machine-learning-intro.md",
-    original_filename: "machine-learning-intro.md",
-    file_size: 14_900,
-    file_extension: ".md",
-    created_at: new Date(Date.now() - 2 * 86_400_000).toISOString(),
-    status: "done",
-  },
-  {
-    filename: "data-analysis.py",
-    original_filename: "data-analysis.py",
-    file_size: 8_200,
-    file_extension: ".py",
-    created_at: new Date(Date.now() - 86_400_000).toISOString(),
-    status: "done",
-  },
-  {
-    filename: "api-design-guide.md",
-    original_filename: "api-design-guide.md",
-    file_size: 22_100,
-    file_extension: ".md",
-    created_at: new Date().toISOString(),
-    status: "processing",
-    progress: 68,
-  },
-];
 
 export function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
@@ -55,9 +19,19 @@ export function formatSize(bytes: number) {
 }
 
 export function formatDate(iso: string) {
-  const diffHours = (Date.now() - new Date(iso).getTime()) / 3_600_000;
-  if (diffHours < 1) return "just now";
-  if (diffHours < 24) return `${Math.floor(diffHours)}h ago`;
+  // Keep new uploads feeling live without leaving everything stuck at "just now".
+  const timestamp = new Date(iso).getTime();
+  if (Number.isNaN(timestamp)) return "unknown";
+
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (diffSeconds < 45) return "just now";
+
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+
   const days = Math.floor(diffHours / 24);
   if (days < 7) return `${days}d ago`;
   return new Date(iso).toLocaleDateString();

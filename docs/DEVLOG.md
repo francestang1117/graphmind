@@ -169,6 +169,22 @@ Examples:
 
 This should make the project easier to read without making the code feel over-commented.
 
+## 2026-04 — Upload UI Polish
+
+After testing the upload flow with real files, I found several small UI problems that made the app feel less stable than the backend actually was.
+
+The first issue was duplicate rows. A successful upload briefly showed both the temporary upload row and the saved document row. I changed the flow so the temporary row is removed before the refreshed backend list is applied.
+
+The second issue was unsupported files. Dropping a PNG used to create an error row in the document list and show raw request text like `status code 400`. That was technically true, but not useful. Unsupported files are now blocked at the dropzone, and the user sees a short supported-types message instead.
+
+I also tightened a few details that became obvious only after clicking around:
+
+- Markdown preview can be toggled from the eye button.
+- The active preview row now gets a highlighted eye state.
+- The preview panel title uses the filename, while the Markdown H1 stays inside the structure details.
+- Time labels now move from `just now` to minute/hour/day labels.
+- File icons are easier to scan: Markdown, DOCX, code, PDF, and text no longer all look the same.
+
 ## Current State
 
 As of April 2026, GraphMind has a working foundation:
