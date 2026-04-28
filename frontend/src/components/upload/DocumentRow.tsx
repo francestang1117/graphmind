@@ -1,0 +1,61 @@
+import { AlertCircle, CheckCircle2, Eye, Loader2, Trash2 } from "lucide-react";
+import type { FileInfo } from "../../stores/appStore";
+import { displayName, fileStatusLabel, formatDate, formatSize } from "../../utils/fileMeta";
+import FileIcon from "./FileIcon";
+
+interface Props {
+  file: FileInfo & { progress?: number };
+  demo?: boolean;
+  deleting: boolean;
+  onDelete: (filename: string) => void;
+  onViewParsed?: (filename: string) => void;
+}
+
+// Implemented: icon, filename, size/date metadata, status pill, delete action, and parsed-MD action.
+export default function DocumentRow({ file, demo = false, deleting, onDelete, onViewParsed }: Props) {
+  // Demo rows look real, but stay read-only so users do not delete sample data.
+  const status = file.status ?? "done";
+  const canViewParsed = !demo && file.file_extension === ".md" && onViewParsed;
+
+  return (
+    <div className={`document-row ${demo ? "demo-row" : ""}`}>
+      <FileIcon ext={file.file_extension} />
+      <div className="document-main">
+        <strong>{displayName(file)}</strong>
+        <span>
+          {formatSize(file.file_size)} · {formatDate(file.created_at)}
+        </span>
+        {status === "processing" && (
+          <div className="row-progress">
+            <div style={{ width: `${file.progress ?? 55}%` }} />
+          </div>
+        )}
+      </div>
+      <span className={`status-pill ${status}`}>
+        {status === "processing" && <Loader2 className="spin" size={13} />}
+        {status === "done" && <CheckCircle2 size={13} />}
+        {status === "error" && <AlertCircle size={13} />}
+        {fileStatusLabel(status)}
+      </span>
+      {canViewParsed && (
+        <button
+          className="row-action"
+          aria-label={`View parsed Markdown for ${displayName(file)}`}
+          onClick={() => onViewParsed(file.filename)}
+        >
+          <Eye size={17} />
+        </button>
+      )}
+      {!demo && (
+        <button
+          className="row-action"
+          aria-label={`Delete ${displayName(file)}`}
+          onClick={() => onDelete(file.filename)}
+          disabled={deleting}
+        >
+          {deleting ? <Loader2 className="spin" size={17} /> : <Trash2 size={17} />}
+        </button>
+      )}
+    </div>
+  );
+}

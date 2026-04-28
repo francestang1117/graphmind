@@ -1,0 +1,37 @@
+services:
+  api:
+    build:
+      context: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+      - upload_data:/app/uploads
+    environment:
+      PROJECT_NAME: GraphMind
+      VERSION: 0.1.0
+      ENVIRONMENT: development
+      API_V1_PREFIX: /api/v1
+      UPLOAD_DIR: /app/uploads
+      MAX_UPLOAD_SIZE_MB: "50"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+      - ./frontend/index.html:/app/index.html
+    environment:
+      VITE_API_URL: http://localhost:8000
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  upload_data:
