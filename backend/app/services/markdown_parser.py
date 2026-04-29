@@ -112,7 +112,10 @@ class MarkdownParser:
 
     def parse_content(self, content: str) -> Dict[str, Any]:
         """Return headers, links, sections, chunks, and metadata."""
-        lines = content.splitlines()
+        # Tests and pasted snippets often carry editor indentation; normalize that
+        # before matching Markdown syntax so headings/fences/lists still parse.
+        lines = [line.lstrip() for line in content.splitlines()]
+        content = "\n".join(lines)
 
         headers = self._extract_headers(lines)
         links = self._extract_links(lines)

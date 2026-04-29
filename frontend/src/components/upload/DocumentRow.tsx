@@ -12,7 +12,21 @@ interface Props {
   onViewParsed?: (filename: string, label: string) => void;
 }
 
-// Implemented: icon, filename, size/date metadata, status pill, delete action, and parsed-MD action.
+const PARSEABLE_EXTENSIONS = new Set([
+  ".md",
+  ".txt",
+  ".pdf",
+  ".docx",
+  ".py",
+  ".js",
+  ".ts",
+  ".json",
+  ".csv",
+  ".html",
+  ".htm",
+]);
+
+// Implemented: icon, filename, size/date metadata, status pill, delete action, and parsed-structure action.
 export default function DocumentRow({
   file,
   demo = false,
@@ -23,7 +37,7 @@ export default function DocumentRow({
 }: Props) {
   // Demo rows look real, but stay read-only so users do not delete sample data.
   const status = file.status ?? "done";
-  const canViewParsed = !demo && file.file_extension === ".md" && onViewParsed;
+  const canViewParsed = !demo && PARSEABLE_EXTENSIONS.has(file.file_extension) && onViewParsed;
 
   return (
     <div className={`document-row ${demo ? "demo-row" : ""}`}>
@@ -48,7 +62,7 @@ export default function DocumentRow({
       {canViewParsed && (
         <button
           className={`row-action ${parsedActive ? "active" : ""}`}
-          aria-label={`${parsedActive ? "Hide" : "View"} parsed Markdown for ${displayName(file)}`}
+          aria-label={`${parsedActive ? "Hide" : "View"} parsed structure for ${displayName(file)}`}
           aria-pressed={parsedActive}
           onClick={() => onViewParsed(file.filename, displayName(file))}
         >

@@ -732,6 +732,9 @@ button {
 .file-icon.cyan { color: #22d3ee; background: rgba(34, 211, 238, 0.13); }
 .file-icon.green { color: #34d399; background: rgba(16, 185, 129, 0.14); }
 .file-icon.amber { color: #f59e0b; background: rgba(245, 158, 11, 0.14); }
+.file-icon.lime { color: #a3e635; background: rgba(163, 230, 53, 0.12); }
+.file-icon.teal { color: #2dd4bf; background: rgba(45, 212, 191, 0.12); }
+.file-icon.orange { color: #fb923c; background: rgba(251, 146, 60, 0.13); }
 .file-icon.violet { color: #a78bfa; background: rgba(139, 92, 246, 0.16); }
 .file-icon.gray { color: #a1a1aa; background: rgba(161, 161, 170, 0.14); }
 
@@ -867,15 +870,17 @@ button {
 }
 
 .parsed-viewer {
-  margin-top: 18px;
-  padding: 16px;
+  margin-top: 14px;
+  padding: 12px;
   border: 1px solid var(--line);
-  border-radius: 16px;
-  background: rgba(18, 19, 17, 0.32);
-  box-shadow: var(--shadow);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(139, 92, 246, 0.045), transparent 32%),
+    rgba(18, 19, 17, 0.26);
 }
 
 .parsed-viewer header,
+.parsed-meta,
 .parsed-grid,
 .parsed-state {
   display: flex;
@@ -884,50 +889,87 @@ button {
 
 .parsed-viewer header {
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
 }
 
 .parsed-viewer header .section-heading {
   display: block;
-  margin: 0 0 4px;
+  margin: 0 0 3px;
+  font-size: 9px;
 }
 
 .parsed-viewer header strong {
   color: var(--text);
-  font-size: 15px;
+  font-size: 13px;
 }
 
 .parsed-viewer header button {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: 9px;
   background: rgba(255, 255, 255, 0.055);
   color: var(--muted);
   cursor: pointer;
 }
 
+.parsed-meta,
 .parsed-grid {
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 14px;
+  gap: 6px;
+  margin-top: 10px;
 }
 
+.parsed-highlights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.parsed-highlight {
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.parsed-highlight span {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 760;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.parsed-highlight strong {
+  display: block;
+  margin-top: 3px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.parsed-meta span,
 .parsed-grid span,
 .parsed-state {
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
+  border-radius: 999px;
   background: rgba(255, 255, 255, 0.035);
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 750;
+  font-size: 10px;
+  font-weight: 720;
 }
 
+.parsed-meta span,
 .parsed-grid span {
-  padding: 8px 10px;
+  padding: 5px 8px;
 }
 
+.parsed-meta strong,
 .parsed-grid strong {
   margin-left: 5px;
   color: var(--text);

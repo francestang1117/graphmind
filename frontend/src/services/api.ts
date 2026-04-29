@@ -32,18 +32,34 @@ export interface SearchResult {
   tags?: string[];
 }
 
-export interface ParsedMarkdownSummary {
+export interface ParsedDocumentSummary {
   filename: string;
   title: string;
+  format: string;
   headers_count: number;
   sections_count: number;
+  chunks_count: number;
   links_count: number;
   images_count: number;
+  list_items_count: number;
   code_blocks_count: number;
+  tables_count: number;
+  imports_count: number;
+  functions_count: number;
+  classes_count: number;
+  entities_count: number;
+  pages_count: number;
+  paragraphs_count: number;
+  comments_count: number;
+  inherited_styles_count: number;
   word_count: number;
   reading_time: number;
   has_code: boolean;
   languages: string[];
+  imports: string[];
+  functions: string[];
+  classes: string[];
+  entities: Array<{ type?: string; text?: string }>;
 }
 
 export const checkHealth = () =>
@@ -71,7 +87,7 @@ export const listDocuments = (): Promise<FileInfo[]> =>
 export const deleteDocument = (filename: string) =>
   http.delete(`/documents/${encodeURIComponent(filename)}`);
 
-export const getParsedDocument = (filename: string): Promise<ParsedMarkdownSummary> =>
+export const getParsedDocument = (filename: string): Promise<ParsedDocumentSummary> =>
   http.get(`/documents/${encodeURIComponent(filename)}/parsed`).then((r) => r.data);
 
 export const fetchGraph = (): Promise<GraphData> =>

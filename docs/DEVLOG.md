@@ -185,6 +185,31 @@ I also tightened a few details that became obvious only after clicking around:
 - Time labels now move from `just now` to minute/hour/day labels.
 - File icons are easier to scan: Markdown, DOCX, code, PDF, and text no longer all look the same.
 
+## 2026-04 — Multi-format Parse Summaries
+
+Markdown was the first format with a visible parse summary. After adding PDF, DOCX, code, JSON, CSV, and HTML parsers, I noticed the UI still behaved as if Markdown was the only parseable file.
+
+I changed the parsed summary endpoint and viewer so every supported file can expose what was actually extracted. PDF summaries now focus on the dimensions that matter for document quality:
+
+- base text
+- tables
+- figures/images
+- reading order
+
+For now, PDF reading order is basic. It works well enough for simple documents, but complex academic PDFs with multi-column layouts will need a more deliberate reading-order pass later.
+
+## 2026-04 — Real Upload Edge Cases
+
+Testing with real files exposed a few problems that did not show up with simple sample documents.
+
+The first issue was JSON storage. Uploaded `.json` files are stored as `hash.json`, while their sidecar metadata is stored as `hash.json.json`. My list endpoint was scanning every `*.json` file and accidentally tried to read the uploaded document itself as metadata. That broke the document list with a missing `created_at` field. I fixed this by validating the sidecar metadata schema before including a file in the list.
+
+The second issue was duplicate uploads. Content-addressed storage already used SHA-256 filenames, but the API still behaved as if uploading the same content again was normal. I changed this into an explicit duplicate flow: the backend detects repeated content by hash and returns a `409`, and the frontend shows a `Duplicate` state instead of adding another row.
+
+The third issue was HTML validation. I originally blocked any HTML containing scripts or inline handlers. That is too strict for this project because HTML is uploaded as source material to parse, not as a page to execute. The validator now allows script tags in `.html` source files while still blocking dangerous URL schemes such as `javascript:` and `data:text/html`.
+
+The last issue was DOCX structure. A resume template used a Word table for layout, so the parser reported `paragraphs: 3` and `tables: 1`, even though the visible document had many more text blocks and no real data table. I updated the DOCX parser to read visible XML paragraphs, treat layout tables as searchable text, and only count compact grid-like content as actual tables.
+
 ## Current State
 
 As of April 2026, GraphMind has a working foundation:
@@ -196,10 +221,11 @@ As of April 2026, GraphMind has a working foundation:
 - file validation
 - local file storage
 - document list/detail/delete
+- duplicate detection by content hash
 - Markdown parser
 - Markdown parse summary endpoint
-- simple frontend Markdown summary viewer
-- basic parsers for TXT, PDF, DOCX, Python, JavaScript, and TypeScript
+- frontend parse summary viewer
+- basic parsers for TXT, PDF, DOCX, Python, JavaScript, TypeScript, JSON, CSV, and HTML
 - Docker Compose for API + frontend
 - tests for the core backend pieces
 

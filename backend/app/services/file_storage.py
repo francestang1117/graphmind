@@ -3,7 +3,7 @@
 Implemented:
 - SHA-256 based filenames
 - sidecar metadata JSON
-- duplicate-content reuse
+- duplicate-content detection by hash
 - list, lookup, load, and delete operations
 - path guard before read/delete
 """
@@ -19,6 +19,16 @@ from app.core.config import settings
 
 class FileStorageError(IOError):
     """Raised when a storage operation fails unexpectedly."""
+
+
+class DuplicateFileError(FileStorageError):
+    """Raised when the same content has already been stored."""
+
+    def __init__(self, metadata: dict[str, Any]) -> None:
+        self.metadata = metadata
+        super().__init__(
+            f"Duplicate file content already exists as {metadata.get('original_filename')}"
+        )
 
 
 class FileStorage:
@@ -40,14 +50,20 @@ class FileStorage:
         dest = self._dest_path(file_hash, extension)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
-        if not dest.exists():
-            tmp = dest.with_suffix(dest.suffix + ".tmp")
-            try:
-                tmp.write_bytes(data)
-                tmp.rename(dest)
-            except Exception as exc:
-                tmp.unlink(missing_ok=True)
-                raise FileStorageError(f"Failed to write {dest}: {exc}") from exc
+        # Deduplication is based on content, not filename. Renaming a file should
+        # not create a second copy if the bytes are exactly the same.
+        if dest.exists():
+            existing = self.get_file_info(dest.name)
+            if existing:
+                raise DuplicateFileError(existing)
+
+        tmp = dest.with_suffix(dest.suffix + ".tmp")
+        try:
+            tmp.write_bytes(data)
+            tmp.rename(dest)
+        except Exception as exc:
+            tmp.unlink(missing_ok=True)
+            raise FileStorageError(f"Failed to write {dest}: {exc}") from exc
 
         metadata = self._build_metadata(dest, original_filename, file_hash, mime_type)
         self._metadata_path(dest).write_text(
@@ -61,10 +77,12 @@ class FileStorage:
         files = []
         for metadata_path in self.root.glob("*/*.json"):
             try:
-                files.append(json.loads(metadata_path.read_text(encoding="utf-8")))
+                metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-        return sorted(files, key=lambda item: item["created_at"], reverse=True)
+            if self._is_metadata_file(metadata_path, metadata):
+                files.append(metadata)
+        return sorted(files, key=lambda item: item.get("created_at", ""), reverse=True)
 
     def get_file_info(self, filename: str) -> Optional[dict[str, Any]]:
         """Return metadata for a stored filename."""
@@ -113,6 +131,26 @@ class FileStorage:
 
     def _metadata_path(self, path: Path) -> Path:
         return path.with_suffix(path.suffix + ".json")
+
+    def _is_metadata_file(self, path: Path, metadata: dict[str, Any]) -> bool:
+        """Distinguish sidecar metadata from uploaded .json documents."""
+        # Uploaded JSON files live beside their metadata as:
+        #   hash.json       -> user document
+        #   hash.json.json  -> sidecar metadata
+        # So list_files() must validate the schema instead of trusting '*.json'.
+        required = {
+            "filename",
+            "stored_filename",
+            "original_filename",
+            "file_size",
+            "file_extension",
+            "file_path",
+            "created_at",
+        }
+        if not required.issubset(metadata):
+            return False
+        stored_path = Path(str(metadata["file_path"]))
+        return path == self._metadata_path(stored_path)
 
     def _build_metadata(
         self,

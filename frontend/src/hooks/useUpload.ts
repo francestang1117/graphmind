@@ -13,16 +13,22 @@ export interface UploadState {
   step: string;
   status: "uploading" | "done" | "error";
   error?: string;
-  errorKind?: "unsupported" | "failed";
+  errorKind?: "unsupported" | "duplicate" | "failed";
 }
 
 const steps = ["Uploading", "Validating", "Saving", "Parsing", "Indexing", "Done"];
-const allowedExtensions = new Set([".md", ".pdf", ".txt", ".docx", ".py", ".js", ".ts"]);
-const supportedLabel = ".md, .pdf, .txt, .docx, .py, .js, .ts";
+const allowedExtensions = new Set([
+  ".md", ".pdf", ".txt", ".docx", ".py", ".js", ".ts", ".json", ".csv", ".html", ".htm",
+]);
+const supportedLabel = ".md, .pdf, .txt, .docx, .py, .js, .ts, .json, .csv, .html";
 
 function fileExtension(filename: string) {
   const ext = filename.includes(".") ? `.${filename.split(".").pop()?.toLowerCase() ?? ""}` : "";
   return ext;
+}
+
+function isUsableFile(file: unknown): file is File {
+  return file instanceof File && Boolean(file.name) && Number.isFinite(file.size);
 }
 
 function removeUpload(
@@ -48,6 +54,15 @@ function friendlyUploadError(error: unknown, ext: string) {
   if (axios.isAxiosError(error)) {
     const detail = error.response?.data?.detail;
     const text = typeof detail === "string" ? detail : "";
+    const message = typeof detail?.message === "string" ? detail.message : "";
+    // The backend uses a 409 when SHA-256 content already exists, even if
+    // the duplicate was uploaded with a different filename.
+    if (error.response?.status === 409 || message.includes("already been uploaded")) {
+      return {
+        kind: "duplicate" as const,
+        message: "This file is already in your documents.",
+      };
+    }
     if (text.includes("not permitted")) {
       return {
         kind: "unsupported" as const,
@@ -82,6 +97,10 @@ export function useUpload() {
   };
 
   const uploadFile = async (file: File) => {
+    if (!isUsableFile(file)) {
+      return;
+    }
+
     const id = `${file.name}-${file.lastModified}-${Date.now()}`;
     const ext = fileExtension(file.name);
 
@@ -111,6 +130,17 @@ export function useUpload() {
       removeUpload(setUploads, id);
       setFiles(await listDocuments());
     } catch (error) {
+      const friendly = friendlyUploadError(error, ext);
+      if (friendly.kind === "duplicate") {
+        update(id, {
+          status: "error",
+          error: friendly.message,
+          errorKind: friendly.kind,
+          step: "Duplicate",
+        });
+        return;
+      }
+
       const refreshed = await listDocuments().catch(() => []);
       const saved = refreshed.find(
         (doc) => doc.original_filename === file.name && doc.file_size === file.size,
@@ -123,7 +153,11 @@ export function useUpload() {
         return;
       }
 
-      const friendly = friendlyUploadError(error, ext);
+      if (!file.name || !Number.isFinite(file.size)) {
+        removeUpload(setUploads, id);
+        setFiles(refreshed);
+        return;
+      }
       update(id, {
         status: "error",
         error: friendly.message,
@@ -134,7 +168,9 @@ export function useUpload() {
   };
 
   const uploadMany = (files: FileList | File[]) =>
-    Promise.all(Array.from(files).map((file) => uploadFile(file)));
+    Promise.all(Array.from(files).filter(isUsableFile).map((file) => uploadFile(file)));
 
-  return { uploads: Object.values(uploads), uploadFile, uploadMany };
+  const dismissUpload = (id: string) => removeUpload(setUploads, id);
+
+  return { uploads: Object.values(uploads), uploadFile, uploadMany, dismissUpload };
 }

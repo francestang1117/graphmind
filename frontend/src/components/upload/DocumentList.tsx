@@ -15,6 +15,7 @@ interface Props {
   activeParsedFilename: string;
   onFilterChange: (filter: StatusFilter) => void;
   onDelete: (filename: string) => void;
+  onDismissUpload?: (id: string) => void;
   onViewParsed?: (filename: string, label: string) => void;
 }
 
@@ -52,6 +53,9 @@ function EmptyDocuments() {
           <span>.py</span>
           <span>.js</span>
           <span>.ts</span>
+          <span>.json</span>
+          <span>.csv</span>
+          <span>.html</span>
         </div>
       </div>
     </div>
@@ -67,6 +71,10 @@ function EmptyFilter() {
   );
 }
 
+function isRenderableUpload(upload: UploadState) {
+  return Boolean(upload.filename) && Number.isFinite(upload.file_size);
+}
+
 // Implemented: saved-file rows, in-flight upload rows, empty state, filtering, delete, and Markdown viewer entry.
 export default function DocumentList({
   files,
@@ -77,6 +85,7 @@ export default function DocumentList({
   activeParsedFilename,
   onFilterChange,
   onDelete,
+  onDismissUpload,
   onViewParsed,
 }: Props) {
   // Upload rows stay above saved rows so active work is always visible.
@@ -84,13 +93,14 @@ export default function DocumentList({
     if (filter === "all") return true;
     return (file.status ?? "done") === filter;
   });
-  const filteredUploads = uploads.filter((upload) => {
+  const visibleUploads = uploads.filter(isRenderableUpload);
+  const filteredUploads = visibleUploads.filter((upload) => {
     if (filter === "all") return true;
     return filter === "processing" && upload.status === "uploading";
   });
-  const isEmpty = uploads.length === 0 && files.length === 0;
+  const isEmpty = visibleUploads.length === 0 && files.length === 0;
   const hasNoFilteredFiles =
-    files.length + uploads.length > 0 &&
+    files.length + visibleUploads.length > 0 &&
     filteredFiles.length === 0 &&
     filteredUploads.length === 0;
 
@@ -116,7 +126,7 @@ export default function DocumentList({
         {isEmpty && <EmptyDocuments />}
         {hasNoFilteredFiles && <EmptyFilter />}
         {filteredUploads.map((upload) => (
-          <UploadRow upload={upload} key={upload.id} />
+          <UploadRow upload={upload} key={upload.id} onDismiss={onDismissUpload} />
         ))}
         {filteredFiles.map((file) => (
           <DocumentRow

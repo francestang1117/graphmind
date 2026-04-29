@@ -5,12 +5,18 @@ interface Props {
   onFiles: (files: FileList | File[]) => void;
 }
 
-const allowedExtensions = new Set([".md", ".pdf", ".txt", ".docx", ".py", ".js", ".ts"]);
-const accept = ".md,.pdf,.txt,.docx,.py,.js,.ts";
-const supportedLabel = ".md, .pdf, .txt, .docx, .py, .js, .ts";
+const allowedExtensions = new Set([
+  ".md", ".pdf", ".txt", ".docx", ".py", ".js", ".ts", ".json", ".csv", ".html", ".htm",
+]);
+const accept = ".md,.pdf,.txt,.docx,.py,.js,.ts,.json,.csv,.html,.htm";
+const supportedLabel = ".md, .pdf, .txt, .docx, .py, .js, .ts, .json, .csv, .html";
 
 function fileExtension(filename: string) {
   return filename.includes(".") ? `.${filename.split(".").pop()?.toLowerCase() ?? ""}` : "";
+}
+
+function isUsableFile(file: unknown): file is File {
+  return file instanceof File && Boolean(file.name) && Number.isFinite(file.size);
 }
 
 // Implemented: drag-and-drop upload, click-to-browse, multi-file selection, and accepted extension hints.
@@ -21,9 +27,9 @@ export default function UploadDropzone({ onFiles }: Props) {
 
   const acceptFiles = (files: FileList | File[]) => {
     // Unsupported files are rejected at the doorway, not shown as failed uploads.
-    const incoming = Array.from(files);
+    const incoming = Array.from(files).filter(isUsableFile);
     const accepted = incoming.filter((file) => allowedExtensions.has(fileExtension(file.name)));
-    const rejected = incoming.length - accepted.length;
+    const rejected = Array.from(files).length - accepted.length;
 
     if (rejected) {
       setNotice(
@@ -62,7 +68,7 @@ export default function UploadDropzone({ onFiles }: Props) {
     >
       <UploadCloud size={56} />
       <strong>{dragging ? "Release to upload" : "Drop files here or click to browse"}</strong>
-      <span>Supports .md, .pdf, .txt, .docx, .py, .js, .ts</span>
+      <span>Supports .md, .pdf, .txt, .docx, .py, .js, .ts, .json, .csv, .html</span>
       {notice && <small className="dropzone-notice">{notice}</small>}
       <button type="button">Choose files</button>
       <input

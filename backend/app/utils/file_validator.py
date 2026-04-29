@@ -5,7 +5,7 @@ Implemented:
 - empty and oversized file rejection
 - MIME detection with local fallback
 - PDF/DOCX magic-byte checks
-- basic text safety scan
+- basic text safety scan with HTML-as-source handling
 - filename sanitization
 """
 
@@ -36,6 +36,10 @@ EXTENSION_MIME_MAP: dict[str, frozenset[str]] = {
     ".py": frozenset({"text/plain", "text/x-python", "application/x-python", "text/x-script.python"}),
     ".js": frozenset({"text/plain", "text/javascript", "application/javascript", "text/ecmascript"}),
     ".ts": frozenset({"text/plain", "application/typescript", "text/typescript"}),
+    ".json": frozenset({"application/json", "text/plain"}),
+    ".csv": frozenset({"text/csv", "text/plain", "application/csv", "application/vnd.ms-excel"}),
+    ".html": frozenset({"text/html", "text/plain"}),
+    ".htm": frozenset({"text/html", "text/plain"}),
 }
 
 MAGIC_BYTES: dict[str, bytes] = {
@@ -51,7 +55,13 @@ _DANGER_PATTERNS: list[re.Pattern] = [
     re.compile(rb"data\s*:\s*text/html",     re.IGNORECASE),
 ]
 
-_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".py", ".js", ".ts"})
+_HTML_DANGER_PATTERNS: list[re.Pattern] = [
+    re.compile(rb"javascript\s*:",       re.IGNORECASE),
+    re.compile(rb"vbscript\s*:",         re.IGNORECASE),
+    re.compile(rb"data\s*:\s*text/html", re.IGNORECASE),
+]
+
+_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".py", ".js", ".ts", ".json", ".csv", ".html", ".htm"})
 
 
 class FileValidator:
@@ -68,7 +78,10 @@ class FileValidator:
         self._check_magic_bytes(suffix, data)
 
         if suffix in _TEXT_EXTENSIONS:
-            self._scan_content(data)
+            # HTML uploads are treated as source documents for parsing, not as
+            # pages to render. Script tags can be stored as text, while dangerous
+            # URL schemes are still blocked.
+            self._scan_content(data, allow_html_scripts=suffix in {".html", ".htm"})
 
         return self._sanitise_filename(filename), detected_mime
     
@@ -110,6 +123,9 @@ class FileValidator:
         if data.startswith(b"PK\x03\x04"):
             return "application/zip"
         try:
+            stripped = data.lstrip()
+            if stripped.startswith((b"{", b"[")):
+                return "application/json"
             data.decode("utf-8")
             return "text/plain"
         except UnicodeDecodeError:
@@ -117,6 +133,8 @@ class FileValidator:
         
     def _check_mime(self, suffix: str, detected_mime: str) -> None:
         """Verify the detected MIME type is valid for the extension."""
+        if suffix in {".html", ".htm"} and detected_mime == "application/octet-stream":
+            return
         allowed = EXTENSION_MIME_MAP[suffix]
         if detected_mime not in allowed:
             raise UploadValidationError(
@@ -126,17 +144,33 @@ class FileValidator:
 
     def _check_magic_bytes(self, suffix: str, data: bytes) -> None:
         """Verify binary formats start with their expected signature."""
+        if suffix in {".html", ".htm"}:
+            self._check_html_content(data)
+            return
         expected = MAGIC_BYTES.get(suffix)
         if expected is not None and not data.startswith(expected):
             raise UploadValidationError(
                 f"File does not begin with the expected '{suffix}' signature. "
                 "It may be corrupt or incorrectly named."
             )
+
+    def _check_html_content(self, data: bytes) -> None:
+        """Accept HTML documents and fragments without requiring libmagic."""
+        try:
+            sample = data[:65_536].decode("utf-8", errors="ignore").lower()
+        except Exception as exc:
+            raise UploadValidationError("HTML files must be readable text.") from exc
+
+        if not re.search(r"<!doctype\s+html|<html[\s>]|<(head|body|meta|title|div|p|span|a|section|article)[\s>]", sample):
+            raise UploadValidationError(
+                "HTML files must contain recognizable HTML markup."
+            )
         
-    def _scan_content(self, data: bytes) -> None:
+    def _scan_content(self, data: bytes, allow_html_scripts: bool = False) -> None:
         """Scan the first 64 KB of text formats for dangerous patterns."""
         sample = data[:65_536]
-        for pattern in _DANGER_PATTERNS:
+        patterns = _HTML_DANGER_PATTERNS if allow_html_scripts else _DANGER_PATTERNS
+        for pattern in patterns:
             if pattern.search(sample):
                 raise UploadValidationError(
                     "File contains dangerous embedded content (scripts, "

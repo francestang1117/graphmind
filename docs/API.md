@@ -33,6 +33,10 @@ Supported extensions:
 - `.py`
 - `.js`
 - `.ts`
+- `.json`
+- `.csv`
+- `.html`
+- `.htm`
 
 Example:
 

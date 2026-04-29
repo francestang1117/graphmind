@@ -34,7 +34,8 @@ class Settings(BaseSettings):
 
     MAX_UPLOAD_SIZE_MB: int = 50
     ALLOWED_EXTENSIONS: List[str] = [
-        ".md", ".pdf", ".txt", ".docx", ".py", ".js", ".ts"
+        ".md", ".pdf", ".txt", ".docx", ".py", ".js", ".ts",
+        ".json", ".csv", ".html", ".htm",
     ]
     UPLOAD_DIR: str = str(Path(__file__).resolve().parents[2] / "uploads")
 

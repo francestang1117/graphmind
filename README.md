@@ -13,7 +13,7 @@ The project is intentionally built in small phases. Knowledge graph construction
 - SHA-256 content-addressed local file storage
 - Document metadata listing, detail lookup, and deletion
 - Markdown parsing helper and summary viewer for headings, links, code blocks, sections, chunks, and metadata
-- Multi-format parser for Markdown, TXT, PDF, DOCX, Python, JavaScript, and TypeScript files
+- Multi-format parser for Markdown, TXT, PDF, DOCX, Python, JavaScript, TypeScript, JSON, CSV, and HTML files
 - Lightweight Docker Compose setup for the API and frontend
 
 ## Project Status
@@ -23,7 +23,7 @@ The project is intentionally built in small phases. Knowledge graph construction
 | Project setup | Done | FastAPI, React, Docker Compose |
 | File upload | Done | Validation, storage, list/get/delete |
 | Markdown parsing | In progress | Parser is wired into upload background work with a small summary viewer |
-| PDF/DOCX/code parsing | Basic | Parser functions exist, deeper extraction comes later |
+| PDF/DOCX/code/data parsing | Basic | Parser functions exist for PDF, DOCX, code, JSON, CSV, and HTML |
 | Knowledge graph | Demo UI only | Backend graph engine is planned |
 | Search | Demo UI only | Backend semantic search is planned |
 | AI chat | Demo UI only | Backend RAG/chat is planned |

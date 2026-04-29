@@ -1,4 +1,4 @@
-import { Braces, Code2, File, FileText, Pilcrow } from "lucide-react";
+import { Braces, Code2, File, FileJson, FileText, Globe2, Pilcrow, Table2 } from "lucide-react";
 import type { FileInfo } from "../stores/appStore";
 
 // File visuals stay centralized so upload rows, saved rows, and future viewers agree.
@@ -10,9 +10,14 @@ export const fileTypeMeta: Record<string, { icon: typeof File; tone: string }> =
   ".py": { icon: Code2, tone: "green" },
   ".js": { icon: Braces, tone: "amber" },
   ".ts": { icon: Braces, tone: "violet" },
+  ".json": { icon: FileJson, tone: "lime" },
+  ".csv": { icon: Table2, tone: "teal" },
+  ".html": { icon: Globe2, tone: "orange" },
+  ".htm": { icon: Globe2, tone: "orange" },
 };
 
 export function formatSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "unknown size";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;

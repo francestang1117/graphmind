@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.services.file_storage import FileStorage, _sha256
+from app.services.file_storage import DuplicateFileError, FileStorage, _sha256
 
 
 def test_save_file_returns_metadata_and_writes_bytes(tmp_path):
@@ -18,14 +18,16 @@ def test_save_file_returns_metadata_and_writes_bytes(tmp_path):
     assert Path(info["file_path"]).read_bytes() == content
 
 
-def test_same_content_reuses_the_same_storage_path(tmp_path):
+def test_same_content_is_reported_as_duplicate(tmp_path):
     storage = FileStorage(tmp_path)
 
     first = storage.save_file(b"same", "first.txt", "text/plain")
-    second = storage.save_file(b"same", "second.txt", "text/plain")
 
-    assert first["file_path"] == second["file_path"]
-    assert first["file_hash"] == second["file_hash"]
+    with pytest.raises(DuplicateFileError) as exc:
+        storage.save_file(b"same", "second.txt", "text/plain")
+
+    assert exc.value.metadata["file_path"] == first["file_path"]
+    assert exc.value.metadata["file_hash"] == first["file_hash"]
 
 
 def test_list_files_returns_saved_metadata(tmp_path):
