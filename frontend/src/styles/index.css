@@ -1077,12 +1077,18 @@ button {
   width: 100%;
   height: 100%;
   display: block;
-  cursor: crosshair;
+  cursor: grab;
+  touch-action: none;
+}
+
+.graph-canvas-wrap canvas:active {
+  cursor: grabbing;
 }
 
 .graph-loading,
 .graph-caption,
-.graph-refresh {
+.graph-controls,
+.graph-tooltip {
   position: absolute;
 }
 
@@ -1100,18 +1106,66 @@ button {
   font-size: 13px;
 }
 
-.graph-refresh {
+.graph-controls {
   top: 18px;
   left: 18px;
-  width: 42px;
-  height: 42px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.graph-controls button {
+  width: 30px;
+  height: 30px;
   display: grid;
   place-items: center;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 9px;
   background: rgba(0, 0, 0, 0.16);
   color: var(--muted);
   cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    color 160ms ease,
+    background 160ms ease;
+}
+
+.graph-controls button:hover {
+  border-color: rgba(139, 92, 246, 0.62);
+  color: var(--text);
+  background: rgba(139, 92, 246, 0.12);
+}
+
+.graph-controls button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.graph-tooltip {
+  right: 22px;
+  bottom: 18px;
+  display: grid;
+  gap: 3px;
+  min-width: 150px;
+  max-width: 220px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(18, 18, 18, 0.88);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+.graph-tooltip strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.graph-tooltip span,
+.graph-tooltip em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
 }
 
 .graph-side {

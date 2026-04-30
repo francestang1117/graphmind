@@ -1136,10 +1136,20 @@ def _top_level_dependencies(imports: list[str]) -> list[str]:
     """Normalize imports into dependency names useful for graph nodes."""
     dependencies = []
     for item in imports:
-        root = item.strip().split()[0].split(".")[0].strip("'\"")
-        if root and root not in {".", ".."}:
+        root = _normalise_dependency_name(item)
+        if root:
             dependencies.append(root)
     return list(dict.fromkeys(dependencies))
+
+
+def _normalise_dependency_name(value: str) -> str:
+    item = value.strip().split()[0].strip("'\"")
+    if not item or item.startswith((".", "/")):
+        return ""
+    if item.startswith("@"):
+        parts = item.split("/")
+        return "/".join(parts[:2]) if len(parts) >= 2 else item
+    return item.split("/")[0].split(".")[0]
 
 
 def _dependency_entities(imports: list[str]) -> list[dict]:

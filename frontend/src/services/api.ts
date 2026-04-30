@@ -13,9 +13,16 @@ export interface GraphNode {
   size: number;
 }
 
+export interface GraphEdge {
+  source: string;
+  target: string;
+  type?: string;
+  weight?: number;
+}
+
 export interface GraphData {
   nodes: GraphNode[];
-  edges: Array<[string, string]>;
+  edges: GraphEdge[];
   stats: {
     total_nodes: number;
     total_edges: number;
@@ -117,10 +124,16 @@ export const sendChatMessage = (
     .then((r) => r.data);
 
 function normalizeGraph(data: unknown): GraphData {
-  const raw = data as Partial<GraphData> | undefined;
+  const raw = data as (Partial<GraphData> & { edge_details?: GraphEdge[] }) | undefined;
+  const rawEdges = raw?.edge_details ?? raw?.edges ?? [];
   return {
     nodes: raw?.nodes ?? [],
-    edges: raw?.edges ?? [],
+    edges: rawEdges.map((edge) => {
+      if (Array.isArray(edge)) {
+        return { source: edge[0], target: edge[1] };
+      }
+      return edge;
+    }),
     stats: raw?.stats ?? {
       total_nodes: raw?.nodes?.length ?? 0,
       total_edges: raw?.edges?.length ?? 0,

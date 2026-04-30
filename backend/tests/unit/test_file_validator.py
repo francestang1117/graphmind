@@ -59,5 +59,16 @@ def test_libmagic_failure_uses_local_fallback(validator):
     assert mime == "text/plain"
 
 
+def test_typescript_declaration_allows_json_like_mime(validator):
+    # Short .d.ts files can be misidentified as JSON-ish text by libmagic.
+    # They are still source text and should go through the code parser.
+    fake_magic = SimpleNamespace(from_buffer=lambda *_args, **_kwargs: "application/json")
+    with patch("app.utils.file_validator.magic", fake_magic):
+        safe_name, mime = validator.validate("absolutePath.d.ts", b"{}")
+
+    assert safe_name == "absolutePath.d.ts"
+    assert mime == "application/json"
+
+
 def test_filename_sanitiser_strips_paths_and_bad_chars():
     assert FileValidator._sanitise_filename("../../bad<name>.md") == "bad_name_.md"

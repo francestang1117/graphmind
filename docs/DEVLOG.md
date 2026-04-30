@@ -210,6 +210,40 @@ The third issue was HTML validation. I originally blocked any HTML containing sc
 
 The last issue was DOCX structure. A resume template used a Word table for layout, so the parser reported `paragraphs: 3` and `tables: 1`, even though the visible document had many more text blocks and no real data table. I updated the DOCX parser to read visible XML paragraphs, treat layout tables as searchable text, and only count compact grid-like content as actual tables.
 
+## 2026-04 — Entity Extraction MVP
+
+I started Module 3 with a small entity extraction layer. The first draft had the right idea, but the file accidentally lived under `__pycache__`, and the test file was closer to a demo script than an automated test.
+
+I moved the extractor into `app/services/entity_extractor.py` and made the first version deliberately modest:
+
+- rule-based technical entities for languages, frameworks, libraries, and concepts
+- optional spaCy support for general named entities
+- Markdown-aware extraction from headings, links, and code blocks
+- import extraction from Python and JS/TS code fences
+- entity normalization and deduplication
+- lightweight relation hints such as `USES`, `DEVELOPED_BY`, and co-mentions
+
+The important design choice was to make spaCy optional. The project should still start and the tests should still run if the local machine does not have `en_core_web_sm` installed. spaCy can improve recall later, but it should not make the module fragile during early development.
+
+## 2026-04 — First Knowledge Graph Builder
+
+I added Module 4 to turn extracted entities into a graph. The first version used a demo-style NetworkX wrapper, but it was not wired into the API router and it added a new dependency before the current project really needed it.
+
+I simplified the first graph builder into an in-memory service with a clear shape:
+
+- document nodes
+- entity nodes
+- `MENTIONS` edges from documents to entities
+- relation edges from the entity extractor
+- node search
+- neighbor lookup
+- graph statistics
+- frontend-ready visualization export
+
+The graph API now rebuilds from the current uploaded documents, which is not the final persistence model, but it is honest for this stage. It means the Graph panel can show real data from uploaded files without pretending that Neo4j/Postgres graph persistence is already finished.
+
+I also replaced the old full-pipeline demo script with assertions. The test now checks the real path from Markdown parsing to entity extraction to graph construction.
+
 ## Current State
 
 As of April 2026, GraphMind has a working foundation:
@@ -226,10 +260,12 @@ As of April 2026, GraphMind has a working foundation:
 - Markdown parse summary endpoint
 - frontend parse summary viewer
 - basic parsers for TXT, PDF, DOCX, Python, JavaScript, TypeScript, JSON, CSV, and HTML
+- entity extraction MVP with rule-based technical entities and optional spaCy NER
+- in-memory knowledge graph builder connected to uploaded documents
 - Docker Compose for API + frontend
 - tests for the core backend pieces
 
-The project is not yet a full knowledge graph system. The graph, search, and chat screens are still mostly product scaffolding.
+The project is not yet a full knowledge graph system. The graph screen can now use real extracted data, while search and chat are still mostly product scaffolding.
 
 ## Next Steps
 
@@ -237,6 +273,6 @@ The next realistic steps are:
 
 1. Expand the Markdown viewer to show full sections and chunks.
 2. Store document metadata in a real database instead of local sidecar metadata only.
-3. Start the first graph extraction module from parsed Markdown chunks.
+3. Improve graph quality with better relation extraction and edge weighting.
 4. Add persistent graph storage.
 5. Replace demo search/chat data with real backend flows.
