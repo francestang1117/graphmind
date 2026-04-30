@@ -87,7 +87,7 @@ class FileValidator:
         self._check_extension(suffix)
         self._check_size(len(data))
         detected_mime = self._detect_mime(data)
-        self._check_mime(suffix, detected_mime)
+        self._check_mime(suffix, detected_mime, data)
         self._check_magic_bytes(suffix, data)
 
         if suffix in _TEXT_EXTENSIONS:
@@ -144,8 +144,13 @@ class FileValidator:
         except UnicodeDecodeError:
             return "application/octet-stream"
         
-    def _check_mime(self, suffix: str, detected_mime: str) -> None:
+    def _check_mime(self, suffix: str, detected_mime: str, data: bytes) -> None:
         """Verify the detected MIME type is valid for the extension."""
+        if suffix in _TEXT_EXTENSIONS and self._is_readable_text(data):
+            # libmagic can mislabel short Markdown/code snippets as unrelated
+            # formats such as video/MP2T. For source-like files, readable text
+            # plus the extension allow-list is a better signal than MIME alone.
+            return
         if suffix in {".html", ".htm"} and detected_mime == "application/octet-stream":
             return
         allowed = EXTENSION_MIME_MAP[suffix]
@@ -154,6 +159,26 @@ class FileValidator:
                 f"Detected type '{detected_mime}' is not valid for '{suffix}'. "
                 f"Expected one of: {sorted(allowed)}"
             )
+
+    def _is_readable_text(self, data: bytes) -> bool:
+        """Accept source/document text even when libmagic picks a narrow text subtype."""
+        sample = data[:65_536]
+        if b"\x00" in sample:
+            return False
+
+        try:
+            text = sample.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                text = sample.decode("latin-1")
+            except UnicodeDecodeError:
+                return False
+
+        if not text:
+            return True
+
+        readable = sum(1 for char in text if char.isprintable() or char in "\r\n\t")
+        return readable / len(text) >= 0.92
 
     def _check_magic_bytes(self, suffix: str, data: bytes) -> None:
         """Verify binary formats start with their expected signature."""

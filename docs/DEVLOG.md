@@ -225,6 +225,19 @@ I moved the extractor into `app/services/entity_extractor.py` and made the first
 
 The important design choice was to make spaCy optional. The project should still start and the tests should still run if the local machine does not have `en_core_web_sm` installed. spaCy can improve recall later, but it should not make the module fragile during early development.
 
+After testing the graph view, I tightened the entity extractor again. Simply
+creating more nodes made the graph noisier, not smarter. I added a small domain
+vocabulary, confidence filtering, and a dependency-free optional LLM hook:
+
+- curated aliases such as `js` -> `JavaScript` and `RAG` -> `Retrieval Augmented Generation`
+- local domain terms for frameworks, languages, libraries, and AI/search concepts
+- a minimum confidence threshold before entities can enter the graph
+- optional spaCy NER for general named entities
+- optional LLM enhancer interface, disabled by default
+
+This keeps the default project runnable without API keys or model downloads,
+while leaving a clean place to add stronger extraction later.
+
 ## 2026-04 — First Knowledge Graph Builder
 
 I added Module 4 to turn extracted entities into a graph. The first version used a demo-style NetworkX wrapper, but it was not wired into the API router and it added a new dependency before the current project really needed it.
@@ -244,9 +257,44 @@ The graph API now rebuilds from the current uploaded documents, which is not the
 
 I also replaced the old full-pipeline demo script with assertions. The test now checks the real path from Markdown parsing to entity extraction to graph construction.
 
+## 2026-04 — Search Module MVP
+
+I added the first version of Module 5 for search. The initial draft used ChromaDB and sentence-transformers directly at import time. That is the right long-term direction, but it made the current backend too fragile because a fresh checkout would fail before the API even started if those heavy dependencies were missing.
+
+I changed the first search module into a lightweight local vector index:
+
+- parsed chunks become searchable records
+- text is embedded with deterministic hashed term vectors
+- cosine similarity gives a basic semantic score
+- keyword overlap boosts direct matches
+- the `/api/v1/search` endpoint now searches the current uploaded documents
+- a small context endpoint is available for the future chat/RAG module
+
+This is not a production vector database yet. It is a stable MVP that proves the parser output can feed search, and it leaves room to swap in ChromaDB later behind the same service interface.
+
+## 2026-05 — Upload Validation False Positives
+
+After adding more realistic test files, I hit a confusing upload problem: a short Markdown file named `RAG System Design.md` kept failing with "The file contents do not match its extension." Restarting the backend did not help.
+
+The issue was not the file itself. `libmagic` was detecting a tiny Markdown document beginning with `# RAG System Design` as `video/MP2T`. The validator trusted the detected MIME type too much, so a normal `.md` file was rejected before parsing.
+
+I changed the rule for text-like files. For `.md`, `.txt`, `.py`, `.js`, `.ts`, `.json`, `.csv`, and `.html`, the validator now checks:
+
+- the extension is allowed
+- the content is readable text
+- the text does not contain blocked unsafe patterns
+
+Binary document formats still stay strict. PDF and DOCX uploads continue to require their expected file signatures, so this fix does not make disguised binary files pass as Markdown.
+
+I also added regression tests for the exact false positive:
+
+- Markdown detected as `text/x-shellscript`
+- Markdown detected as `video/MP2T`
+- binary bytes renamed to `.md`
+
 ## Current State
 
-As of April 2026, GraphMind has a working foundation:
+As of May 2026, GraphMind has a working foundation:
 
 - FastAPI backend
 - React + TypeScript frontend
@@ -262,10 +310,11 @@ As of April 2026, GraphMind has a working foundation:
 - basic parsers for TXT, PDF, DOCX, Python, JavaScript, TypeScript, JSON, CSV, and HTML
 - entity extraction MVP with rule-based technical entities and optional spaCy NER
 - in-memory knowledge graph builder connected to uploaded documents
+- vector search MVP over parsed document chunks
 - Docker Compose for API + frontend
 - tests for the core backend pieces
 
-The project is not yet a full knowledge graph system. The graph screen can now use real extracted data, while search and chat are still mostly product scaffolding.
+The project is not yet a full knowledge graph system. The graph and search screens can now use real extracted data, while chat is still mostly product scaffolding.
 
 ## Next Steps
 
@@ -275,4 +324,4 @@ The next realistic steps are:
 2. Store document metadata in a real database instead of local sidecar metadata only.
 3. Improve graph quality with better relation extraction and edge weighting.
 4. Add persistent graph storage.
-5. Replace demo search/chat data with real backend flows.
+5. Replace chat demo data with real backend retrieval and answer generation.

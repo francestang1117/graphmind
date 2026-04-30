@@ -78,15 +78,18 @@ export default function GraphPanel() {
     if (!canvas) return;
     const width = canvas.clientWidth || 900;
     const height = canvas.clientHeight || 600;
+    const radiusX = width * (nodes.length <= 12 ? 0.27 : 0.32);
+    const radiusY = height * (nodes.length <= 12 ? 0.25 : 0.3);
     simRef.current = nodes.map((node, index) => {
-      const angle = (Math.PI * 2 * index) / Math.max(nodes.length, 1);
+      const angle = index * 2.399963229728653;
+      const ring = 0.58 + (index % 4) * 0.12;
       return {
         ...node,
-        x: width / 2 + Math.cos(angle) * width * 0.26,
-        y: height / 2 + Math.sin(angle) * height * 0.26,
+        x: width / 2 + Math.cos(angle) * radiusX * ring,
+        y: height / 2 + Math.sin(angle) * radiusY * ring,
         vx: 0,
         vy: 0,
-        r: 6 + Math.min(5, node.size || 1) * 1.8,
+        r: Math.max(7, Math.min(18, node.size || 8)),
       };
     });
   };
@@ -124,12 +127,12 @@ export default function GraphPanel() {
           const dx = node.x - other.x;
           const dy = node.y - other.y;
           const distance = Math.hypot(dx, dy) || 1;
-          const force = 2200 / (distance * distance);
-          node.vx += (dx / distance) * force * 0.38;
-          node.vy += (dy / distance) * force * 0.38;
+          const force = 3600 / (distance * distance);
+          node.vx += (dx / distance) * force * 0.42;
+          node.vy += (dy / distance) * force * 0.42;
         });
-        node.vx += (width / 2 - node.x) * 0.0015;
-        node.vy += (height / 2 - node.y) * 0.0015;
+        node.vx += (width / 2 - node.x) * 0.0008;
+        node.vy += (height / 2 - node.y) * 0.0008;
       });
 
       edges.forEach((edge) => {
@@ -139,7 +142,7 @@ export default function GraphPanel() {
         const dx = target.x - source.x;
         const dy = target.y - source.y;
         const distance = Math.hypot(dx, dy) || 1;
-        const force = (distance - 145) * 0.045;
+        const force = (distance - 175) * 0.034;
         source.vx += (dx / distance) * force;
         source.vy += (dy / distance) * force;
         target.vx -= (dx / distance) * force;
@@ -179,9 +182,9 @@ export default function GraphPanel() {
         ctx.strokeStyle = active ? "rgba(255,255,255,.2)" : "rgba(255,255,255,.05)";
         ctx.lineWidth = active ? 1.5 : 0.8;
         ctx.stroke();
-        if (focus && active && edge.type && scale > 0.65) {
+        if ((focus || edges.length <= 18) && active && edge.type && scale > 0.65) {
           ctx.font = "600 10px Inter, system-ui";
-          ctx.fillStyle = "rgba(167,139,250,.86)";
+          ctx.fillStyle = focus ? "rgba(167,139,250,.9)" : "rgba(210,210,210,.42)";
           ctx.textAlign = "center";
           ctx.fillText(edge.type.replaceAll("_", " ").toLowerCase(), (sourcePoint.x + targetPoint.x) / 2, (sourcePoint.y + targetPoint.y) / 2 - 5);
         }
@@ -215,7 +218,7 @@ export default function GraphPanel() {
             simRef.current.length <= 28);
 
         if (shouldLabel) {
-          const label = fitLabel(ctx, node.label, isSelected ? 140 : 96);
+          const label = fitLabel(ctx, node.label, isSelected || simRef.current.length <= 16 ? 180 : 132);
           ctx.font = `${isSelected ? 700 : 500} ${Math.max(10, Math.min(12, 11 * scale))}px Inter, system-ui`;
           ctx.fillStyle = "rgba(245,245,245,.82)";
           ctx.textAlign = "center";
@@ -381,9 +384,10 @@ function GraphTooltip({ node, edges }: { node: SimNode; edges: GraphEdge[] }) {
 }
 
 function fitLabel(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  if (text.length <= 24) return text;
   if (ctx.measureText(text).width <= maxWidth) return text;
   let next = text;
-  while (next.length > 4 && ctx.measureText(`${next}...`).width > maxWidth) {
+  while (next.length > 10 && ctx.measureText(`${next}...`).width > maxWidth) {
     next = next.slice(0, -1);
   }
   return `${next}...`;

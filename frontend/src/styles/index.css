@@ -1068,8 +1068,8 @@ button {
   position: relative;
   min-height: 0;
   background:
-    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
   background-size: 44px 44px;
 }
 
@@ -1115,13 +1115,15 @@ button {
 }
 
 .graph-controls button {
+  appearance: none;
   width: 30px;
   height: 30px;
   display: grid;
   place-items: center;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: rgba(0, 0, 0, 0.16);
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(14, 14, 14, 0.42);
   color: var(--muted);
   cursor: pointer;
   transition:
@@ -1131,9 +1133,18 @@ button {
 }
 
 .graph-controls button:hover {
-  border-color: rgba(139, 92, 246, 0.62);
+  border-color: rgba(255, 255, 255, 0.18);
   color: var(--text);
-  background: rgba(139, 92, 246, 0.12);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.graph-controls button:focus-visible {
+  outline: 1px solid rgba(139, 92, 246, 0.65);
+  outline-offset: 2px;
+}
+
+.graph-controls button:active {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .graph-controls button:disabled {

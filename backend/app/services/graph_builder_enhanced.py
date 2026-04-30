@@ -20,6 +20,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hashlib
+from pathlib import Path
 import re
 from typing import Any, Iterable, Optional
 
@@ -269,10 +270,15 @@ class KnowledgeGraph:
         the knowledge base instead of turning dependency metadata into static.
         """
         degree = Counter()
+        entity_keys = {
+            _visual_identity(node.label)
+            for node in self.nodes.values()
+            if node.type != "DOCUMENT"
+        }
         visible_nodes = {
             node_id: node
             for node_id, node in self.nodes.items()
-            if self._is_visual_node(node)
+            if self._is_visual_node(node, entity_keys)
         }
         visible_edges = [
             edge
@@ -294,7 +300,7 @@ class KnowledgeGraph:
                     "id": node.id,
                     "label": node.label,
                     "type": node.type,
-                    "size": min(18, 7 + degree[node.id]),
+                    "size": self._visual_size(node, degree[node.id]),
                 }
                 for node in visible_nodes.values()
             ],
@@ -335,13 +341,20 @@ class KnowledgeGraph:
         prefix = "doc" if node_type == "DOCUMENT" else "ent"
         return f"{prefix}_{digest}"
 
-    def _is_visual_node(self, node: GraphNode) -> bool:
+    def _is_visual_node(self, node: GraphNode, entity_keys: set[str]) -> bool:
         if node.type in VISUAL_HIDDEN_NODE_TYPES:
             return False
         label = node.label.strip()
         if node.type in {"DEPENDENCY", "LIBRARY"} and _looks_like_internal_path(label):
             return False
+        if node.type == "DOCUMENT" and _visual_identity(label) in entity_keys:
+            return False
         return True
+
+    def _visual_size(self, node: GraphNode, degree: int) -> float:
+        if node.type == "DOCUMENT":
+            return min(10.5, 6 + degree * 0.65)
+        return min(19, 8 + degree * 1.15 + node.confidence * 1.5)
 
 
 def _get(item: Any, key: str, default: Any = None) -> Any:
@@ -357,6 +370,11 @@ def _normalize(value: str) -> str:
 
 def _looks_like_internal_path(value: str) -> bool:
     return value.startswith((".", "/", "../")) or "/_" in value
+
+
+def _visual_identity(value: str) -> str:
+    stem = Path(value).stem if "." in Path(value).name else value
+    return re.sub(r"[^a-z0-9]+", "", stem.lower().lstrip("_"))
 
 
 def _now() -> str:

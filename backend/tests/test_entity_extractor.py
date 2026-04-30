@@ -85,6 +85,65 @@ def test_aliases_merge_to_canonical_entities():
     assert "HTTP" in found
 
 
+def test_domain_vocabulary_extracts_curated_terms():
+    entities = EntityExtractor().extract_from_text(
+        "The app uses RAG with a vector database and semantic search."
+    )
+    found = {entity.normalized for entity in entities}
+
+    assert "Retrieval Augmented Generation" in found
+    assert "Vector Database" in found
+    assert "Semantic Search" in found
+
+
+def test_confidence_filter_blocks_weak_llm_entities():
+    def fake_llm(_text: str):
+        return [
+            {"text": "Random Phrase", "type": "CONCEPT", "confidence": 0.42},
+            {"text": "Useful Concept", "type": "CONCEPT", "confidence": 0.82},
+        ]
+
+    entities = EntityExtractor(llm_enhancer=fake_llm).extract_from_text(
+        "This text is long enough to let the optional LLM enhancer run."
+    )
+    found = {entity.text for entity in entities}
+
+    assert "Useful Concept" in found
+    assert "Random Phrase" not in found
+
+
+def test_llm_enhancer_is_optional_and_dependency_free():
+    entities = EntityExtractor().extract_from_text(
+        "Semantic search connects documents to a knowledge graph."
+    )
+    found = {entity.normalized for entity in entities}
+
+    assert "Semantic Search" in found
+    assert "Knowledge Graph" in found
+
+
+def test_parser_symbols_keep_function_but_do_not_create_generic_word_nodes():
+    parsed = {
+        "content": "",
+        "extra": {
+            "functions": ["_arraySampleSize(items)"],
+            "classes": [],
+            "imports": [],
+            "code_blocks": [],
+            "sections": [],
+            "entities": [],
+        },
+    }
+
+    entities = EntityExtractor().extract_from_parsed_document(parsed)
+    found = {entity.normalized for entity in entities}
+
+    assert "arraySampleSize" in found
+    assert "Array" not in found
+    assert "Sample" not in found
+    assert "Size" not in found
+
+
 def test_deduplicates_entities_across_sources():
     extractor = EntityExtractor()
 

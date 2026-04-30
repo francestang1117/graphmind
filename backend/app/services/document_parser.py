@@ -817,6 +817,7 @@ class JSONParser:
             data = {}
 
         sections, chunks = [], []
+        entities = self._extract_json_entities(data)
 
         if isinstance(data, dict):
             schema_desc = self._describe_object(data, depth=0)
@@ -846,6 +847,7 @@ class JSONParser:
             raw_text     = raw_text,
             sections     = sections,
             chunks       = chunks,
+            entities     = entities,
             metadata     = {"filename": path.name, "type": type(data).__name__},
             word_count   = len(raw_text.split()),
             reading_time_min = 1,
@@ -878,6 +880,42 @@ class JSONParser:
             for item in obj[:100]:
                 self._extract_strings(item, results)
         return results
+
+    def _extract_json_entities(self, data: Any) -> list[dict]:
+        """Pull package/API-style hints out of structured JSON."""
+        if not isinstance(data, dict):
+            return []
+
+        entities = []
+        for key in ("name", "package", "module"):
+            value = data.get(key)
+            if isinstance(value, str) and 2 <= len(value) <= 60:
+                entities.append({"type": "library", "text": value})
+
+        for key in ("dependencies", "devDependencies", "peerDependencies", "requires"):
+            values = data.get(key)
+            if isinstance(values, dict):
+                for name in list(values.keys())[:25]:
+                    entities.append({"type": "dependency", "text": name})
+            elif isinstance(values, list):
+                for name in values[:25]:
+                    if isinstance(name, str):
+                        entities.append({"type": "dependency", "text": name})
+
+        for key in ("keywords", "tags", "classifiers"):
+            values = data.get(key)
+            if isinstance(values, list):
+                for value in values[:20]:
+                    if isinstance(value, str) and 2 <= len(value) <= 40:
+                        entities.append({"type": "concept", "text": value})
+
+        for key in ("summary", "description", "about"):
+            value = data.get(key)
+            if isinstance(value, str):
+                for phrase in _known_concepts_in_text(value):
+                    entities.append({"type": "concept", "text": phrase})
+
+        return _dedupe_entity_dicts(entities)
 
 
 # ── CSV Parser ────────────────────────────────────────────────────────────────
@@ -1157,6 +1195,36 @@ def _dependency_entities(imports: list[str]) -> list[dict]:
         {"type": "dependency", "text": name}
         for name in _top_level_dependencies(imports)
     ]
+
+
+def _known_concepts_in_text(text: str) -> list[str]:
+    """Extract only clear technical concepts from noisy metadata prose."""
+    concepts = [
+        "API",
+        "REST",
+        "HTTP",
+        "JSON",
+        "GraphQL",
+        "database",
+        "semantic search",
+        "knowledge graph",
+        "machine learning",
+        "data structure",
+    ]
+    lower = text.lower()
+    return [concept for concept in concepts if concept.lower() in lower]
+
+
+def _dedupe_entity_dicts(entities: list[dict]) -> list[dict]:
+    seen = set()
+    result = []
+    for entity in entities:
+        key = (str(entity.get("type", "")).lower(), str(entity.get("text", "")).lower())
+        if key in seen or not key[1]:
+            continue
+        seen.add(key)
+        result.append(entity)
+    return result
 
 
 def parsed_document_to_legacy_dict(doc: ParsedDocument) -> dict[str, Any]:
