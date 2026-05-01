@@ -238,6 +238,80 @@ vocabulary, confidence filtering, and a dependency-free optional LLM hook:
 This keeps the default project runnable without API keys or model downloads,
 while leaving a clean place to add stronger extraction later.
 
+I refined this again after seeing sparse and noisy graph output. The extractor
+now tries to load the local `en_core_web_sm` spaCy model by default, but it does
+not download anything during backend startup. If the model is missing, the
+backend falls back to the deterministic rule/domain extractor.
+
+I also expanded the domain vocabulary around the actual project direction:
+RAG, LLMs, chunking, embeddings, vector databases, semantic search, reranking,
+ChromaDB, Redis, Docker, and graph databases. Overlapping phrases now prefer the
+more specific term, so `vector embeddings` becomes one `Vector Embedding` node
+instead of also creating a generic `Embedding` node. This made the graph less
+cluttered without hiding meaningful concepts.
+
+The next graph review exposed a more important issue: most visible edges were
+still labeled `mentions`, which made the graph hard to read. I changed document
+edges to use more meaningful relation names:
+
+- documents `CONTAINS` concepts
+- documents `USES` languages, frameworks, libraries, databases, and tools
+- documents `DEFINES` functions and classes
+- documents `REFERENCES` people, organizations, locations, and products
+
+I also added noise filters for version/build strings, hash-like fragments,
+timestamps, weekday/date fragments, tiny numeric labels, and article-led text
+snippets. The goal is for the main graph to show knowledge-bearing entities,
+while low-level parser artifacts stay out of the default visualization.
+
+I then added two smaller improvements to make the extractor cheaper and the
+graph less document-centered. spaCy models are now cached by model name, so the
+backend does not reload `en_core_web_sm` every time an extractor is created.
+Same-sentence entity pairs also get low-confidence type-pair relation hints,
+such as `FastAPI -> WRITTEN_IN -> Python` or `React -> WRITTEN_IN -> JavaScript`.
+These hints are deliberately weaker than explicit pattern matches, but they
+help the graph show connections between entities instead of only document-to-
+entity spokes.
+
+After testing the graph visually, I adjusted the frontend to treat those weak
+`RELATED_TO` edges differently. The main canvas now lays out and renders strong
+edges first, while weak low-confidence edges stay hidden until a node is focused.
+The caption also reports shown edges separately from hidden weak edges. This
+keeps the default graph readable without throwing away the extra relation hints.
+
+I made one more graph readability pass after seeing labels collide and generic
+location/snippet entities creep back in. The main graph now hides location/date
+nodes by default, filters possessive location fragments such as `New York City's`,
+and drops generic one-word fragments like `jargon`, `Method`, and `Generate`.
+Relation labels are no longer always-on; they appear when a node is focused so
+the graph can stay quiet until the user asks for detail. I also added a simple
+label collision check in the canvas renderer and made the graph controls smaller.
+
+Finally, I added an optional relation-enhancer hook for a future GPT pass. This
+lets the backend accept LLM-suggested relation triples later without making GPT
+part of the current default pipeline.
+
+The next cleanup focused on the remaining noise I could see in real uploads.
+spaCy was still technically correct when it found places like Halifax or New
+York City, but those nodes did not help a technical knowledge graph unless the
+document was actually about geography. I added a small domain-relevance score:
+technical/domain entities stay high priority, generic words are filtered, and
+location entities from spaCy only survive when their surrounding context looks
+geographic.
+
+I also made the deduplication layer more explicit. Curated aliases still handle
+the common cases (`js` -> `JavaScript`, `ML` -> `Machine Learning`, `LLM` ->
+`Large Language Model`), and the extractor now has an optional semantic
+similarity hook for future sentence-embedding merges. That keeps the current
+project dependency-light, but gives a clean insertion point for merging near
+duplicates before the graph builder inserts nodes.
+
+On the frontend, I added stronger minimum node separation to the graph force
+layout. Labels are still truncated at word boundaries, full names live in the
+hover tooltip, and the canvas skips labels that would collide with already drawn
+labels. The graph still needs a richer relation-extraction pass, but it is much
+closer to a readable working view than the first dense cluster.
+
 ## 2026-04 — First Knowledge Graph Builder
 
 I added Module 4 to turn extracted entities into a graph. The first version used a demo-style NetworkX wrapper, but it was not wired into the API router and it added a new dependency before the current project really needed it.
@@ -272,6 +346,29 @@ I changed the first search module into a lightweight local vector index:
 
 This is not a production vector database yet. It is a stable MVP that proves the parser output can feed search, and it leaves room to swap in ChromaDB later behind the same service interface.
 
+## 2026-05 — Retrieval-Based Chat MVP
+
+I added the first version of Module 6 and Module 7: a question-answering engine
+and a `/api/v1/chat` endpoint. The first draft called an external LLM provider
+directly during service initialization, which made the backend too fragile for
+the current stage. A missing package or API key should not stop upload, parsing,
+graph, or search from working.
+
+I changed the chat module into a retrieval-first MVP:
+
+- rebuild the vector index from current uploaded documents before answering
+- rebuild the in-memory graph before collecting graph context
+- keep short in-memory conversation history
+- return source documents from retrieved chunks
+- answer locally from retrieved context when no LLM key is configured
+- leave a clean future path for GPT/OpenAI answer generation
+- expose `/api/v1/chat` through the main API router
+
+This is not full GPT/OpenAI RAG yet. It is a stable bridge between the search
+module and the future AI layer. The chat panel can now talk to real backend
+context instead of only showing demo replies, while still running on a fresh
+checkout without paid API keys.
+
 ## 2026-05 — Upload Validation False Positives
 
 After adding more realistic test files, I hit a confusing upload problem: a short Markdown file named `RAG System Design.md` kept failing with "The file contents do not match its extension." Restarting the backend did not help.
@@ -292,6 +389,44 @@ I also added regression tests for the exact false positive:
 - Markdown detected as `video/MP2T`
 - binary bytes renamed to `.md`
 
+## 2026-05 — Auth And User Isolation Pass
+
+I started the authentication module after the document/search/chat flows were
+already usable. The first question was whether to lock every endpoint
+immediately. Technically that would be cleaner, but the frontend does not have a
+login screen yet, so forcing auth now would make the current app hard to test.
+
+I chose a transition step instead:
+
+- `/api/v1/auth/register`
+- `/api/v1/auth/login`
+- `/api/v1/auth/refresh`
+- `/api/v1/auth/logout`
+- `/api/v1/auth/me`
+
+Access tokens are short-lived JWTs, and refresh tokens are opaque random tokens.
+Redis is used for refresh-token storage when available, with an in-process
+fallback for local development. User records are still in memory for now; the
+real version should move them into PostgreSQL when the database module lands.
+
+I also hit a dependency issue here. `passlib[bcrypt]` was installed, but the
+local `passlib`/`bcrypt` combination failed while hashing passwords. Instead of
+letting auth break the backend, I changed the password helper to prefer the
+`bcrypt` package directly, then fall back to passlib, then to PBKDF2 for local
+development. That keeps the project runnable while still using bcrypt when the
+environment supports it.
+
+The bigger change was user scoping. New file metadata now includes `user_id`,
+and the document, graph, search, and chat flows all read through the current
+user context. To avoid breaking the current frontend, missing tokens resolve to
+a stable `local-dev` user while `AUTH_REQUIRED=false`. When the frontend login
+UI is ready, I can flip `AUTH_REQUIRED=true` and the same endpoints become
+properly protected.
+
+Tests now cover the token lifecycle and the existing upload/search/chat paths:
+register, login, refresh, logout, document upload, file storage, vector search,
+and local QA.
+
 ## Current State
 
 As of May 2026, GraphMind has a working foundation:
@@ -311,10 +446,15 @@ As of May 2026, GraphMind has a working foundation:
 - entity extraction MVP with rule-based technical entities and optional spaCy NER
 - in-memory knowledge graph builder connected to uploaded documents
 - vector search MVP over parsed document chunks
+- retrieval-based chat endpoint with local fallback answers
+- JWT auth MVP with access/refresh token flow
+- user-scoped document, graph, search, and chat reads
 - Docker Compose for API + frontend
 - tests for the core backend pieces
 
-The project is not yet a full knowledge graph system. The graph and search screens can now use real extracted data, while chat is still mostly product scaffolding.
+The project is not yet a full knowledge graph system. The graph, search, and
+chat screens can now use real extracted data, but persistence and production
+auth are still early-stage.
 
 ## Next Steps
 
@@ -324,4 +464,5 @@ The next realistic steps are:
 2. Store document metadata in a real database instead of local sidecar metadata only.
 3. Improve graph quality with better relation extraction and edge weighting.
 4. Add persistent graph storage.
-5. Replace chat demo data with real backend retrieval and answer generation.
+5. Add the frontend login/register flow and send Bearer tokens from the API client.
+6. Replace local chat answers with GPT-backed answer generation when the OpenAI layer is ready.

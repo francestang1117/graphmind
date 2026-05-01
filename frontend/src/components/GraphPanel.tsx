@@ -73,6 +73,8 @@ export default function GraphPanel() {
     resetLayout();
   }, [nodes]);
 
+  const strongEdges = useMemo(() => edges.filter((edge) => !isWeakEdge(edge)), [edges]);
+
   const resetLayout = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -120,6 +122,9 @@ export default function GraphPanel() {
       const { scale, x: panX, y: panY } = viewRef.current;
       const idMap = new Map(simRef.current.map((node) => [node.id, node]));
       const focus = hovered ?? selected;
+      const renderEdges = focus
+        ? edges.filter((edge) => !isWeakEdge(edge) || edge.source === focus.id || edge.target === focus.id)
+        : strongEdges;
 
       simRef.current.forEach((node) => {
         simRef.current.forEach((other) => {
@@ -127,15 +132,21 @@ export default function GraphPanel() {
           const dx = node.x - other.x;
           const dy = node.y - other.y;
           const distance = Math.hypot(dx, dy) || 1;
+          const minDistance = node.r + other.r + 68;
           const force = 3600 / (distance * distance);
           node.vx += (dx / distance) * force * 0.42;
           node.vy += (dy / distance) * force * 0.42;
+          if (distance < minDistance) {
+            const push = (minDistance - distance) * 0.028;
+            node.vx += (dx / distance) * push;
+            node.vy += (dy / distance) * push;
+          }
         });
         node.vx += (width / 2 - node.x) * 0.0008;
         node.vy += (height / 2 - node.y) * 0.0008;
       });
 
-      edges.forEach((edge) => {
+      strongEdges.forEach((edge) => {
         const source = idMap.get(edge.source);
         const target = idMap.get(edge.target);
         if (!source || !target) return;
@@ -159,7 +170,7 @@ export default function GraphPanel() {
 
       const connected = focus
         ? new Set(
-            edges
+            renderEdges
               .filter((edge) => edge.source === focus.id || edge.target === focus.id)
               .flatMap((edge) => [edge.source, edge.target]),
           )
@@ -169,7 +180,7 @@ export default function GraphPanel() {
         y: (node.y + panY) * scale,
       });
 
-      edges.forEach((edge) => {
+      renderEdges.forEach((edge) => {
         const source = idMap.get(edge.source);
         const target = idMap.get(edge.target);
         if (!source || !target) return;
@@ -179,16 +190,23 @@ export default function GraphPanel() {
         ctx.beginPath();
         ctx.moveTo(sourcePoint.x, sourcePoint.y);
         ctx.lineTo(targetPoint.x, targetPoint.y);
-        ctx.strokeStyle = active ? "rgba(255,255,255,.2)" : "rgba(255,255,255,.05)";
-        ctx.lineWidth = active ? 1.5 : 0.8;
+        const weak = isWeakEdge(edge);
+        ctx.strokeStyle = active
+          ? weak
+            ? "rgba(167,139,250,.22)"
+            : "rgba(255,255,255,.2)"
+          : "rgba(255,255,255,.05)";
+        ctx.lineWidth = active ? (weak ? 0.9 : 1.5) : 0.8;
         ctx.stroke();
-        if ((focus || edges.length <= 18) && active && edge.type && scale > 0.65) {
+        if (focus && active && edge.type && scale > 0.65 && !weak) {
           ctx.font = "600 10px Inter, system-ui";
           ctx.fillStyle = focus ? "rgba(167,139,250,.9)" : "rgba(210,210,210,.42)";
           ctx.textAlign = "center";
-          ctx.fillText(edge.type.replaceAll("_", " ").toLowerCase(), (sourcePoint.x + targetPoint.x) / 2, (sourcePoint.y + targetPoint.y) / 2 - 5);
+          ctx.fillText(formatRelation(edge.type), (sourcePoint.x + targetPoint.x) / 2, (sourcePoint.y + targetPoint.y) / 2 - 5);
         }
       });
+
+      const labelBoxes: Array<{ x: number; y: number; width: number; height: number }> = [];
 
       simRef.current.forEach((node) => {
         const color = colors[node.type] ?? "#a1a1aa";
@@ -218,8 +236,19 @@ export default function GraphPanel() {
             simRef.current.length <= 28);
 
         if (shouldLabel) {
-          const label = fitLabel(ctx, node.label, isSelected || simRef.current.length <= 16 ? 180 : 132);
+          const label = truncateLabel(node.label, isSelected || simRef.current.length <= 16 ? 28 : 20);
           ctx.font = `${isSelected ? 700 : 500} ${Math.max(10, Math.min(12, 11 * scale))}px Inter, system-ui`;
+          const labelWidth = ctx.measureText(label).width;
+          const labelHeight = 16;
+          const labelBox = {
+            x: point.x - labelWidth / 2,
+            y: point.y + radius + 6,
+            width: labelWidth,
+            height: labelHeight,
+          };
+          const overlaps = labelBoxes.some((box) => boxesOverlap(box, labelBox));
+          if (overlaps && !isSelected && !isConnected) return;
+          labelBoxes.push(labelBox);
           ctx.fillStyle = "rgba(245,245,245,.82)";
           ctx.textAlign = "center";
           ctx.fillText(label, point.x, point.y + radius + 16);
@@ -231,7 +260,7 @@ export default function GraphPanel() {
 
     frameRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(frameRef.current);
-  }, [edges, selected, hovered]);
+  }, [edges, strongEdges, selected, hovered]);
 
   const screenToWorld = (x: number, y: number) => {
     const { scale, x: panX, y: panY } = viewRef.current;
@@ -332,15 +361,16 @@ export default function GraphPanel() {
           onWheel={handleWheel}
         />
         <div className="graph-controls">
-          <button onClick={() => zoom(1.15)} aria-label="Zoom in" title="Zoom in"><Plus size={15} /></button>
-          <button onClick={() => zoom(0.85)} aria-label="Zoom out" title="Zoom out"><Minus size={15} /></button>
-          <button onClick={resetView} aria-label="Reset graph view" title="Reset view"><House size={15} /></button>
+          <button onClick={() => zoom(1.15)} aria-label="Zoom in" title="Zoom in"><Plus size={12} /></button>
+          <button onClick={() => zoom(0.85)} aria-label="Zoom out" title="Zoom out"><Minus size={12} /></button>
+          <button onClick={resetView} aria-label="Reset graph view" title="Reset view"><House size={12} /></button>
           <button onClick={handleRefresh} aria-label="Refresh graph" disabled={refreshing} title="Refresh graph data">
-            <RefreshCcw className={refreshing ? "spin" : ""} size={15} />
+            <RefreshCcw className={refreshing ? "spin" : ""} size={12} />
           </button>
         </div>
         <div className="graph-caption">
-          {stats.total_nodes} nodes · {stats.total_edges} edges
+          {stats.total_nodes} nodes · {strongEdges.length} shown edges
+          {edges.length !== strongEdges.length ? ` · ${edges.length - strongEdges.length} weak hidden` : ""}
           {hovered ? ` · ${hovered.label}` : selected ? ` · ${selected.label}` : " · drag nodes, scroll to zoom"}
         </div>
         {hovered && <GraphTooltip node={hovered} edges={edges} />}
@@ -383,14 +413,29 @@ function GraphTooltip({ node, edges }: { node: SimNode; edges: GraphEdge[] }) {
   );
 }
 
-function fitLabel(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
-  if (text.length <= 24) return text;
-  if (ctx.measureText(text).width <= maxWidth) return text;
-  let next = text;
-  while (next.length > 10 && ctx.measureText(`${next}...`).width > maxWidth) {
-    next = next.slice(0, -1);
+function truncateLabel(text: string, max = 20) {
+  if (text.length <= max) return text;
+  const slice = text.slice(0, max).trimEnd();
+  const lastSpace = slice.lastIndexOf(" ");
+  if (lastSpace > max * 0.55) {
+    return `${slice.slice(0, lastSpace)}…`;
   }
-  return `${next}...`;
+  return `${slice}…`;
+}
+
+function formatRelation(type: string) {
+  return type.replaceAll("_", " ").toLowerCase();
+}
+
+function isWeakEdge(edge: GraphEdge) {
+  return edge.type === "RELATED_TO" && (edge.confidence ?? 1) < 0.7;
+}
+
+function boxesOverlap(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
 function clamp(value: number, min: number, max: number) {

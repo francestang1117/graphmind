@@ -27,7 +27,7 @@ from typing import Any, Iterable, Optional
 
 # The main canvas should show knowledge-bearing nodes. More mechanical details
 # stay available in /graph/debug for development and later filtering controls.
-VISUAL_HIDDEN_NODE_TYPES = {"VERSION", "RESOURCE", "REPOSITORY", "CSV_VALUE"}
+VISUAL_HIDDEN_NODE_TYPES = {"VERSION", "RESOURCE", "REPOSITORY", "CSV_VALUE", "LOCATION", "DATE", "TIME"}
 VISUAL_HIDDEN_EDGE_TYPES = {"MENTIONS_WITH"}
 
 
@@ -116,9 +116,15 @@ class KnowledgeGraph:
             entity_map[text] = node_id
             entity_map[text.lower()] = node_id
 
-            # Direction is document -> entity so the graph reads naturally in
-            # the frontend: this document mentions these concepts.
-            self.add_edge(doc_node_id, node_id, "MENTIONS", confidence=confidence, source_document=document_name)
+            # Direction is document -> entity so the frontend reads as:
+            # this document contains, uses, or defines these knowledge nodes.
+            self.add_edge(
+                doc_node_id,
+                node_id,
+                self._document_relation_for(str(label).upper()),
+                confidence=confidence,
+                source_document=document_name,
+            )
 
         for relation in relations:
             source_id = self._resolve_relation_node(relation, "source", entity_map)
@@ -134,6 +140,16 @@ class KnowledgeGraph:
                 )
 
         return doc_node_id
+
+    def _document_relation_for(self, entity_type: str) -> str:
+        """Use a more useful document edge than a generic MENTIONS fallback."""
+        if entity_type in {"PROGRAMMING_LANGUAGE", "FRAMEWORK", "LIBRARY", "DATABASE", "TOOL"}:
+            return "USES"
+        if entity_type in {"FUNCTION", "CLASS"}:
+            return "DEFINES"
+        if entity_type in {"PERSON", "ORGANIZATION", "LOCATION", "PRODUCT"}:
+            return "REFERENCES"
+        return "CONTAINS"
 
     def add_node(
         self,
@@ -313,6 +329,7 @@ class KnowledgeGraph:
                     "target": edge.target,
                     "type": edge.type,
                     "weight": edge.weight,
+                    "confidence": edge.confidence,
                 }
                 for edge in visible_edges
             ],

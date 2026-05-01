@@ -10,9 +10,10 @@ Implemented:
 
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.documents_with_markdown import (
     clear_cached_parse,
     document_summary,
@@ -25,6 +26,11 @@ from app.utils.file_validator import UploadValidationError
 
 
 router = APIRouter()
+
+
+def _user_id(user: UserRecord) -> str:
+    """Keep direct endpoint tests working when FastAPI has not resolved Depends."""
+    return getattr(user, "id", "local-dev")
 
 
 class UploadResponse(BaseModel):
@@ -94,12 +100,13 @@ class ParsedDocumentSummary(BaseModel):
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    user: UserRecord = Depends(current_user_or_dev),
 ) -> UploadResponse:
     """Validate, store, and queue a document for parsing."""
     content = await file.read()
 
     try:
-        metadata = document_service.save_upload(file.filename or "upload", content)
+        metadata = document_service.save_upload(file.filename or "upload", content, user_id=_user_id(user))
     except UploadValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except DuplicateFileError as exc:
@@ -131,16 +138,19 @@ async def upload_document(
 
 
 @router.get("/", response_model=FileListResponse)
-async def list_documents() -> FileListResponse:
+async def list_documents(user: UserRecord = Depends(current_user_or_dev)) -> FileListResponse:
     """Return stored documents, newest first."""
-    files = [FileInfo(**item) for item in document_service.list_documents()]
+    files = [FileInfo(**item) for item in document_service.list_documents(_user_id(user))]
     return FileListResponse(files=files, total=len(files))
 
 
 @router.get("/{filename}/parsed", response_model=ParsedDocumentSummary)
-async def get_parsed_document(filename: str) -> ParsedDocumentSummary:
+async def get_parsed_document(
+    filename: str,
+    user: UserRecord = Depends(current_user_or_dev),
+) -> ParsedDocumentSummary:
     """Return the cached parse summary for a stored file."""
-    metadata = document_service.get_document(filename)
+    metadata = document_service.get_document(filename, _user_id(user))
     if not metadata:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -166,18 +176,24 @@ async def get_parsed_document(filename: str) -> ParsedDocumentSummary:
 
 
 @router.get("/{filename}", response_model=FileInfo)
-async def get_document(filename: str) -> FileInfo:
+async def get_document(
+    filename: str,
+    user: UserRecord = Depends(current_user_or_dev),
+) -> FileInfo:
     """Return metadata for one stored document."""
-    metadata = document_service.get_document(filename)
+    metadata = document_service.get_document(filename, _user_id(user))
     if not metadata:
         raise HTTPException(status_code=404, detail="File not found")
     return FileInfo(**metadata)
 
 
 @router.delete("/{filename}")
-async def delete_document(filename: str) -> dict[str, str]:
+async def delete_document(
+    filename: str,
+    user: UserRecord = Depends(current_user_or_dev),
+) -> dict[str, str]:
     """Delete a stored document by its stored filename."""
-    if not document_service.delete_document(filename):
+    if not document_service.delete_document(filename, _user_id(user)):
         raise HTTPException(status_code=404, detail="File not found")
     clear_cached_parse(filename)
     return {"message": "File deleted"}

@@ -43,6 +43,7 @@ class FileStorage:
         data: bytes,
         original_filename: str,
         mime_type: str = "application/octet-stream",
+        user_id: str = "local-dev",
     ) -> dict[str, Any]:
         """Persist bytes atomically and return API-ready metadata."""
         extension = Path(original_filename).suffix.lower()
@@ -65,14 +66,14 @@ class FileStorage:
             tmp.unlink(missing_ok=True)
             raise FileStorageError(f"Failed to write {dest}: {exc}") from exc
 
-        metadata = self._build_metadata(dest, original_filename, file_hash, mime_type)
+        metadata = self._build_metadata(dest, original_filename, file_hash, mime_type, user_id)
         self._metadata_path(dest).write_text(
             json.dumps(metadata, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
         return metadata
 
-    def list_files(self) -> list[dict[str, Any]]:
+    def list_files(self, user_id: Optional[str] = None) -> list[dict[str, Any]]:
         """Return all stored file metadata, newest first."""
         files = []
         for metadata_path in self.root.glob("*/*.json"):
@@ -80,21 +81,21 @@ class FileStorage:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            if self._is_metadata_file(metadata_path, metadata):
+            if self._is_metadata_file(metadata_path, metadata) and self._belongs_to_user(metadata, user_id):
                 files.append(metadata)
         return sorted(files, key=lambda item: item.get("created_at", ""), reverse=True)
 
-    def get_file_info(self, filename: str) -> Optional[dict[str, Any]]:
+    def get_file_info(self, filename: str, user_id: Optional[str] = None) -> Optional[dict[str, Any]]:
         """Return metadata for a stored filename."""
         safe_name = Path(filename).name
-        for info in self.list_files():
+        for info in self.list_files(user_id):
             if info.get("filename") == safe_name:
                 return info
         return None
 
-    def delete_file(self, filename: str) -> bool:
+    def delete_file(self, filename: str, user_id: Optional[str] = None) -> bool:
         """Delete a stored file and its sidecar metadata."""
-        info = self.get_file_info(filename)
+        info = self.get_file_info(filename, user_id)
         if not info:
             return False
 
@@ -114,9 +115,9 @@ class FileStorage:
                 raise FileStorageError(f"Could not delete {target}: {exc}") from exc
         return deleted
 
-    def load_file(self, filename: str) -> bytes:
+    def load_file(self, filename: str, user_id: Optional[str] = None) -> bytes:
         """Read stored file bytes by stored filename."""
-        info = self.get_file_info(filename)
+        info = self.get_file_info(filename, user_id)
         if not info:
             raise FileNotFoundError(filename)
         path = Path(info["file_path"])
@@ -158,6 +159,7 @@ class FileStorage:
         original_filename: str,
         file_hash: str,
         mime_type: str,
+        user_id: str,
     ) -> dict[str, Any]:
         stat = path.stat()
         created_at = _to_iso(stat.st_ctime)
@@ -172,9 +174,16 @@ class FileStorage:
             "file_hash": file_hash,
             "mime_type": mime_type,
             "file_path": str(path),
+            "user_id": user_id,
             "created_at": created_at,
             "modified_at": modified_at,
         }
+
+    def _belongs_to_user(self, metadata: dict[str, Any], user_id: Optional[str]) -> bool:
+        """Older local files did not have user_id; keep them visible to local-dev."""
+        if user_id is None:
+            return True
+        return metadata.get("user_id", "local-dev") == user_id
 
     def _is_under_root(self, path: Path) -> bool:
         try:

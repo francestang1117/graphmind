@@ -11,8 +11,14 @@ Implemented:
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import logging
 import re
 from typing import Any, Callable, Iterable, Optional, Union
+
+
+log = logging.getLogger(__name__)
+DEFAULT_SPACY_MODEL = "en_core_web_sm"
+_SPACY_MODEL_CACHE: dict[str, Any] = {}
 
 
 @dataclass
@@ -96,6 +102,109 @@ STOP_CONCEPTS = {
     "type",
 }
 
+
+GENERIC_SINGLE_WORDS = {
+    "generate",
+    "jargon",
+    "method",
+    "principle",
+    "principles",
+    "overview",
+    "summary",
+    "introduction",
+    "example",
+    "examples",
+    "note",
+    "notes",
+    "content",
+    "section",
+    "chapter",
+}
+
+
+GEOGRAPHY_CONTEXT_WORDS = {
+    "address",
+    "area",
+    "country",
+    "county",
+    "geography",
+    "map",
+    "province",
+    "region",
+    "state",
+    "street",
+}
+
+
+DOMAIN_RELEVANT_LABELS = {
+    "PROGRAMMING_LANGUAGE",
+    "FRAMEWORK",
+    "LIBRARY",
+    "DATABASE",
+    "TOOL",
+    "CONCEPT",
+    "FUNCTION",
+    "CLASS",
+    "DOCUMENT",
+    "REPOSITORY",
+}
+
+
+LABEL_PRIORITY = {
+    "PROGRAMMING_LANGUAGE": 100,
+    "FRAMEWORK": 95,
+    "LIBRARY": 90,
+    "DATABASE": 88,
+    "TOOL": 86,
+    "CONCEPT": 85,
+    "ORGANIZATION": 80,
+    "PERSON": 80,
+    "LOCATION": 75,
+    "PRODUCT": 75,
+    "CLASS": 70,
+    "FUNCTION": 68,
+    "DATE": 50,
+    "VERSION": 30,
+    "RESOURCE": 20,
+}
+
+
+NOISE_PATTERNS = tuple(
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"^[0-9a-f]{6,}(?:[_-]\d+)?$",
+        r"^[a-z0-9]{6,}[_-]\d+$",
+        r"^\d+\.\d+\.\d+(?:\s+\S+)?",
+        r"^\d{1,2}:\d{2}\s*(?:am|pm)?$",
+        r"^(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+        r"^\d+[+\-]$",
+        r"^(the|a|an)\s+\S+",
+        r"^.{1,2}$",
+    )
+)
+
+
+TYPE_PAIR_RELATIONS: dict[tuple[str, str], str] = {
+    ("PROGRAMMING_LANGUAGE", "FRAMEWORK"): "HAS_FRAMEWORK",
+    ("FRAMEWORK", "PROGRAMMING_LANGUAGE"): "WRITTEN_IN",
+    ("PROGRAMMING_LANGUAGE", "LIBRARY"): "HAS_LIBRARY",
+    ("LIBRARY", "PROGRAMMING_LANGUAGE"): "WRITTEN_IN",
+    ("FRAMEWORK", "LIBRARY"): "USES",
+    ("LIBRARY", "FRAMEWORK"): "USED_BY",
+    ("FRAMEWORK", "DATABASE"): "USES",
+    ("DATABASE", "FRAMEWORK"): "USED_BY",
+    ("TOOL", "FRAMEWORK"): "INTEGRATES_WITH",
+    ("TOOL", "LIBRARY"): "INTEGRATES_WITH",
+    ("PERSON", "ORGANIZATION"): "ASSOCIATED_WITH",
+    ("ORGANIZATION", "PERSON"): "ASSOCIATED_WITH",
+    ("CONCEPT", "CONCEPT"): "RELATED_TO",
+    ("CONCEPT", "FRAMEWORK"): "RELATED_TO",
+    ("CONCEPT", "PROGRAMMING_LANGUAGE"): "RELATED_TO",
+    ("CONCEPT", "DATABASE"): "RELATED_TO",
+    ("CONCEPT", "TOOL"): "RELATED_TO",
+}
+
+
 # This is intentionally small and explicit. It gives Module 3 useful signal now,
 # while leaving room for a richer taxonomy or user-provided glossary later.
 TECH_TERMS: dict[str, str] = {
@@ -123,8 +232,18 @@ TECH_TERMS: dict[str, str] = {
     "numpy": "LIBRARY",
     "spacy": "LIBRARY",
     "lodash": "LIBRARY",
+    "chromadb": "DATABASE",
+    "neo4j": "DATABASE",
+    "postgresql": "DATABASE",
+    "redis": "DATABASE",
+    "docker": "TOOL",
+    "celery": "FRAMEWORK",
     "json": "CONCEPT",
     "http": "CONCEPT",
+    "markdown": "CONCEPT",
+    "json5": "LIBRARY",
+    "llm": "CONCEPT",
+    "large language model": "CONCEPT",
     "machine learning": "CONCEPT",
     "ml": "CONCEPT",
     "deep learning": "CONCEPT",
@@ -133,12 +252,26 @@ TECH_TERMS: dict[str, str] = {
     "natural language processing": "CONCEPT",
     "computer vision": "CONCEPT",
     "knowledge graph": "CONCEPT",
+    "knowledge base": "CONCEPT",
+    "entity extraction": "CONCEPT",
+    "named entity recognition": "CONCEPT",
+    "ner": "CONCEPT",
     "semantic search": "CONCEPT",
+    "hybrid search": "CONCEPT",
     "retrieval augmented generation": "CONCEPT",
+    "rag": "CONCEPT",
+    "chunking": "CONCEPT",
+    "embedding": "CONCEPT",
+    "embeddings": "CONCEPT",
+    "vector embedding": "CONCEPT",
+    "reranking": "CONCEPT",
+    "document ingestion": "CONCEPT",
+    "text extraction": "CONCEPT",
     "api": "CONCEPT",
     "graphql": "CONCEPT",
     "rest": "CONCEPT",
     "database": "CONCEPT",
+    "graph database": "CONCEPT",
     "vector database": "CONCEPT",
     "array": "CONCEPT",
     "sampling": "CONCEPT",
@@ -165,7 +298,18 @@ CANONICAL_TERMS = {
     "rest": "REST",
     "http": "HTTP",
     "json": "JSON",
+    "markdown": "Markdown",
+    "json5": "JSON5",
     "lodash": "Lodash",
+    "llm": "Large Language Model",
+    "rag": "Retrieval Augmented Generation",
+    "ner": "Named Entity Recognition",
+    "chromadb": "ChromaDB",
+    "neo4j": "Neo4j",
+    "postgresql": "PostgreSQL",
+    "redis": "Redis",
+    "docker": "Docker",
+    "celery": "Celery",
 }
 
 
@@ -182,7 +326,7 @@ DOMAIN_TERMS: tuple[DomainTerm, ...] = (
     DomainTerm("FastAPI", "FRAMEWORK", ("fastapi",)),
     DomainTerm("Django", "FRAMEWORK", ("django",)),
     DomainTerm("Flask", "FRAMEWORK", ("flask",)),
-    DomainTerm("Node.js", "FRAMEWORK", ("node.js", "nodejs", "node")),
+    DomainTerm("Node.js", "FRAMEWORK", ("node.js", "nodejs")),
     DomainTerm("TensorFlow", "FRAMEWORK", ("tensorflow",)),
     DomainTerm("PyTorch", "FRAMEWORK", ("pytorch",)),
     DomainTerm("Keras", "FRAMEWORK", ("keras",)),
@@ -190,16 +334,36 @@ DOMAIN_TERMS: tuple[DomainTerm, ...] = (
     DomainTerm("pandas", "LIBRARY", ("pandas",)),
     DomainTerm("spaCy", "LIBRARY", ("spacy", "spaCy")),
     DomainTerm("Lodash", "LIBRARY", ("lodash",)),
+    DomainTerm("ChromaDB", "DATABASE", ("chromadb", "chroma")),
+    DomainTerm("Neo4j", "DATABASE", ("neo4j",)),
+    DomainTerm("PostgreSQL", "DATABASE", ("postgresql", "postgres")),
+    DomainTerm("Redis", "DATABASE", ("redis",)),
+    DomainTerm("Docker", "TOOL", ("docker", "docker compose")),
+    DomainTerm("Celery", "FRAMEWORK", ("celery",)),
     DomainTerm("API", "CONCEPT", ("api", "apis")),
     DomainTerm("REST", "CONCEPT", ("rest", "rest api", "restful")),
     DomainTerm("HTTP", "CONCEPT", ("http", "https")),
     DomainTerm("JSON", "CONCEPT", ("json",)),
+    DomainTerm("JSON5", "LIBRARY", ("json5",)),
+    DomainTerm("Markdown", "CONCEPT", ("markdown",)),
     DomainTerm("GraphQL", "CONCEPT", ("graphql",)),
     DomainTerm("Database", "CONCEPT", ("database", "databases")),
+    DomainTerm("Graph Database", "CONCEPT", ("graph database",)),
     DomainTerm("Vector Database", "CONCEPT", ("vector database", "vector db")),
     DomainTerm("Knowledge Graph", "CONCEPT", ("knowledge graph",)),
+    DomainTerm("Knowledge Base", "CONCEPT", ("knowledge base",)),
     DomainTerm("Semantic Search", "CONCEPT", ("semantic search",)),
+    DomainTerm("Hybrid Search", "CONCEPT", ("hybrid search",)),
     DomainTerm("Retrieval Augmented Generation", "CONCEPT", ("retrieval augmented generation", "rag")),
+    DomainTerm("Large Language Model", "CONCEPT", ("large language model", "llm", "llms")),
+    DomainTerm("Entity Extraction", "CONCEPT", ("entity extraction",)),
+    DomainTerm("Named Entity Recognition", "CONCEPT", ("named entity recognition", "ner")),
+    DomainTerm("Chunking", "CONCEPT", ("chunking", "chunk", "chunks")),
+    DomainTerm("Embedding", "CONCEPT", ("embedding", "embeddings")),
+    DomainTerm("Vector Embedding", "CONCEPT", ("vector embedding", "vector embeddings")),
+    DomainTerm("Reranking", "CONCEPT", ("reranking", "rerank", "reranker")),
+    DomainTerm("Document Ingestion", "CONCEPT", ("document ingestion",)),
+    DomainTerm("Text Extraction", "CONCEPT", ("text extraction",)),
     DomainTerm("Machine Learning", "CONCEPT", ("machine learning", "ml")),
     DomainTerm("Deep Learning", "CONCEPT", ("deep learning",)),
     DomainTerm("Neural Network", "CONCEPT", ("neural network", "neural networks")),
@@ -217,6 +381,8 @@ DOMAIN_LOOKUP = {
 
 
 LlmEnhancer = Callable[[str], Iterable[Union[Entity, dict[str, Any]]]]
+RelationEnhancer = Callable[[list[Entity], str], Iterable[Union[EntityRelation, dict[str, Any]]]]
+SemanticSimilarity = Callable[[str, str], float]
 
 
 class EntityExtractor:
@@ -224,15 +390,21 @@ class EntityExtractor:
 
     def __init__(
         self,
-        model_name: Optional[str] = None,
+        model_name: Optional[str] = DEFAULT_SPACY_MODEL,
         min_confidence: float = 0.7,
         llm_enhancer: Optional[LlmEnhancer] = None,
+        relation_enhancer: Optional[RelationEnhancer] = None,
+        semantic_similarity: Optional[SemanticSimilarity] = None,
+        semantic_merge_threshold: float = 0.92,
     ) -> None:
-        # spaCy is an opt-in enhancer here. The rule pass should work in a fresh
-        # local checkout without model downloads or network access.
+        # spaCy is an opportunistic enhancer. If the local model exists, use it;
+        # otherwise keep the rule/domain pass running without network downloads.
         self.model_name = model_name
         self.min_confidence = min_confidence
         self.llm_enhancer = llm_enhancer
+        self.relation_enhancer = relation_enhancer
+        self.semantic_similarity = semantic_similarity
+        self.semantic_merge_threshold = semantic_merge_threshold
         self.nlp = self._load_spacy_model(model_name) if model_name else None
 
     def extract_from_text(self, text: str) -> list[Entity]:
@@ -311,19 +483,50 @@ class EntityExtractor:
         relations = []
         relations.extend(self._extract_pattern_relations(entities, text))
         relations.extend(self._extract_cooccurrence_relations(entities, text))
+        relations.extend(self._extract_with_relation_enhancer(entities, text))
         return self._deduplicate_relations(relations)
 
+    def _extract_with_relation_enhancer(self, entities: list[Entity], text: str) -> list[EntityRelation]:
+        """Optional GPT/LLM relation pass. Disabled unless a caller provides it."""
+        if self.relation_enhancer is None or len(entities) < 2:
+            return []
+        try:
+            raw_items = self.relation_enhancer(entities, text)
+        except Exception:
+            return []
+
+        relations = []
+        for item in raw_items:
+            if isinstance(item, EntityRelation):
+                relations.append(item)
+                continue
+            if not isinstance(item, dict):
+                continue
+            source = str(item.get("source") or "").strip()
+            target = str(item.get("target") or "").strip()
+            relation = str(item.get("relation") or "RELATED_TO").upper()
+            confidence = float(item.get("confidence", 0.74) or 0.74)
+            if source and target and source != target:
+                relations.append(EntityRelation(source, target, relation, confidence))
+        return relations
+
     def _load_spacy_model(self, model_name: str) -> Any:
+        if model_name in _SPACY_MODEL_CACHE:
+            return _SPACY_MODEL_CACHE[model_name]
+
         try:
             import spacy
         except ImportError:
+            log.info("spaCy is not installed; using rule-based entity extraction only.")
             return None
 
         try:
-            return spacy.load(model_name)
+            _SPACY_MODEL_CACHE[model_name] = spacy.load(model_name)
+            return _SPACY_MODEL_CACHE[model_name]
         except OSError:
             # The model is optional for local development. Rule extraction still
             # gives deterministic results without downloading anything at import.
+            log.info("spaCy model %s is not installed; using rule-based extraction only.", model_name)
             return None
 
     def _extract_with_spacy(self, text: str) -> list[Entity]:
@@ -352,20 +555,36 @@ class EntityExtractor:
 
     def _extract_domain_terms(self, text: str) -> list[Entity]:
         """Extract curated domain entities and aliases from the local vocabulary."""
-        entities = []
+        candidates = []
         for alias, term in DOMAIN_LOOKUP.items():
             pattern = self._term_pattern(alias)
             for match in re.finditer(pattern, text, re.IGNORECASE):
-                entities.append(
-                    self._entity(
-                        term.canonical,
-                        term.label,
+                candidates.append(
+                    (
                         match.start(),
                         match.end(),
-                        term.confidence,
-                        "domain",
+                        term,
                     )
                 )
+
+        # Prefer the most specific phrase when aliases overlap, for example
+        # "vector embeddings" should not also create a generic "Embedding" node.
+        occupied: list[tuple[int, int]] = []
+        entities = []
+        for start, end, term in sorted(candidates, key=lambda item: (-(item[1] - item[0]), item[0])):
+            if any(start < used_end and end > used_start for used_start, used_end in occupied):
+                continue
+            occupied.append((start, end))
+            entities.append(
+                self._entity(
+                    term.canonical,
+                    term.label,
+                    start,
+                    end,
+                    term.confidence,
+                    "domain",
+                )
+            )
         return entities
 
     def _extract_technical_terms(self, text: str) -> list[Entity]:
@@ -521,28 +740,41 @@ class EntityExtractor:
             for index, source in enumerate(sentence_entities):
                 for target in sentence_entities[index + 1 :]:
                     if source.normalized != target.normalized:
-                        # Co-occurrence is weak, but useful for early graph
-                        # exploration before relation extraction is mature.
+                        relation_type = self._infer_type_pair_relation(source, target)
+                        # Same-sentence type-pair relations are useful, but weak:
+                        # they should add graph texture without pretending to be
+                        # a fully parsed semantic claim.
                         relations.append(
-                            EntityRelation(source.normalized, target.normalized, "MENTIONS_WITH", 0.45)
+                            EntityRelation(source.normalized, target.normalized, relation_type, 0.52)
                         )
         return relations
 
+    def _infer_type_pair_relation(self, source: Entity, target: Entity) -> str:
+        """Infer a low-confidence relation from entity type pairs."""
+        return TYPE_PAIR_RELATIONS.get((source.label, target.label), "RELATED_TO")
+
     def _deduplicate(self, entities: Iterable[Entity]) -> list[Entity]:
-        grouped: dict[tuple[str, str], Entity] = {}
+        grouped: dict[str, Entity] = {}
         for entity in entities:
             entity = self._canonicalize_entity(entity)
             if self._is_low_value_entity(entity):
                 continue
-            key = (entity.normalized or self._normalize(entity.text), entity.label)
+            key = entity.normalized or self._normalize(entity.text)
             current = grouped.get(key)
-            if current is None or entity.confidence > current.confidence:
+            if current is None or self._is_better_entity(entity, current):
                 grouped[key] = entity
             elif current.source != entity.source:
                 # Seeing the same entity through multiple paths is a small
                 # confidence boost, but not enough to make weak matches certain.
                 current.confidence = min(1.0, current.confidence + 0.05)
-        return sorted(grouped.values(), key=lambda item: (-item.confidence, item.label, item.text))
+        merged = self._merge_semantic_duplicates(grouped.values())
+        return sorted(merged, key=lambda item: (-item.confidence, item.label, item.text))
+
+    def _is_better_entity(self, candidate: Entity, current: Entity) -> bool:
+        """Choose the display label that gives the graph the clearest node type."""
+        if candidate.confidence != current.confidence:
+            return candidate.confidence > current.confidence
+        return LABEL_PRIORITY.get(candidate.label, 0) > LABEL_PRIORITY.get(current.label, 0)
 
     def _canonicalize_entity(self, entity: Entity) -> Entity:
         term = DOMAIN_LOOKUP.get((entity.normalized or entity.text).lower())
@@ -564,13 +796,102 @@ class EntityExtractor:
         lowered = text.lower()
         if entity.confidence < self.min_confidence:
             return True
-        if not text or lowered in STOP_CONCEPTS:
+        if self._domain_relevance_score(entity) < 0.55:
             return True
-        if entity.label == "CONCEPT" and entity.source in {"parser", "symbol"}:
-            return lowered not in {term for term, label in TECH_TERMS.items() if label == "CONCEPT"}
+        if not text or lowered in STOP_CONCEPTS or self._is_noise_entity(text):
+            return True
+        if entity.label == "LOCATION" and entity.source == "spacy":
+            return not self._has_geography_context(entity.context)
+        if entity.label == "CONCEPT" and entity.source in {"context", "parser", "symbol"}:
+            is_domain_concept = lowered in {term for term, label in TECH_TERMS.items() if label == "CONCEPT"}
+            is_multi_word = len(text.split()) > 1
+            return not (is_domain_concept or is_multi_word)
         if entity.label in {"FUNCTION", "CLASS"}:
             return len(text) < 3 or lowered in STOP_CONCEPTS
         return False
+
+    def _domain_relevance_score(self, entity: Entity) -> float:
+        """Keep the graph focused on technical/domain signal, not every NER hit."""
+        text = (entity.normalized or entity.text).strip()
+        lowered = text.lower()
+        if lowered in DOMAIN_LOOKUP or lowered in TECH_TERMS:
+            return 1.0
+        if entity.label in DOMAIN_RELEVANT_LABELS:
+            return max(0.72, entity.confidence)
+        if entity.label in {"PERSON", "ORGANIZATION", "PRODUCT"}:
+            return 0.68 if self._has_domain_context(entity.context) else 0.46
+        if entity.label == "LOCATION":
+            return 0.66 if self._has_geography_context(entity.context) else 0.32
+        if entity.label in {"DATE", "TIME", "VERSION"}:
+            return 0.24
+        return entity.confidence * 0.65
+
+    def _has_domain_context(self, context: str) -> bool:
+        lowered = context.lower()
+        return any(re.search(self._term_pattern(alias), lowered, re.IGNORECASE) for alias in DOMAIN_LOOKUP) or any(
+            re.search(self._term_pattern(term), lowered, re.IGNORECASE) for term in TECH_TERMS
+        )
+
+    def _has_geography_context(self, context: str) -> bool:
+        lowered = context.lower()
+        return any(word in lowered for word in GEOGRAPHY_CONTEXT_WORDS)
+
+    def _is_noise_entity(self, text: str) -> bool:
+        """Filter parser/spaCy fragments that make the graph look random."""
+        clean = " ".join(text.strip().split())
+        lowered = clean.lower()
+        possessive_base = lowered[:-2] if lowered.endswith("'s") else lowered
+        if possessive_base in GENERIC_SINGLE_WORDS:
+            return True
+        if lowered.endswith("'s") and len(clean.split()) <= 3:
+            return True
+        if any(pattern.match(lowered) for pattern in NOISE_PATTERNS):
+            return True
+        if lowered.replace(".", "").replace("-", "").isdigit():
+            return True
+        special = sum(1 for char in clean if not char.isalnum() and char not in " _-.")
+        return bool(clean) and special > len(clean) * 0.3
+
+    def _merge_semantic_duplicates(self, entities: Iterable[Entity]) -> list[Entity]:
+        """Merge aliases and optional embedding-near duplicates before graph insert."""
+        merged: list[Entity] = []
+        for entity in entities:
+            match_index = next(
+                (
+                    index
+                    for index, current in enumerate(merged)
+                    if self._are_semantically_same(current, entity)
+                ),
+                None,
+            )
+            if match_index is None:
+                merged.append(entity)
+                continue
+            current = merged[match_index]
+            winner = entity if self._is_better_entity(entity, current) else current
+            winner.confidence = min(1.0, max(current.confidence, entity.confidence) + 0.04)
+            merged[match_index] = winner
+        return merged
+
+    def _are_semantically_same(self, left: Entity, right: Entity) -> bool:
+        left_text = (left.normalized or left.text).strip()
+        right_text = (right.normalized or right.text).strip()
+        if left_text.lower() == right_text.lower():
+            return True
+        if self._acronym(left_text) == right_text.lower() or self._acronym(right_text) == left_text.lower():
+            return True
+        if self.semantic_similarity is None:
+            return False
+        try:
+            return self.semantic_similarity(left_text, right_text) >= self.semantic_merge_threshold
+        except Exception:
+            return False
+
+    def _acronym(self, text: str) -> str:
+        words = [word for word in re.split(r"[^A-Za-z0-9]+", text) if word]
+        if len(words) < 2:
+            return ""
+        return "".join(word[0].lower() for word in words)
 
     def _deduplicate_relations(self, relations: Iterable[EntityRelation]) -> list[EntityRelation]:
         best: dict[tuple[str, str, str], EntityRelation] = {}

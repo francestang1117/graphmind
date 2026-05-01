@@ -6,6 +6,11 @@ python-multipart==0.0.20
 # Settings
 pydantic-settings==2.7.1
 
+# Auth/session storage
+# Auth works without these in local fallback mode, but production should use them.
+passlib[bcrypt]==1.7.4
+redis==5.2.1
+
 # Upload validation
 python-magic==0.4.27
 

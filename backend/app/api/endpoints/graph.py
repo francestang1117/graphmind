@@ -14,8 +14,9 @@ reflected the next time the graph endpoint is requested.
 
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.documents_with_markdown import get_cached_parse, parse_document_file
 from app.services.document_service import document_service
 from app.services.entity_extractor import entity_extractor
@@ -26,23 +27,26 @@ router = APIRouter()
 
 
 @router.get("/")
-async def get_graph() -> dict:
+async def get_graph(user: UserRecord = Depends(current_user_or_dev)) -> dict:
     """Return a graph built from all currently uploaded documents."""
-    graph = rebuild_graph_from_documents()
+    graph = rebuild_graph_from_documents(user.id)
     return graph.export_for_visualization()
 
 
 @router.get("/stats")
-async def get_graph_stats() -> dict:
+async def get_graph_stats(user: UserRecord = Depends(current_user_or_dev)) -> dict:
     """Return graph counters without duplicating frontend demo values."""
-    graph = rebuild_graph_from_documents()
+    graph = rebuild_graph_from_documents(user.id)
     return graph.get_stats()
 
 
 @router.get("/nodes/{node_id}")
-async def get_node(node_id: str) -> dict:
+async def get_node(
+    node_id: str,
+    user: UserRecord = Depends(current_user_or_dev),
+) -> dict:
     """Return one node plus its directly connected neighborhood."""
-    graph = rebuild_graph_from_documents()
+    graph = rebuild_graph_from_documents(user.id)
     node = graph.get_node(node_id)
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
@@ -56,25 +60,26 @@ async def search_nodes(
     q: str = Query("", description="Label text to search for"),
     node_type: Optional[str] = Query(None, description="Optional node type filter"),
     limit: int = Query(10, ge=1, le=50),
+    user: UserRecord = Depends(current_user_or_dev),
 ) -> dict:
     """Search graph nodes by label."""
-    graph = rebuild_graph_from_documents()
+    graph = rebuild_graph_from_documents(user.id)
     return {"results": graph.search_nodes(q, node_type=node_type, limit=limit)}
 
 
 @router.get("/debug")
-async def graph_debug() -> dict:
+async def graph_debug(user: UserRecord = Depends(current_user_or_dev)) -> dict:
     """Return full node and edge metadata for development checks."""
-    graph = rebuild_graph_from_documents()
+    graph = rebuild_graph_from_documents(user.id)
     return {**graph.export_detailed(), "stats": graph.get_stats()}
 
 
-def rebuild_graph_from_documents() -> KnowledgeGraph:
+def rebuild_graph_from_documents(user_id: Optional[str] = None) -> KnowledgeGraph:
     """Build a fresh in-memory graph from stored files and cached parses."""
     graph = knowledge_graph
     graph.clear()
 
-    for metadata in document_service.list_documents():
+    for metadata in document_service.list_documents(user_id):
         filename = metadata["filename"]
         original_name = metadata.get("original_filename", filename)
         parsed = get_cached_parse(filename)

@@ -1,8 +1,8 @@
 # GraphMind
 
-GraphMind is an early-stage document ingestion and knowledge graph workspace. The current version focuses on the foundation: uploading documents, validating them safely, storing files locally, parsing supported formats, and presenting the workflow in a React interface.
+GraphMind is an early-stage document ingestion and knowledge graph workspace. The current version focuses on the foundation: uploading documents, validating them safely, storing files locally, parsing supported formats, extracting entities, building an in-memory graph, and querying the uploaded content through search and chat.
 
-The project is intentionally built in small phases. Knowledge graph construction, semantic search, and AI chat are represented in the UI as planned workflows, but their backend modules are not fully implemented yet.
+The project is intentionally built in small phases. The current graph, search, and chat modules are working MVPs, not production infrastructure yet. Graph persistence, a real vector database, and GPT/OpenAI-based answer generation are still planned upgrades.
 
 ## Current Features
 
@@ -14,6 +14,10 @@ The project is intentionally built in small phases. Knowledge graph construction
 - Document metadata listing, detail lookup, and deletion
 - Markdown parsing helper and summary viewer for headings, links, code blocks, sections, chunks, and metadata
 - Multi-format parser for Markdown, TXT, PDF, DOCX, Python, JavaScript, TypeScript, JSON, CSV, and HTML files
+- Entity extraction with curated technical terms and optional spaCy NER
+- In-memory knowledge graph from uploaded documents
+- Local vector-search MVP over parsed chunks
+- Chat API that answers from retrieved chunks and graph context, with optional LLM provider support
 - Lightweight Docker Compose setup for the API and frontend
 
 ## Project Status
@@ -24,9 +28,9 @@ The project is intentionally built in small phases. Knowledge graph construction
 | File upload | Done | Validation, storage, list/get/delete |
 | Markdown parsing | In progress | Parser is wired into upload background work with a small summary viewer |
 | PDF/DOCX/code/data parsing | Basic | Parser functions exist for PDF, DOCX, code, JSON, CSV, and HTML |
-| Knowledge graph | Demo UI only | Backend graph engine is planned |
-| Search | Demo UI only | Backend semantic search is planned |
-| AI chat | Demo UI only | Backend RAG/chat is planned |
+| Knowledge graph | MVP | In-memory graph from uploaded documents |
+| Search | MVP | Local hashed-vector index over parsed chunks |
+| AI chat | MVP | Retrieval-based local answers; GPT/OpenAI hook planned |
 
 ## Quick Start
 
@@ -70,6 +74,9 @@ Base URL: `http://localhost:8000/api/v1`
 - `GET /documents/` lists stored documents.
 - `GET /documents/{filename}` returns metadata for one stored document.
 - `DELETE /documents/{filename}` deletes a stored document.
+- `GET /graph/` returns the current in-memory knowledge graph.
+- `POST /search/` searches parsed document chunks.
+- `POST /chat/` answers questions from retrieved document and graph context.
 
 Interactive docs are available at `http://localhost:8000/docs`.
 
@@ -123,12 +130,12 @@ The full staged roadmap is tracked in [docs/ROADMAP.md](docs/ROADMAP.md). The ne
 2. Add persistent document metadata storage.
 3. Build the first graph extraction module.
 4. Add graph persistence and graph API endpoints.
-5. Add semantic search and vector storage.
-6. Add graph-augmented AI chat.
+5. Replace the local vector-search MVP with persistent vector storage.
+6. Add GPT/OpenAI answer generation behind the existing chat interface.
 7. Explore extensions such as web capture, code repository analysis, transcription, and graph-to-video generation.
 
 ## Development Notes
 
 - The current Docker setup runs only the API and frontend. Redis, Postgres, ChromaDB, MinIO, and ClamAV are future infrastructure choices.
 - Generated folders such as `.venv`, `node_modules`, `dist`, `__pycache__`, `.pytest_cache`, and uploaded files should not be committed.
-- The frontend currently includes demo data for graph, search, and chat so the intended product flow is visible before those backend modules are finished.
+- Chat currently works without an LLM key by returning local retrieval-based answers. GPT/OpenAI answer generation is planned behind the same interface.

@@ -1,74 +1,64 @@
-import { useMemo, useState } from "react";
-import { Loader2, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Loader2, Search, X } from "lucide-react";
 import { semanticSearch, type SearchResult } from "../services/api";
 
-const demoResults: SearchResult[] = [
-  {
-    title: "Neural Network",
-    type: "CONCEPT",
-    score: 98,
-    excerpt:
-      "A computational model used in machine learning to approximate functions through layers of connected nodes.",
-    source: "neural-nets.pdf",
-    tags: ["deep-learning", "architecture"],
-  },
-  {
-    title: "Backpropagation",
-    type: "CONCEPT",
-    score: 91,
-    excerpt:
-      "The training algorithm that computes gradients by propagating errors backwards through neural network layers.",
-    source: "neural-nets.pdf",
-    tags: ["training", "gradient"],
-  },
-  {
-    title: "TensorFlow",
-    type: "FRAMEWORK",
-    score: 86,
-    excerpt:
-      "An open-source machine learning framework commonly used for training and deploying neural networks.",
-    source: "data-analysis.py",
-    tags: ["python", "framework"],
-  },
-];
-
-const filters = ["All", "CONCEPT", "FRAMEWORK", "PERSON"];
+const SEARCH_HISTORY_KEY = "graphmind.search.history";
+const MAX_HISTORY = 8;
 
 export default function SearchPanel() {
-  const [query, setQuery] = useState("neural network");
+  const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("All");
-  const [results, setResults] = useState<SearchResult[]>(demoResults);
+  const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [history, setHistory] = useState<string[]>(() => readSearchHistory());
+
+  const filters = useMemo(() => {
+    const types = [...new Set(results.map((result) => result.type).filter(Boolean))].sort();
+    return ["All", ...types];
+  }, [results]);
 
   const visible = useMemo(() => {
-    // Filter locally so demo data and future API results behave the same way.
-    const q = query.trim().toLowerCase();
-    return results.filter((result) => {
-      const matchesFilter = filter === "All" || result.type === filter;
-      const matchesQuery =
-        !q ||
-        result.title.toLowerCase().includes(q) ||
-        result.excerpt.toLowerCase().includes(q) ||
-        result.tags?.some((tag) => tag.toLowerCase().includes(q));
-      return matchesFilter && matchesQuery;
-    });
-  }, [filter, query, results]);
+    return results
+      .filter((result) => filter === "All" || result.type === filter)
+      .sort((left, right) => right.score - left.score);
+  }, [filter, results]);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (!trimmed) {
+      setResults([]);
+      setError("");
+      setLoading(false);
+      return;
+    }
+
+    const timeout = window.setTimeout(async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const remote = await semanticSearch(trimmed, 10, "hybrid");
+        setResults(remote);
+        setFilter("All");
+        setHistory((current) => saveSearchHistory(trimmed, current));
+      } catch {
+        setResults([]);
+        setError("Search is unavailable. Start the backend and upload documents first.");
+      } finally {
+        setLoading(false);
+      }
+    }, 260);
+
+    return () => window.clearTimeout(timeout);
+  }, [query]);
 
   const runSearch = async (value: string) => {
     setQuery(value);
-    if (!value.trim()) {
-      setResults(demoResults);
-      return;
-    }
-    setLoading(true);
-    try {
-      const remote = await semanticSearch(value);
-      setResults(remote.length ? remote : demoResults);
-    } catch {
-      setResults(demoResults);
-    } finally {
-      setLoading(false);
-    }
+  };
+
+  const clearHistory = () => {
+    window.localStorage.removeItem(SEARCH_HISTORY_KEY);
+    setHistory([]);
   };
 
   return (
@@ -79,7 +69,7 @@ export default function SearchPanel() {
           <input
             value={query}
             onChange={(event) => runSearch(event.target.value)}
-            placeholder="Search your knowledge base..."
+            placeholder="Search uploaded documents..."
           />
           {loading && <Loader2 className="spin" size={18} />}
         </div>
@@ -90,14 +80,38 @@ export default function SearchPanel() {
               className={filter === item ? "active" : ""}
               onClick={() => setFilter(item)}
             >
-              {item}
+              {formatFilterLabel(item)}
             </button>
           ))}
         </div>
+        {history.length > 0 && (
+          <div className="search-history">
+            <span>Recent</span>
+            {history.map((item) => (
+              <button key={item} onClick={() => runSearch(item)}>
+                {item}
+              </button>
+            ))}
+            <button className="icon-only" onClick={clearHistory} aria-label="Clear search history" title="Clear history">
+              <X size={12} />
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="result-list">
-        {visible.length === 0 ? (
+        {!query.trim() ? (
+          <div className="empty-state search-state">
+            <Search size={32} />
+            <span>Search your uploaded documents</span>
+            <p>Results come from parsed chunks in the local vector index.</p>
+          </div>
+        ) : error ? (
+          <div className="empty-state search-state error">
+            <Search size={32} />
+            <span>{error}</span>
+          </div>
+        ) : !loading && visible.length === 0 ? (
           <div className="empty-state">
             <Search size={32} />
             <span>No results found</span>
@@ -112,9 +126,9 @@ export default function SearchPanel() {
               <p>{result.excerpt}</p>
               <footer>
                 <em>{result.source}</em>
-                <em>{result.type}</em>
+                <em>{formatFilterLabel(result.type)}</em>
                 {result.tags?.map((tag) => (
-                  <em key={tag}>{tag}</em>
+                  <em key={tag}>{formatTagLabel(tag)}</em>
                 ))}
               </footer>
             </article>
@@ -123,4 +137,48 @@ export default function SearchPanel() {
       </div>
     </div>
   );
+}
+
+function readSearchHistory() {
+  try {
+    const raw = window.localStorage.getItem(SEARCH_HISTORY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string").slice(0, MAX_HISTORY) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSearchHistory(query: string, current: string[]) {
+  const normalized = query.trim();
+  if (normalized.length < 2) return current;
+  const next = [normalized, ...current.filter((item) => item.toLowerCase() !== normalized.toLowerCase())].slice(0, MAX_HISTORY);
+  window.localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
+  return next;
+}
+
+function formatFilterLabel(value: string) {
+  const labels: Record<string, string> = {
+    All: "All",
+    SECTION: "Sections",
+    SCHEMA: "Schemas",
+    VALUES: "Values",
+    PAGE: "Pages",
+    CODE: "Code",
+    TABLE: "Tables",
+    TEXT: "Text",
+    SUMMARY: "Summaries",
+  };
+  return labels[value] ?? titleCase(value);
+}
+
+function formatTagLabel(value: string) {
+  return formatFilterLabel(value.toUpperCase());
+}
+
+function titleCase(value: string) {
+  return value
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }

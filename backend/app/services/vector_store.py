@@ -135,7 +135,7 @@ class VectorStore:
 
     def _result(self, chunk: IndexedChunk, score: float) -> dict[str, Any]:
         excerpt = compact_excerpt(chunk.text)
-        title = str(chunk.metadata.get("section") or chunk.metadata.get("page") or chunk.chunk_type).title()
+        title = self._result_title(chunk)
         return {
             "id": chunk.id,
             "title": title,
@@ -148,6 +148,18 @@ class VectorStore:
             "chunk_type": chunk.chunk_type,
             "metadata": chunk.metadata,
         }
+
+    def _result_title(self, chunk: IndexedChunk) -> str:
+        """Prefer a useful result title over generic chunk labels like Section."""
+        for key in ("section", "title", "header"):
+            value = chunk.metadata.get(key)
+            if value:
+                return str(value).strip().title()
+        if chunk.metadata.get("page"):
+            return f"Page {chunk.metadata['page']}"
+        if chunk.chunk_type in {"section", "paragraph", "text"}:
+            return readable_document_title(chunk.document)
+        return chunk.chunk_type.replace("_", " ").title()
 
     def _chunk_id(self, document_name: str, index: int, text: str) -> str:
         digest = hashlib.sha1(f"{document_name}:{index}:{text[:80]}".encode("utf-8")).hexdigest()
@@ -184,6 +196,11 @@ def compact_excerpt(text: str, max_len: int = 220) -> str:
     if len(clean) <= max_len:
         return clean
     return f"{clean[: max_len - 3].rstrip()}..."
+
+
+def readable_document_title(filename: str) -> str:
+    stem = filename.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    return stem.replace("_", " ").replace("-", " ").title()
 
 
 def _is_metadata_value(value: Any) -> bool:

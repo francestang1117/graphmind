@@ -79,4 +79,17 @@ def test_visualization_export_matches_frontend_shape():
     assert all({"id", "label", "type", "size"} <= set(node) for node in visual["nodes"])
     assert all(isinstance(edge, tuple) and len(edge) == 2 for edge in visual["edges"])
     assert all({"source", "target", "type"} <= set(edge) for edge in visual["edge_details"])
-    assert graph.get_stats()["edge_types"]["MENTIONS"] >= 2
+    assert graph.get_stats()["edge_types"]["USES"] >= 2
+
+
+def test_document_edges_use_semantic_relation_names():
+    extractor = EntityExtractor()
+    entities = extractor.extract_from_text("GraphMind uses Python for semantic search.")
+
+    graph = KnowledgeGraph()
+    graph.add_document("rag-notes.md", entities, [])
+    edge_types = graph.get_stats()["edge_types"]
+
+    assert "USES" in edge_types
+    assert "CONTAINS" in edge_types
+    assert "MENTIONS" not in edge_types

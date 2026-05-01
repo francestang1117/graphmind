@@ -24,18 +24,18 @@ class DocumentService:
         self.storage = storage
         self.validator = validator or FileValidator()
 
-    def save_upload(self, filename: str, content: bytes) -> dict[str, Any]:
+    def save_upload(self, filename: str, content: bytes, user_id: str = "local-dev") -> dict[str, Any]:
         safe_name, mime_type = self.validator.validate(filename or "upload", content)
-        return self.storage.save_file(content, safe_name, mime_type)
+        return self.storage.save_file(content, safe_name, mime_type, user_id=user_id)
 
-    def list_documents(self) -> list[dict[str, Any]]:
-        return self.storage.list_files()
+    def list_documents(self, user_id: Optional[str] = None) -> list[dict[str, Any]]:
+        return self.storage.list_files(user_id)
 
-    def get_document(self, filename: str) -> Optional[dict[str, Any]]:
-        return self.storage.get_file_info(filename)
+    def get_document(self, filename: str, user_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+        return self.storage.get_file_info(filename, user_id)
 
-    def delete_document(self, filename: str) -> bool:
-        return self.storage.delete_file(filename)
+    def delete_document(self, filename: str, user_id: Optional[str] = None) -> bool:
+        return self.storage.delete_file(filename, user_id)
 
 
 document_service = DocumentService()

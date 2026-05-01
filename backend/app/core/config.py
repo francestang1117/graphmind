@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
+    SECRET_KEY: str = "dev-only-change-me-before-deploy"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    BCRYPT_ROUNDS: int = 12
+    REDIS_URL: str = "redis://localhost:6379/0"
+    AUTH_REQUIRED: bool = False
+
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:5173",

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Loader2, Send } from "lucide-react";
 import { sendChatMessage } from "../services/api";
 import { useAppStore } from "../stores/appStore";
@@ -15,33 +15,35 @@ const suggestions = [
   "Summarize the key ideas across all files",
 ];
 
-const fallbackReplies = [
-  {
-    content:
-      "I can already show the chat workflow, but the backend chat endpoint is not implemented yet. For now, upload documents first, then build the graph/search modules in the next stage.",
-    sources: ["roadmap"],
-  },
-  {
-    content:
-      "The current backend supports upload, validation, storage, listing, deletion, and document parsing. Entity extraction and graph persistence are the next natural modules.",
-    sources: ["backend/app/api/endpoints/documents.py"],
-  },
-];
-
 export default function ChatPanel() {
-  // Chat is wired to the future API, with local replies so the workflow still feels complete.
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
       content:
-        "Hello. Ask about your uploaded documents, or use this panel to preview the future RAG workflow.",
+        "Hello. Ask about your uploaded documents and I will answer from the current search and graph context.",
     },
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [replyIndex, setReplyIndex] = useState(0);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const { conversationId, setConversationId } = useAppStore();
+  const measureRef = useRef<HTMLSpanElement>(null);
+  const [ghostLeft, setGhostLeft] = useState(16);
+  const { conversationId, files, setConversationId } = useAppStore();
+
+  const completion = useMemo(() => {
+    const term = lastMeaningfulToken(input);
+    if (term.length < 2) return null;
+    const match = files
+      .map((file) => file.original_filename || file.filename)
+      .find((name) => name.toLowerCase().startsWith(term.toLowerCase()));
+    if (!match || match.toLowerCase() === term.toLowerCase()) return null;
+    return { term, value: match, suffix: match.slice(term.length) };
+  }, [files, input]);
+
+  useEffect(() => {
+    const width = measureRef.current?.offsetWidth ?? 0;
+    setGhostLeft(16 + width);
+  }, [input, completion]);
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
@@ -68,9 +70,14 @@ export default function ChatPanel() {
         },
       ]);
     } catch {
-      const fallback = fallbackReplies[replyIndex % fallbackReplies.length];
-      setReplyIndex((value) => value + 1);
-      setMessages((prev) => [...prev, { role: "assistant", ...fallback }]);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content:
+            "Chat is unavailable right now. Start the backend, upload documents, then try again.",
+        },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -120,22 +127,40 @@ export default function ChatPanel() {
           send();
         }}
       >
-        <textarea
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
-              event.preventDefault();
-              send();
-            }
-          }}
-          placeholder="Ask anything about your documents..."
-          rows={1}
-        />
+        <div className="chat-input-wrap">
+          <span className="chat-input-measure" ref={measureRef}>{input}</span>
+          {completion && (
+            <span className="chat-typeahead" style={{ left: ghostLeft }}>
+              {completion.suffix}
+            </span>
+          )}
+          <textarea
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.key === "Tab" || event.key === "ArrowRight") && completion) {
+                event.preventDefault();
+                setInput(completion.value);
+                return;
+              }
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                send();
+              }
+            }}
+            placeholder="Ask anything about your documents..."
+            rows={1}
+          />
+        </div>
         <button disabled={!input.trim() || loading} aria-label="Send message">
           {loading ? <Loader2 className="spin" size={19} /> : <Send size={19} />}
         </button>
       </form>
     </div>
   );
+}
+
+function lastMeaningfulToken(value: string) {
+  const matches = value.toLowerCase().match(/[a-z0-9][a-z0-9_-]{1,}/g);
+  return matches?.at(-1) ?? "";
 }

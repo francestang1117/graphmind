@@ -18,6 +18,7 @@ export interface GraphEdge {
   target: string;
   type?: string;
   weight?: number;
+  confidence?: number;
 }
 
 export interface GraphData {

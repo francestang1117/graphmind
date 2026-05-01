@@ -1058,6 +1058,25 @@ button {
   font-weight: 700;
 }
 
+.empty-state p {
+  max-width: 360px;
+  margin: 0;
+  color: var(--soft);
+  font-size: 13px;
+  text-align: center;
+}
+
+.search-state {
+  min-height: 300px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.search-state.error span {
+  color: #ff7b7b;
+}
+
 .graph-panel {
   height: 100%;
   display: grid;
@@ -1107,35 +1126,42 @@ button {
 }
 
 .graph-controls {
-  top: 18px;
-  left: 18px;
+  top: 12px;
+  left: 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .graph-controls button {
   appearance: none;
-  width: 30px;
-  height: 30px;
+  width: 22px;
+  height: 22px;
   display: grid;
   place-items: center;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  border-radius: 8px;
-  background: rgba(14, 14, 14, 0.42);
-  color: var(--muted);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  background: rgba(8, 8, 9, 0.38);
+  color: rgba(245, 245, 245, 0.48);
   cursor: pointer;
+  backdrop-filter: blur(10px);
   transition:
     border-color 160ms ease,
     color 160ms ease,
     background 160ms ease;
 }
 
+.graph-controls button svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 1.8;
+}
+
 .graph-controls button:hover {
-  border-color: rgba(255, 255, 255, 0.18);
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: rgba(245, 245, 245, 0.82);
+  background: rgba(255, 255, 255, 0.055);
 }
 
 .graph-controls button:focus-visible {
@@ -1302,6 +1328,46 @@ button {
   background: rgba(139, 92, 246, 0.18);
 }
 
+.search-history {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.search-history span {
+  color: var(--soft);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.search-history button {
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.search-history button:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.search-history .icon-only {
+  width: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+}
+
 .result-list {
   max-width: 820px;
   display: grid;
@@ -1411,6 +1477,7 @@ button {
   background: rgba(0, 0, 0, 0.16);
   color: var(--text);
   line-height: 1.65;
+  white-space: pre-wrap;
 }
 
 .message.user .bubble {
@@ -1450,6 +1517,7 @@ button {
 }
 
 .chat-input-row {
+  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 12px;
@@ -1457,8 +1525,14 @@ button {
   border-top: 1px solid var(--line);
 }
 
-.chat-input-row textarea {
+.chat-input-wrap {
+  position: relative;
   flex: 1;
+  min-width: 0;
+}
+
+.chat-input-row textarea {
+  width: 100%;
   min-height: 54px;
   max-height: 140px;
   resize: vertical;
@@ -1468,6 +1542,28 @@ button {
   padding: 15px 16px;
   background: rgba(0, 0, 0, 0.18);
   color: var(--text);
+}
+
+.chat-input-measure,
+.chat-typeahead {
+  position: absolute;
+  top: 15px;
+  left: 16px;
+  max-width: calc(100% - 32px);
+  overflow: hidden;
+  font: inherit;
+  font-size: 13px;
+  line-height: normal;
+  white-space: pre;
+  pointer-events: none;
+}
+
+.chat-input-measure {
+  visibility: hidden;
+}
+
+.chat-typeahead {
+  color: rgba(242, 240, 234, 0.28);
 }
 
 .chat-input-row button {
