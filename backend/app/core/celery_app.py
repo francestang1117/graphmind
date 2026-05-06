@@ -1,9 +1,4 @@
-"""Celery wiring for later background processing.
-
-The app currently uses FastAPI background tasks for document parsing. This
-module is intentionally light so importing it does not require Redis to be
-running during local development.
-"""
+"""Celery wiring, with a tiny local fallback."""
 
 from typing import Any, Callable
 

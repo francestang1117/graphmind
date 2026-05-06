@@ -1,12 +1,4 @@
-"""API router composition.
-
-Implemented:
-- document upload/list/detail/delete routes
-- in-memory knowledge graph routes for Module 4
-- vector search routes for Module 5
-- AI chat routes for Module 7
-- JWT auth routes for account/session MVP
-"""
+"""API router composition."""
 
 from fastapi import APIRouter
 from app.api.endpoints import auth, chat, documents, graph, search

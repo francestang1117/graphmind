@@ -1,12 +1,4 @@
-"""Document upload and listing endpoints.
-
-Implemented:
-- single-file upload API
-- validation and storage handoff
-- background parser queueing with cached summaries
-- parsed structure lookup for all supported document types
-- document list, detail, and delete endpoints
-"""
+"""Routes for upload, file lookup, parsing summary, and delete."""
 
 from pathlib import Path
 from typing import List
@@ -40,7 +32,7 @@ SAFE_FILE_HEADERS = {
 
 
 def _user_id(user: UserRecord) -> str:
-    """Keep direct endpoint tests working when FastAPI has not resolved Depends."""
+    """Direct tests pass the unresolved Depends object, so use local-dev there."""
     return getattr(user, "id", "local-dev")
 
 
@@ -117,8 +109,7 @@ async def upload_document(
 ) -> UploadResponse:
     """Validate, store, and queue a document for parsing.
 
-    The request argument is intentionally present for slowapi. The function does
-    not read it directly, but the limiter needs it to identify the caller IP.
+    `request` is only here because slowapi needs it for the rate-limit key.
     """
     content = await file.read()
 

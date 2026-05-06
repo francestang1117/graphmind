@@ -1,14 +1,4 @@
-"""Document upload workflow.
-
-This service keeps the API route small: validate bytes, store the file, and
-shape responses for the current frontend.
-
-Implemented:
-- upload validation orchestration
-- optional pre-storage malware scan
-- storage handoff
-- document list/detail/delete facade
-"""
+"""Upload workflow shared by the document API routes."""
 
 from typing import Any, Optional
 
@@ -37,14 +27,12 @@ class DocumentService:
         self.scanner = scanner
         self.repository = repository
         self.virus_scan_enabled = settings.VIRUS_SCAN_ENABLED if virus_scan_enabled is None else virus_scan_enabled
-        # Tests often pass a temporary FileStorage. In that case sidecar reads are
-        # clearer than writing metadata into the developer's local graphmind.db.
+        # Temp storage in tests should not write into the local graphmind.db.
         self.use_database = (storage is file_storage and db_enabled()) if use_database is None else use_database
 
     def save_upload(self, filename: str, content: bytes, user_id: str = "local-dev") -> dict[str, Any]:
         safe_name, mime_type = self.validator.validate(filename or "upload", content)
-        # Keep this before save_file(): scanner-clean bytes are the only bytes
-        # that should ever reach local disk or later parsing stages.
+        # Scan before save_file so unchecked bytes never touch storage.
         self._scan_for_malware(content)
         metadata = self.storage.save_file(content, safe_name, mime_type, user_id=user_id)
         if self._db_available():
@@ -88,8 +76,7 @@ class DocumentService:
         if result.clean:
             return
 
-        # A named threat is a clear block. A scanner outage can also block when
-        # VIRUS_SCAN_FAIL_OPEN=false, which is the safer production setting.
+        # If fail-open is off, scanner outages land here too.
         if result.threat:
             raise UploadValidationError(f"Malware detected: {result.threat}")
 

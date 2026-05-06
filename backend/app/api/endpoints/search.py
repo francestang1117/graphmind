@@ -1,11 +1,4 @@
-"""Search endpoints for Module 5.
-
-Implemented:
-- rebuild an in-memory vector index from uploaded documents
-- semantic-ish vector search over parser chunks
-- hybrid keyword + vector scoring
-- context endpoint for future chat/RAG
-"""
+"""Search API over parsed document chunks."""
 
 from typing import Literal, Optional
 

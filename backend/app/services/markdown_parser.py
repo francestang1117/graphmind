@@ -1,14 +1,4 @@
-"""Small Markdown structure parser used by the document pipeline.
-
-Implemented:
-- title and heading extraction
-- link and image extraction
-- fenced code block extraction
-- ordered and unordered list detection
-- nested section tree
-- paragraph/header/code chunking
-- word count, reading time, and language metadata
-"""
+"""Small Markdown structure parser used by the document pipeline."""
 
 from dataclasses import dataclass, field
 import re

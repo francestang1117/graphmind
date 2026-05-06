@@ -1,16 +1,4 @@
-"""Question-answering engine for Module 6.
-
-Implemented:
-- rebuilds the current vector index before answering
-- pulls lightweight graph context from uploaded documents
-- keeps short in-memory conversation history
-- returns citation sources from retrieved chunks
-- uses an optional LLM client only when configured
-
-The fallback answer is intentionally extractive. It lets the Chat API work in a
-fresh local checkout without API keys, while keeping a clear upgrade path for
-GPT/OpenAI-backed generation later.
-"""
+"""Retrieval-based chat answers over the current uploaded documents."""
 
 from __future__ import annotations
 
@@ -109,7 +97,7 @@ class QAEngine:
         graph_context: str,
         history: list[dict[str, str]],
     ) -> Optional[str]:
-        """Use a future OpenAI/GPT provider only when explicitly configured."""
+        """Use OpenAI only when a key/model is configured."""
         api_key = os.getenv("OPENAI_API_KEY")
         model = os.getenv("OPENAI_MODEL")
         if not api_key or not model:

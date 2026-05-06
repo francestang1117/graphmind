@@ -1,12 +1,4 @@
-"""Database foundation.
-
-The current app still uses local sidecar metadata as its primary read path.
-This module is the first persistence layer: when SQLAlchemy is installed, it
-creates the core tables and lets services mirror important state into the DB.
-
-PostgreSQL is the production target, but SQLite keeps local development and
-tests lightweight until the rest of the persistence layer is ready.
-"""
+"""SQLAlchemy setup for persistent app records."""
 
 from __future__ import annotations
 
@@ -65,7 +57,7 @@ def init_db() -> None:
 
 
 def get_db() -> Iterator[Session]:
-    """FastAPI dependency for future DB-backed endpoints."""
+    """FastAPI dependency for DB-backed endpoints."""
     if not SessionLocal:
         raise RuntimeError("Database is not configured")
     db = SessionLocal()

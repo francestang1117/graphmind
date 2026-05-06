@@ -1,16 +1,4 @@
-"""Knowledge graph endpoints.
-
-Implemented:
-- rebuild the in-memory graph from uploaded documents
-- return frontend-ready graph data
-- graph statistics
-- node detail and neighbor lookup
-- basic node search
-
-The graph is rebuilt from current stored files for now. That keeps Module 4
-honest while persistence is still planned: deleting or uploading documents is
-reflected the next time the graph endpoint is requested.
-"""
+"""Knowledge graph API built from the current uploaded documents."""
 
 from typing import Optional
 
@@ -33,11 +21,7 @@ async def get_graph(
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
 ) -> dict:
-    """Return a graph built from all currently uploaded documents.
-
-    Graph reads are cheaper than uploads/chat, but they still rebuild the
-    in-memory graph today, so they get a gentler limit instead of none.
-    """
+    """Return a graph built from all currently uploaded documents."""
     graph = rebuild_graph_from_documents(user.id)
     return graph.export_for_visualization()
 

@@ -67,7 +67,6 @@ function parsedHighlights(parsed: ParsedDocumentSummary) {
   );
 }
 
-// Implemented: upload surface, backend document list, delete action, and parsed structure viewer.
 export default function UploadPanel() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [filter, setFilter] = useState<StatusFilter>("all");
@@ -80,7 +79,6 @@ export default function UploadPanel() {
   const { files, setFiles, removeFile } = useAppStore();
 
   useEffect(() => {
-    // Treat the backend as the source of truth, but fall back quietly for demos.
     listDocuments()
       .then(setFiles)
       .catch(() => setFiles([]));

@@ -1,16 +1,4 @@
-"""Parse-result helpers for the document module.
-
-This file is intentionally not registered as a separate router yet. It keeps
-the Module 2 parsing work small and importable while the main upload endpoints
-stay focused on storage. It started as Markdown-only glue; now it keeps one
-compact parse summary for every supported document type.
-
-Implemented:
-- parse stored files in background work
-- keep a lightweight parse cache
-- return compact summary data for the frontend viewer
-- clear cached parse data when a file is deleted
-"""
+"""Parse cache and summary helpers for uploaded documents."""
 
 from typing import Any, Optional
 

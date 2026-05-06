@@ -1,9 +1,4 @@
-"""SQLAlchemy models for the first database persistence pass.
-
-These tables intentionally cover only stable data: users and document metadata.
-Parsed chunks, entities, and graph edges will come later, after their schemas
-settle down.
-"""
+"""SQLAlchemy models for users and uploaded document metadata."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 import { Braces, Code2, File, FileJson, FileText, Globe2, Pilcrow, Table2 } from "lucide-react";
 import type { FileInfo } from "../stores/appStore";
 
-// File visuals stay centralized so upload rows, saved rows, and future viewers agree.
+// Keep file icons/colors in one place.
 export const fileTypeMeta: Record<string, { icon: typeof File; tone: string }> = {
   ".pdf": { icon: FileText, tone: "red" },
   ".md": { icon: Pilcrow, tone: "blue" },
@@ -24,7 +24,6 @@ export function formatSize(bytes: number) {
 }
 
 export function formatDate(iso: string) {
-  // Keep new uploads feeling live without leaving everything stuck at "just now".
   const timestamp = new Date(iso).getTime();
   if (Number.isNaN(timestamp)) return "unknown";
 

@@ -1,14 +1,4 @@
-"""Optional Celery-compatible task for document parsing.
-
-The current upload endpoint uses this function through FastAPI background
-tasks. The Celery decorator keeps the same entrypoint ready for a later worker
-without pulling graph or vector services into this phase.
-
-Implemented:
-- parse stored files after upload
-- return a small processing summary
-- keep the function callable by both background tasks and future Celery workers
-"""
+"""Background entrypoint for parsing a stored document."""
 
 from typing import Any, Dict
 

@@ -1,16 +1,4 @@
-"""Vector search engine for Module 5.
-
-Implemented:
-- chunk indexing from parsed documents
-- lightweight local embeddings with cosine similarity
-- keyword boost for hybrid search
-- context assembly for future chat/RAG
-
-This is intentionally dependency-light. ChromaDB and sentence-transformers are
-good future upgrades, but loading them at import time makes the current backend
-fragile. The first version uses deterministic hashed term vectors, so search
-works in a fresh checkout and can be swapped later behind the same interface.
-"""
+"""Small local vector index for parsed document chunks."""
 
 from __future__ import annotations
 
@@ -113,7 +101,7 @@ class VectorStore:
         return semantic_results[:n_results]
 
     def get_context_for_qa(self, query: str, n_chunks: int = 5) -> str:
-        """Return compact context text for a future chat module."""
+        """Return compact context text for chat."""
         results = self.hybrid_search(query, n_chunks)
         if not results:
             return "No relevant context found."

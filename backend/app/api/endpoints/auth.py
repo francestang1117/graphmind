@@ -1,15 +1,4 @@
-"""JWT authentication for local accounts.
-
-Implemented:
-- register / login / me endpoints for the first protected API layer
-- short-lived HS256 access tokens
-- 7-day opaque refresh tokens
-- Redis refresh-token storage when available, with in-process fallback for dev
-- bcrypt password hashing when passlib is installed, with PBKDF2 fallback
-
-This is intentionally still an MVP: user records live in memory until the
-database module owns account persistence.
-"""
+"""JWT auth routes for the current local-account setup."""
 
 from __future__ import annotations
 
@@ -391,7 +380,7 @@ async def refresh_token(body: RefreshRequest) -> AccessToken:
 
 @router.post("/logout")
 async def logout(body: RefreshRequest, _: UserRecord = Depends(current_user)) -> dict[str, str]:
-    """Invalidate one refresh token. The client should also discard its access token."""
+    """Invalidate one refresh token."""
     await _revoke_refresh_token(body.refresh_token)
     return {"message": "Logged out"}
 

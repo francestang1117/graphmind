@@ -76,7 +76,6 @@ function isRenderableUpload(upload: UploadState) {
   return Boolean(upload.filename) && Number.isFinite(upload.file_size);
 }
 
-// Implemented: saved-file rows, in-flight upload rows, empty state, filtering, delete, and Markdown viewer entry.
 export default function DocumentList({
   files,
   uploads,
@@ -90,7 +89,7 @@ export default function DocumentList({
   onOpenFile,
   onViewParsed,
 }: Props) {
-  // Upload rows stay above saved rows so active work is always visible.
+  // Keep active uploads above the saved list.
   const filteredFiles = files.filter((file) => {
     if (filter === "all") return true;
     return (file.status ?? "done") === filter;

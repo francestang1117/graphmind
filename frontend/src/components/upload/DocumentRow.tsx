@@ -27,7 +27,6 @@ const PARSEABLE_EXTENSIONS = new Set([
   ".htm",
 ]);
 
-// Implemented: icon, filename, size/date metadata, status pill, delete action, and parsed-structure action.
 export default function DocumentRow({
   file,
   demo = false,
@@ -37,7 +36,6 @@ export default function DocumentRow({
   onOpenFile,
   onViewParsed,
 }: Props) {
-  // Demo rows look real, but stay read-only so users do not delete sample data.
   const status = file.status ?? "done";
   const canViewParsed = !demo && PARSEABLE_EXTENSIONS.has(file.file_extension) && onViewParsed;
 

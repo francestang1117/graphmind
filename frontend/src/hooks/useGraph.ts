@@ -42,7 +42,7 @@ const demoGraph: GraphData = {
 };
 
 export function useGraph() {
-  // The graph tab should stay useful before the backend graph module exists.
+  // Show sample data if the backend graph is empty.
   const graphQuery = useQuery({
     queryKey: ["graph"],
     queryFn: async () => {

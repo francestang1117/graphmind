@@ -3,7 +3,6 @@ import type { FileInfo } from "../stores/appStore";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
-// Implemented: document upload/list/delete/parsed APIs plus future graph/search/chat wrappers.
 const http = axios.create({ baseURL: `${API_BASE}/api/v1`, timeout: 30_000 });
 
 export interface GraphNode {

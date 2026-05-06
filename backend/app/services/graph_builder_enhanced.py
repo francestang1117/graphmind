@@ -1,18 +1,4 @@
-"""Knowledge graph builder for Module 4.
-
-Implemented:
-- document, entity, and relation nodes/edges
-- content merge by normalized entity id
-- document-to-entity mention edges
-- relation edges from Module 3 entity extraction
-- simple node search, neighbor lookup, and graph stats
-- frontend-ready visualization export
-
-This module deliberately stays light for now. It keeps the graph in memory and
-does not require NetworkX or Neo4j yet, which makes the current upload -> parse
--> entity -> graph flow easy to run locally. Persistent graph storage can be
-added later without changing the API shape too much.
-"""
+"""In-memory graph builder for documents and extracted entities."""
 
 from __future__ import annotations
 
@@ -25,7 +11,7 @@ import re
 from typing import Any, Iterable, Optional
 
 
-# The main canvas should show knowledge-bearing nodes. More mechanical details
+# Keep the default graph focused on useful concepts, not parser leftovers.
 # stay available in /graph/debug for development and later filtering controls.
 VISUAL_HIDDEN_NODE_TYPES = {"VERSION", "RESOURCE", "REPOSITORY", "CSV_VALUE", "LOCATION", "DATE", "TIME"}
 VISUAL_HIDDEN_EDGE_TYPES = {"MENTIONS_WITH"}
@@ -142,7 +128,7 @@ class KnowledgeGraph:
         return doc_node_id
 
     def _document_relation_for(self, entity_type: str) -> str:
-        """Use a more useful document edge than a generic MENTIONS fallback."""
+        """Pick the document edge label from the entity type."""
         if entity_type in {"PROGRAMMING_LANGUAGE", "FRAMEWORK", "LIBRARY", "DATABASE", "TOOL"}:
             return "USES"
         if entity_type in {"FUNCTION", "CLASS"}:

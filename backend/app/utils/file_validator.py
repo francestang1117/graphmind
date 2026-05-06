@@ -1,13 +1,4 @@
-"""In-memory validation for uploaded documents.
-
-Implemented:
-- extension allow-list
-- empty and oversized file rejection
-- MIME detection with local fallback
-- PDF/DOCX magic-byte checks
-- basic text safety scan with HTML-as-source handling
-- filename sanitization
-"""
+"""Upload file checks before storage."""
 
 from pathlib import Path
 import re

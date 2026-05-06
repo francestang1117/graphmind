@@ -25,11 +25,7 @@ async def chat(
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
 ):
-    """Answer a question using retrieved document and graph context.
-
-    Chat is rate-limited ahead of the GPT integration because this endpoint is
-    where future paid model calls will concentrate.
-    """
+    """Answer a question using retrieved document and graph context."""
     conv_id = body.conversation_id or str(uuid.uuid4())
 
     if body.stream:

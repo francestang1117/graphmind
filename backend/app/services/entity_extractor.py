@@ -1,12 +1,4 @@
-"""Entity extraction for the first knowledge-graph pass.
-
-Implemented:
-- optional spaCy NER for people, organizations, places, dates, and products
-- rule-based technical entity extraction
-- Markdown-aware concept/link/code extraction
-- entity normalization and deduplication
-- lightweight relation hints for the future graph builder
-"""
+"""Entity extraction used before building the knowledge graph."""
 
 from __future__ import annotations
 
@@ -49,7 +41,7 @@ class EntityRelation:
 
 @dataclass(frozen=True)
 class DomainTerm:
-    """A curated entity the graph should trust more than raw regex matches."""
+    """Known domain term with a stable label."""
 
     canonical: str
     label: str
@@ -205,8 +197,7 @@ TYPE_PAIR_RELATIONS: dict[tuple[str, str], str] = {
 }
 
 
-# This is intentionally small and explicit. It gives Module 3 useful signal now,
-# while leaving room for a richer taxonomy or user-provided glossary later.
+# Small hand-written glossary for the first graph pass.
 TECH_TERMS: dict[str, str] = {
     "python": "PROGRAMMING_LANGUAGE",
     "javascript": "PROGRAMMING_LANGUAGE",
@@ -741,9 +732,7 @@ class EntityExtractor:
                 for target in sentence_entities[index + 1 :]:
                     if source.normalized != target.normalized:
                         relation_type = self._infer_type_pair_relation(source, target)
-                        # Same-sentence type-pair relations are useful, but weak:
-                        # they should add graph texture without pretending to be
-                        # a fully parsed semantic claim.
+                        # Same sentence is a hint, not a parsed claim.
                         relations.append(
                             EntityRelation(source.normalized, target.normalized, relation_type, 0.52)
                         )

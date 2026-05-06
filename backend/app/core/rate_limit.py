@@ -1,16 +1,4 @@
-"""Rate limiting wrapper.
-
-Implemented:
-- slowapi-compatible decorators for costly endpoint groups
-- Redis-backed counters when slowapi is installed and enabled
-- no-op fallback for local development and fresh checkouts
-- per-IP keying with basic trusted-proxy support
-
-Why this exists:
-Upload, chat, and future video generation have very different costs. A single
-IP should not be able to fill disk with uploads or burn through future AI API
-budget by repeatedly calling expensive endpoints.
-"""
+"""Small wrapper around slowapi so routes can share the same limits."""
 
 from __future__ import annotations
 
@@ -26,12 +14,7 @@ F = TypeVar("F", bound=Callable)
 
 
 class NoopLimiter:
-    """Expose the same decorator shape as slowapi when limits are not active.
-
-    I still want route files to use the real-looking decorators during local
-    development. That way enabling Redis-backed limits later does not require
-    touching every endpoint again.
-    """
+    """Used when local setup does not have Redis/slowapi ready."""
 
     enabled = False
 
@@ -57,7 +40,7 @@ def get_client_ip(request: Request) -> str:
 
 
 def build_limiter():
-    """Build the active limiter, falling back to no-op when local setup is incomplete."""
+    """Build the limiter used by FastAPI."""
     if not settings.RATE_LIMIT_ENABLED:
         return NoopLimiter()
 
@@ -69,8 +52,7 @@ def build_limiter():
 
     storage_uri = settings.RATE_LIMIT_STORAGE_URI or settings.REDIS_URL
     if storage_uri.startswith("redis") and not _redis_is_available(storage_uri):
-        # Rate limiting should protect production, not make a fresh checkout
-        # unusable. Local dev can run without Redis; deployment should not.
+        # Don't make normal local runs depend on Redis.
         log.warning("Redis is not reachable for rate limiting; rate limiting disabled")
         return NoopLimiter()
 

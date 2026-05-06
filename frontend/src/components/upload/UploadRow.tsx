@@ -15,7 +15,6 @@ function uploadStatusLabel(upload: UploadState) {
   return `${upload.progress}%`;
 }
 
-// Implemented: temporary upload row with progress, pipeline step label, error state, and dismiss action.
 export default function UploadRow({
   upload,
   onDismiss,

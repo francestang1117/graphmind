@@ -1,12 +1,4 @@
-"""Content-addressed local file storage.
-
-Implemented:
-- SHA-256 based filenames
-- sidecar metadata JSON
-- duplicate-content detection by hash
-- list, lookup, load, and delete operations
-- path guard before read/delete
-"""
+"""Content-addressed storage for uploaded files."""
 
 import hashlib
 import json
@@ -51,8 +43,7 @@ class FileStorage:
         dest = self._dest_path(file_hash, extension)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
-        # Deduplication is based on content, not filename. Renaming a file should
-        # not create a second copy if the bytes are exactly the same.
+        # Same bytes should map to one stored file, even under a new filename.
         if dest.exists():
             existing = self.get_file_info(dest.name)
             if existing:

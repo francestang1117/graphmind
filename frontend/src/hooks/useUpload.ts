@@ -86,9 +86,8 @@ function friendlyUploadError(error: unknown, ext: string) {
   return { kind: "failed" as const, message: "Upload failed. Please try again." };
 }
 
-// Implemented: multi-file upload orchestration, progress mapping, saved-row replacement, and friendly errors.
 export function useUpload() {
-  // Track upload rows separately from saved documents so progress can disappear cleanly.
+  // Upload progress is temporary; saved files come back from the API list.
   const [uploads, setUploads] = useState<Record<string, UploadState>>({});
   const setFiles = useAppStore((state) => state.setFiles);
 
@@ -146,7 +145,7 @@ export function useUpload() {
         (doc) => doc.original_filename === file.name && doc.file_size === file.size,
       );
 
-      // If the request failed after storage completed, trust the backend list over the request error.
+      // Sometimes the list has the saved row even if the request reported late.
       if (saved) {
         removeUpload(setUploads, id);
         setFiles(refreshed);

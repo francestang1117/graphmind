@@ -54,11 +54,9 @@ class Settings(BaseSettings):
     ]
 
     MAX_UPLOAD_SIZE_MB: int = 50
-    # Off by default so contributors can run the API without ClamAV. Docker and
-    # production envs should turn it on to scan bytes before they are stored.
+    # Off locally unless clamd is running.
     VIRUS_SCAN_ENABLED: bool = False
-    # Local development often runs without clamd. Production should set this to
-    # false so scanner outages reject uploads instead of silently allowing them.
+    # Docker/prod should reject uploads when the scanner is down.
     VIRUS_SCAN_FAIL_OPEN: bool = True
     CLAMAV_HOST: str = "localhost"
     CLAMAV_PORT: int = 3310

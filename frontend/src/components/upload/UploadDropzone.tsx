@@ -19,7 +19,6 @@ function isUsableFile(file: unknown): file is File {
   return file instanceof File && Boolean(file.name) && Number.isFinite(file.size);
 }
 
-// Implemented: drag-and-drop upload, click-to-browse, multi-file selection, and accepted extension hints.
 export default function UploadDropzone({ onFiles }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);

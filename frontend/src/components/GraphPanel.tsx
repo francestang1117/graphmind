@@ -110,7 +110,7 @@ export default function GraphPanel() {
     if (!ctx) return;
 
     const render = () => {
-      // The force layout is intentionally tiny; it keeps the graph readable without another dependency.
+      // Small canvas layout for now; no graph library yet.
       const dpr = window.devicePixelRatio || 1;
       const width = canvas.clientWidth || 900;
       const height = canvas.clientHeight || 600;

@@ -8,9 +8,8 @@ interface Props {
   uploads: UploadState[];
 }
 
-// Implemented: small dashboard for total files, ready files, active uploads, and stored size.
 export default function DocumentOverview({ files, uploads }: Props) {
-  // These numbers mix saved files and in-flight uploads to match what the user sees.
+  // Count in-flight uploads too, since they are already visible in the list.
   const readyCount = files.filter((file) => (file.status ?? "done") === "done").length;
   const indexingCount =
     files.filter((file) => (file.status ?? "done") === "processing").length +
