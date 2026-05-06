@@ -1,4 +1,16 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: graphmind
+      POSTGRES_USER: graphmind
+      POSTGRES_PASSWORD: graphmind
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   api:
     build:
       context: ./backend
@@ -15,6 +27,27 @@ services:
       API_V1_PREFIX: /api/v1
       UPLOAD_DIR: /app/uploads
       MAX_UPLOAD_SIZE_MB: "50"
+      DATABASE_URL: postgresql+psycopg://graphmind:graphmind@postgres:5432/graphmind
+      VIRUS_SCAN_ENABLED: "true"
+      VIRUS_SCAN_FAIL_OPEN: "false"
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
+    depends_on:
+      - postgres
+      - clamav
+    restart: unless-stopped
+
+  clamav:
+    image: clamav/clamav:stable
+    ports:
+      - "3310:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
     restart: unless-stopped
 
   frontend:
@@ -35,3 +68,5 @@ services:
 
 volumes:
   upload_data:
+  postgres_data:
+  clamav_data:

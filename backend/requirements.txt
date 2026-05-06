@@ -6,10 +6,15 @@ python-multipart==0.0.20
 # Settings
 pydantic-settings==2.7.1
 
+# Database persistence
+SQLAlchemy==2.0.36
+psycopg[binary]==3.2.3
+
 # Auth/session storage
 # Auth works without these in local fallback mode, but production should use them.
 passlib[bcrypt]==1.7.4
 redis==5.2.1
+slowapi==0.1.9
 
 # Upload validation
 python-magic==0.4.27

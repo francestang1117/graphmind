@@ -2,6 +2,7 @@
 
 import asyncio
 from io import BytesIO
+from pathlib import Path
 
 from fastapi import BackgroundTasks, UploadFile
 import pytest
@@ -54,6 +55,45 @@ def test_list_get_and_delete_document(temp_document_service):
     assert listed.total == 1
     assert fetched.original_filename == "keep.txt"
     assert deleted == {"message": "File deleted"}
+
+
+def test_open_document_returns_original_file(temp_document_service):
+    uploaded = run(
+        documents.upload_document(
+            BackgroundTasks(),
+            make_upload("keep.txt", b"plain text"),
+        )
+    )
+
+    response = run(documents.open_document(uploaded.filename))
+
+    assert response.media_type == "text/plain"
+    assert response.filename == "keep.txt"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["content-security-policy"] == "sandbox"
+    assert response.headers["content-disposition"].startswith("inline")
+    assert Path(response.path).read_bytes() == b"plain text"
+
+
+def test_open_risky_document_downloads_instead_of_inline(temp_document_service):
+    uploaded = run(
+        documents.upload_document(
+            BackgroundTasks(),
+            make_upload("page.html", b"<!doctype html><script>alert(1)</script>"),
+        )
+    )
+
+    response = run(documents.open_document(uploaded.filename))
+
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["content-disposition"].startswith("attachment")
+
+
+def test_open_missing_document_raises_not_found(temp_document_service):
+    with pytest.raises(documents.HTTPException) as exc:
+        run(documents.open_document("missing.txt"))
+
+    assert exc.value.status_code == 404
 
 
 def test_invalid_upload_raises_http_error(temp_document_service):

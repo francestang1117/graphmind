@@ -30,6 +30,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
 from app.core.config import settings
+from app.services.persistence_service import save_user_record
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -353,6 +354,7 @@ async def register(body: UserCreate) -> TokenPair:
         created_at=datetime.now(timezone.utc).isoformat(),
     )
     _users[email] = user
+    save_user_record(user)
 
     access_token = _create_access_token(user.id)
     refresh_token = _create_refresh_token()

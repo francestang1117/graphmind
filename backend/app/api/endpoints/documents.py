@@ -8,9 +8,11 @@ Implemented:
 - document list, detail, and delete endpoints
 """
 
+from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
@@ -22,10 +24,19 @@ from app.api.endpoints.documents_with_markdown import (
 )
 from app.services.document_service import document_service
 from app.services.file_storage import DuplicateFileError
+from app.core.config import settings
+from app.core.rate_limit import upload_limit
 from app.utils.file_validator import UploadValidationError
 
 
 router = APIRouter()
+
+INLINE_PREVIEW_EXTENSIONS = {".pdf", ".txt", ".md", ".json", ".csv"}
+SAFE_FILE_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "sandbox",
+    "Cache-Control": "private, no-store",
+}
 
 
 def _user_id(user: UserRecord) -> str:
@@ -97,12 +108,18 @@ class ParsedDocumentSummary(BaseModel):
 
 
 @router.post("/upload", response_model=UploadResponse)
+@upload_limit
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user: UserRecord = Depends(current_user_or_dev),
+    request: Request = None,
 ) -> UploadResponse:
-    """Validate, store, and queue a document for parsing."""
+    """Validate, store, and queue a document for parsing.
+
+    The request argument is intentionally present for slowapi. The function does
+    not read it directly, but the limiter needs it to identify the caller IP.
+    """
     content = await file.read()
 
     try:
@@ -173,6 +190,50 @@ async def get_parsed_document(
     return ParsedDocumentSummary(
         **document_summary(filename, parsed, metadata["original_filename"])
     )
+
+
+@router.get("/{filename}/open")
+async def open_document(
+    filename: str,
+    user: UserRecord = Depends(current_user_or_dev),
+) -> FileResponse:
+    """Serve the original file without letting risky formats execute inline."""
+    metadata = document_service.get_document(filename, _user_id(user))
+    if not metadata:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    file_path = Path(metadata["file_path"])
+    allowed_roots = {
+        Path(settings.UPLOAD_DIR).resolve(),
+        Path(getattr(document_service.storage, "root", settings.UPLOAD_DIR)).resolve(),
+    }
+    resolved_path = file_path.resolve()
+    if not any(_is_within(resolved_path, root) for root in allowed_roots):
+        raise HTTPException(status_code=403, detail="Stored file path is invalid")
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Stored file is missing")
+
+    extension = metadata.get("file_extension", "").lower()
+    # Browser preview is convenient, but inline HTML/code can execute in the
+    # browser. Keep preview to passive formats and download everything else.
+    disposition = "inline" if extension in INLINE_PREVIEW_EXTENSIONS else "attachment"
+
+    return FileResponse(
+        file_path,
+        media_type=metadata.get("mime_type") or "application/octet-stream",
+        filename=metadata.get("original_filename") or filename,
+        content_disposition_type=disposition,
+        headers=SAFE_FILE_HEADERS,
+    )
+
+
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
 
 
 @router.get("/{filename}", response_model=FileInfo)

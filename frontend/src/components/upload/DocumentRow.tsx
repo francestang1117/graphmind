@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2, Trash2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, ExternalLink, Eye, EyeOff, Loader2, Trash2 } from "lucide-react";
 import type { FileInfo } from "../../stores/appStore";
 import { displayName, fileStatusLabel, formatDate, formatSize } from "../../utils/fileMeta";
 import FileIcon from "./FileIcon";
@@ -9,6 +9,7 @@ interface Props {
   deleting: boolean;
   parsedActive?: boolean;
   onDelete: (filename: string) => void;
+  onOpenFile?: (filename: string) => void;
   onViewParsed?: (filename: string, label: string) => void;
 }
 
@@ -33,6 +34,7 @@ export default function DocumentRow({
   deleting,
   parsedActive = false,
   onDelete,
+  onOpenFile,
   onViewParsed,
 }: Props) {
   // Demo rows look real, but stay read-only so users do not delete sample data.
@@ -61,7 +63,7 @@ export default function DocumentRow({
       </span>
       {canViewParsed && (
         <button
-          className={`row-action ${parsedActive ? "active" : ""}`}
+          className={`row-action parse-action ${parsedActive ? "active" : ""}`}
           aria-label={`${parsedActive ? "Hide" : "View"} parsed structure for ${displayName(file)}`}
           aria-pressed={parsedActive}
           onClick={() => onViewParsed(file.filename, displayName(file))}
@@ -69,9 +71,19 @@ export default function DocumentRow({
           {parsedActive ? <EyeOff size={17} /> : <Eye size={17} />}
         </button>
       )}
+      {!demo && onOpenFile && (
+        <button
+          className="row-action open-action"
+          aria-label={`Open ${displayName(file)}`}
+          title="Open original file"
+          onClick={() => onOpenFile(file.filename)}
+        >
+          <ExternalLink size={16} />
+        </button>
+      )}
       {!demo && (
         <button
-          className="row-action"
+          className="row-action delete-action"
           aria-label={`Delete ${displayName(file)}`}
           onClick={() => onDelete(file.filename)}
           disabled={deleting}

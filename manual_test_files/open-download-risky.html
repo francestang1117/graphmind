@@ -1,0 +1,14 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Risky HTML Test</title>
+  </head>
+  <body>
+    <h1>Risky HTML Test</h1>
+    <p>If this file opens inline and shows an alert, the security boundary failed.</p>
+    <script>
+      alert("This script should not run. The file should download instead.");
+    </script>
+  </body>
+</html>

@@ -16,6 +16,7 @@ interface Props {
   onFilterChange: (filter: StatusFilter) => void;
   onDelete: (filename: string) => void;
   onDismissUpload?: (id: string) => void;
+  onOpenFile?: (filename: string) => void;
   onViewParsed?: (filename: string, label: string) => void;
 }
 
@@ -86,6 +87,7 @@ export default function DocumentList({
   onFilterChange,
   onDelete,
   onDismissUpload,
+  onOpenFile,
   onViewParsed,
 }: Props) {
   // Upload rows stay above saved rows so active work is always visible.
@@ -136,6 +138,7 @@ export default function DocumentList({
             deleting={deleting === file.filename}
             parsedActive={activeParsedFilename === file.filename}
             onDelete={onDelete}
+            onOpenFile={onOpenFile}
             onViewParsed={onViewParsed}
           />
         ))}

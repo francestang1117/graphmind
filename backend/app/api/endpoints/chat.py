@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 import json
 from pydantic import BaseModel, Field
@@ -6,6 +6,7 @@ from typing import Optional
 import uuid
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
+from app.core.rate_limit import chat_limit
 from app.services.qa_engine import qa_engine
 
 router = APIRouter()
@@ -18,21 +19,27 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/")
+@chat_limit
 async def chat(
-    request: ChatRequest,
+    body: ChatRequest,
     user: UserRecord = Depends(current_user_or_dev),
+    request: Request = None,
 ):
-    """Answer a question using retrieved document and graph context."""
-    conv_id = request.conversation_id or str(uuid.uuid4())
+    """Answer a question using retrieved document and graph context.
 
-    if request.stream:
+    Chat is rate-limited ahead of the GPT integration because this endpoint is
+    where future paid model calls will concentrate.
+    """
+    conv_id = body.conversation_id or str(uuid.uuid4())
+
+    if body.stream:
         return StreamingResponse(
-            stream_response(request.message, conv_id, user.id),
+            stream_response(body.message, conv_id, user.id),
             media_type="text/event-stream",
         )
 
     result = qa_engine.answer(
-        question=request.message,
+        question=body.message,
         conversation_id=conv_id,
         user_id=user.id,
     )

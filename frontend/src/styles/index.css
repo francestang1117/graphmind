@@ -847,6 +847,19 @@ button {
 }
 
 .row-action:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.075);
+}
+
+.parse-action:hover,
+.open-action:hover {
+  color: var(--violet-2);
+  background:
+    linear-gradient(135deg, rgba(139, 92, 246, 0.16), rgba(96, 165, 250, 0.09)),
+    rgba(255, 255, 255, 0.045);
+}
+
+.delete-action:hover {
   color: #f87171;
   background: rgba(248, 113, 113, 0.12);
 }

@@ -3,6 +3,7 @@ import { Loader2, X } from "lucide-react";
 import { useUpload } from "../hooks/useUpload";
 import {
   deleteDocument,
+  getDocumentOpenUrl,
   getParsedDocument,
   listDocuments,
   type ParsedDocumentSummary,
@@ -125,6 +126,10 @@ export default function UploadPanel() {
     }
   };
 
+  const handleOpenFile = (filename: string) => {
+    window.open(getDocumentOpenUrl(filename), "_blank", "noopener,noreferrer");
+  };
+
   return (
     <div className="documents-panel">
       <UploadDropzone onFiles={uploadMany} />
@@ -139,6 +144,7 @@ export default function UploadPanel() {
         onFilterChange={setFilter}
         onDelete={handleDelete}
         onDismissUpload={dismissUpload}
+        onOpenFile={handleOpenFile}
         onViewParsed={handleViewParsed}
       />
       {(loadingParsed || parsed || parsedError) && (

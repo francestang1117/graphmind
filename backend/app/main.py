@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import init_app
 from app.api import router as api_router
 from app.core.config import settings
+from app.core.rate_limit import configure_rate_limiting
 
 import uvicorn
 
@@ -42,6 +43,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+configure_rate_limiting(app)
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
 

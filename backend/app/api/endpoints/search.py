@@ -9,11 +9,12 @@ Implemented:
 
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.documents_with_markdown import get_cached_parse, parse_document_file
+from app.core.rate_limit import search_limit
 from app.services.document_service import document_service
 from app.services.vector_store import VectorStore, vector_store
 
@@ -29,33 +30,40 @@ class SearchRequest(BaseModel):
 
 
 @router.post("/")
+@search_limit
 async def search_documents(
-    request: SearchRequest,
+    body: SearchRequest,
     user: UserRecord = Depends(current_user_or_dev),
+    request: Request = None,
 ) -> dict:
-    """Search all indexed chunks from current uploads."""
+    """Search all indexed chunks from current uploads.
+
+    request is here for the rate limiter; body carries the actual search input.
+    """
     store = rebuild_vector_index(user.id)
-    if request.search_type == "semantic":
-        raw_results = store.search(request.query, request.limit, request.document)
+    if body.search_type == "semantic":
+        raw_results = store.search(body.query, body.limit, body.document)
         results = [_api_result(item, percent=True) for item in raw_results]
     else:
-        results = [_api_result(item) for item in store.hybrid_search(request.query, request.limit, request.document)]
+        results = [_api_result(item) for item in store.hybrid_search(body.query, body.limit, body.document)]
 
     return {
-        "query": request.query,
-        "search_type": request.search_type,
+        "query": body.query,
+        "search_type": body.search_type,
         "results": results,
         "total": len(results),
     }
 
 
 @router.get("/context")
+@search_limit
 async def search_context(
     q: str,
     limit: int = 5,
     user: UserRecord = Depends(current_user_or_dev),
+    request: Request = None,
 ) -> dict:
-    """Return stitched context for a future chat/RAG module."""
+    """Return stitched context for chat/RAG without letting one IP spam rebuilds."""
     store = rebuild_vector_index(user.id)
     return {"query": q, "context": store.get_context_for_qa(q, limit)}
 

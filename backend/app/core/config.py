@@ -32,6 +32,19 @@ class Settings(BaseSettings):
     BCRYPT_ROUNDS: int = 12
     REDIS_URL: str = "redis://localhost:6379/0"
     AUTH_REQUIRED: bool = False
+    DATABASE_URL: str = "sqlite:///./graphmind.db"
+
+    RATE_LIMIT_ENABLED: bool = True
+    # Empty means "use REDIS_URL". This lets production override rate-limit
+    # storage separately without changing the rest of the Redis-backed services.
+    RATE_LIMIT_STORAGE_URI: str = ""
+    RATE_LIMIT_DEFAULT: str = "200/day;50/hour"
+    RATE_LIMIT_UPLOAD: str = "10/minute;100/hour"
+    RATE_LIMIT_CHAT: str = "30/minute;500/day"
+    RATE_LIMIT_SEARCH: str = "60/minute"
+    RATE_LIMIT_GRAPH_READ: str = "120/minute"
+    RATE_LIMIT_VIDEO: str = "5/hour"
+    TRUSTED_PROXY_IPS: List[str] = ["127.0.0.1", "::1"]
 
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
@@ -41,6 +54,15 @@ class Settings(BaseSettings):
     ]
 
     MAX_UPLOAD_SIZE_MB: int = 50
+    # Off by default so contributors can run the API without ClamAV. Docker and
+    # production envs should turn it on to scan bytes before they are stored.
+    VIRUS_SCAN_ENABLED: bool = False
+    # Local development often runs without clamd. Production should set this to
+    # false so scanner outages reject uploads instead of silently allowing them.
+    VIRUS_SCAN_FAIL_OPEN: bool = True
+    CLAMAV_HOST: str = "localhost"
+    CLAMAV_PORT: int = 3310
+    CLAMAV_TIMEOUT_SECONDS: int = 30
     ALLOWED_EXTENSIONS: List[str] = [
         ".md", ".pdf", ".txt", ".docx", ".py", ".js", ".ts",
         ".json", ".csv", ".html", ".htm",

@@ -427,6 +427,118 @@ Tests now cover the token lifecycle and the existing upload/search/chat paths:
 register, login, refresh, logout, document upload, file storage, vector search,
 and local QA.
 
+## 2026-05 — Rate Limiting Boundary
+
+After adding auth, I added the first real rate-limiting boundary. This is mainly
+about protecting the expensive parts of the system before the app grows into
+multi-user usage.
+
+The risks are different by endpoint:
+
+- uploads can fill disk and trigger parsing work
+- chat will eventually call GPT/OpenAI and cost money
+- search can be spammed with repeated large queries
+- graph reads are cheaper, but still rebuild in-memory state right now
+- video generation is planned to be much more expensive than everything else
+
+I added a `slowapi` wrapper in `app/core/rate_limit.py` with named endpoint
+limits instead of hardcoding strings in every route. The current limits are:
+
+- upload: `10/minute;100/hour`
+- chat: `30/minute;500/day`
+- search: `60/minute`
+- graph reads: `120/minute`
+- future video generation: `5/hour`
+
+The limiter is designed to use Redis so counters are shared across API
+instances. I also kept a no-op fallback for local development. If `slowapi` is
+not installed yet, or Redis is not reachable, the backend logs that rate
+limiting is disabled instead of failing startup. That keeps the project usable
+while still making the production path clear.
+
+One implementation detail mattered: `slowapi` needs a `request` parameter in
+decorated route functions. I added that to upload, search, chat, and graph
+endpoints while keeping the existing direct endpoint tests working.
+
+## 2026-05 — Database Foundation
+
+I started the persistence work with a small database foundation instead of
+moving the entire graph into a database at once. The graph schema is still
+changing as entity extraction improves, so persisting every node and edge now
+would create extra migration work before the model has settled.
+
+The first database pass adds:
+
+- `DATABASE_URL` configuration
+- SQLAlchemy engine/session setup
+- startup table creation
+- `users` table
+- `documents` table
+- PostgreSQL service in Docker Compose
+- SQLite as the lightweight local default
+
+The current app still reads document metadata from sidecar JSON files, but new
+users and uploaded document metadata are mirrored into the database when
+SQLAlchemy is available. This gives the project a real persistence path without
+forcing a risky rewrite of upload, search, graph, and chat in one step.
+
+I kept the database module optional during local development. If SQLAlchemy is
+not installed yet, the backend still starts and the existing workflows keep
+using local files. Once dependencies are installed and PostgreSQL is running,
+the same code begins creating tables and writing users/documents.
+
+The next persistence steps should be parsed chunks, extracted entities, and
+graph nodes/edges. Neo4j can still be useful later for heavier graph traversal,
+but PostgreSQL is the right source of truth for the current app.
+
+I then replaced the sidecar-first document metadata read path with a small
+SQLAlchemy `DocumentRepository`. File bytes still live in local storage, but
+document list/detail now prefer the `documents` table when the database is
+available. If the table is empty or the database is disabled, the service falls
+back to sidecar JSON so older local uploads do not disappear.
+
+This is the first real step away from the old in-memory/document-sidecar model:
+
+- uploads mirror metadata into the database
+- list/detail can read from the database
+- delete soft-deletes the database row after removing the local file
+- tests cover repository save/list/get/update/delete behavior
+
+## 2026-05 — Virus Scanning Boundary
+
+I added the first real virus scanning boundary around uploads. The first version
+of this module looked more complete than it actually was: `virus_scanner.py`
+had a ClamAV client, but the upload flow was not calling it yet. That meant the
+code existed, but uploaded bytes still went straight from validation into local
+storage.
+
+I fixed the upload order so the pipeline is now:
+
+1. validate extension, size, MIME, and basic content safety
+2. stream the bytes to ClamAV when virus scanning is enabled
+3. write the file only after both checks pass
+
+The important part is that the scanner runs before `save_file()`. I do not want
+the project to write suspicious bytes to disk and only then decide whether they
+are safe.
+
+I also made the scanner behavior configurable. Local development should not
+depend on a running ClamAV daemon, so `VIRUS_SCAN_ENABLED=false` by default.
+Docker Compose enables it and points the API at the `clamav` service. In that
+environment, `VIRUS_SCAN_FAIL_OPEN=false`, so scanner outages block uploads
+instead of quietly allowing them.
+
+That split feels like the right compromise for this stage:
+
+- local venv: keep upload/parsing easy to test
+- Docker/production path: scan before storage and fail closed
+
+I added tests for the scanner response parser and the upload integration. The
+tests verify clean responses, threat responses, scanner outages, and the fact
+that a detected threat never reaches storage. I still need to do a manual EICAR
+test with the real Docker ClamAV service, but the backend boundary is now wired
+instead of just documented.
+
 ## Current State
 
 As of May 2026, GraphMind has a working foundation:
@@ -449,6 +561,10 @@ As of May 2026, GraphMind has a working foundation:
 - retrieval-based chat endpoint with local fallback answers
 - JWT auth MVP with access/refresh token flow
 - user-scoped document, graph, search, and chat reads
+- Redis-backed rate-limit wrapper with local no-op fallback
+- SQLAlchemy persistence for users and document metadata
+- database-backed document metadata repository with sidecar fallback
+- optional ClamAV virus scan before file storage
 - Docker Compose for API + frontend
 - tests for the core backend pieces
 
@@ -461,8 +577,7 @@ auth are still early-stage.
 The next realistic steps are:
 
 1. Expand the Markdown viewer to show full sections and chunks.
-2. Store document metadata in a real database instead of local sidecar metadata only.
+2. Persist parsed chunks, extracted entities, and graph nodes/edges.
 3. Improve graph quality with better relation extraction and edge weighting.
-4. Add persistent graph storage.
-5. Add the frontend login/register flow and send Bearer tokens from the API client.
-6. Replace local chat answers with GPT-backed answer generation when the OpenAI layer is ready.
+4. Add the frontend login/register flow and send Bearer tokens from the API client.
+5. Replace local chat answers with GPT-backed answer generation when the OpenAI layer is ready.

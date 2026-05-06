@@ -98,6 +98,9 @@ export const deleteDocument = (filename: string) =>
 export const getParsedDocument = (filename: string): Promise<ParsedDocumentSummary> =>
   http.get(`/documents/${encodeURIComponent(filename)}/parsed`).then((r) => r.data);
 
+export const getDocumentOpenUrl = (filename: string) =>
+  `${API_BASE}/api/v1/documents/${encodeURIComponent(filename)}/open`;
+
 export const fetchGraph = (): Promise<GraphData> =>
   http.get("/graph").then((r) => normalizeGraph(r.data));
 

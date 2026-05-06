@@ -14,10 +14,11 @@ reflected the next time the graph endpoint is requested.
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.documents_with_markdown import get_cached_parse, parse_document_file
+from app.core.rate_limit import graph_read_limit
 from app.services.document_service import document_service
 from app.services.entity_extractor import entity_extractor
 from app.services.graph_builder_enhanced import KnowledgeGraph, knowledge_graph
@@ -27,23 +28,37 @@ router = APIRouter()
 
 
 @router.get("/")
-async def get_graph(user: UserRecord = Depends(current_user_or_dev)) -> dict:
-    """Return a graph built from all currently uploaded documents."""
+@graph_read_limit
+async def get_graph(
+    user: UserRecord = Depends(current_user_or_dev),
+    request: Request = None,
+) -> dict:
+    """Return a graph built from all currently uploaded documents.
+
+    Graph reads are cheaper than uploads/chat, but they still rebuild the
+    in-memory graph today, so they get a gentler limit instead of none.
+    """
     graph = rebuild_graph_from_documents(user.id)
     return graph.export_for_visualization()
 
 
 @router.get("/stats")
-async def get_graph_stats(user: UserRecord = Depends(current_user_or_dev)) -> dict:
-    """Return graph counters without duplicating frontend demo values."""
+@graph_read_limit
+async def get_graph_stats(
+    user: UserRecord = Depends(current_user_or_dev),
+    request: Request = None,
+) -> dict:
+    """Return graph counters under the same read limit as the graph canvas."""
     graph = rebuild_graph_from_documents(user.id)
     return graph.get_stats()
 
 
 @router.get("/nodes/{node_id}")
+@graph_read_limit
 async def get_node(
     node_id: str,
     user: UserRecord = Depends(current_user_or_dev),
+    request: Request = None,
 ) -> dict:
     """Return one node plus its directly connected neighborhood."""
     graph = rebuild_graph_from_documents(user.id)
@@ -56,11 +71,13 @@ async def get_node(
 
 
 @router.get("/search")
+@graph_read_limit
 async def search_nodes(
     q: str = Query("", description="Label text to search for"),
     node_type: Optional[str] = Query(None, description="Optional node type filter"),
     limit: int = Query(10, ge=1, le=50),
     user: UserRecord = Depends(current_user_or_dev),
+    request: Request = None,
 ) -> dict:
     """Search graph nodes by label."""
     graph = rebuild_graph_from_documents(user.id)
@@ -68,7 +85,11 @@ async def search_nodes(
 
 
 @router.get("/debug")
-async def graph_debug(user: UserRecord = Depends(current_user_or_dev)) -> dict:
+@graph_read_limit
+async def graph_debug(
+    user: UserRecord = Depends(current_user_or_dev),
+    request: Request = None,
+) -> dict:
     """Return full node and edge metadata for development checks."""
     graph = rebuild_graph_from_documents(user.id)
     return {**graph.export_detailed(), "stats": graph.get_stats()}
