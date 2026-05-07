@@ -1,9 +1,0 @@
-This is a safe plain text preview file.
-
-Expected behavior:
-- Upload succeeds.
-- Clicking the open-file button previews this file in the browser.
-- Response header should include:
-  X-Content-Type-Options: nosniff
-  Content-Security-Policy: sandbox
-  Content-Disposition: inline

@@ -389,6 +389,20 @@ I also added regression tests for the exact false positive:
 - Markdown detected as `video/MP2T`
 - binary bytes renamed to `.md`
 
+## 2026-05 — Opening Uploaded Files Safely
+
+I added an open-file action to the document list because it is useful to inspect the original upload, especially while debugging parser output.
+
+That feature needed a small security boundary. Uploaded files are user-controlled content, so the backend should not blindly render everything inline in the browser. The current rule is:
+
+- passive formats such as text, Markdown, JSON, PDF, and images can open inline
+- active formats such as HTML and code are forced to download
+- every open response includes `X-Content-Type-Options: nosniff`
+- inline previews also get a sandbox-style content security policy
+- paths are still resolved through stored metadata, not arbitrary filesystem input
+
+This keeps the workflow convenient without turning uploaded source files into pages that can execute inside the app.
+
 ## 2026-05 — Auth And User Isolation Pass
 
 I started the authentication module after the document/search/chat flows were

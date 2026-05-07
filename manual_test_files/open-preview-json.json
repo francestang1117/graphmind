@@ -1,9 +1,0 @@
-{
-  "name": "open-preview-json",
-  "purpose": "Manual test for safe inline JSON preview",
-  "expected": {
-    "content_disposition": "inline",
-    "nosniff": true,
-    "sandbox": true
-  }
-}

@@ -62,6 +62,9 @@ class DocumentService:
                 self.repository.mark_deleted(filename, user_id)
             else:
                 mark_document_deleted(filename, user_id)
+            from app.services.parsed_artifact_repository import parsed_artifact_repository
+
+            parsed_artifact_repository.delete_for_document(filename)
         return deleted
 
     def _db_available(self) -> bool:

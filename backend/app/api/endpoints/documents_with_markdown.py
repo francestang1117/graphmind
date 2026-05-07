@@ -1,12 +1,16 @@
 """Parse cache and summary helpers for uploaded documents."""
 
+import logging
 from typing import Any, Optional
 
 from app.services.document_parser import DocumentParser
+from app.services.entity_extractor import entity_extractor
 from app.services.markdown_parser import MarkdownParser
+from app.services.parsed_artifact_repository import parsed_artifact_repository
 
 
 _parse_cache: dict[str, dict[str, Any]] = {}
+log = logging.getLogger(__name__)
 
 
 def cache_key(filename: str) -> str:
@@ -33,6 +37,7 @@ def parse_document_file(
     if original_filename:
         metadata["original_filename"] = original_filename
     _parse_cache[cache_key(filename)] = result
+    _persist_parse_artifacts(filename, result)
     return result
 
 
@@ -42,6 +47,8 @@ def get_cached_parse(filename: str) -> Optional[dict[str, Any]]:
 
 def clear_cached_parse(filename: str) -> None:
     _parse_cache.pop(cache_key(filename), None)
+    # The DB copy should follow the same lifetime as the in-memory parse.
+    parsed_artifact_repository.delete_for_document(filename)
 
 
 def markdown_summary(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
@@ -127,3 +134,14 @@ def _decode_text(data: bytes) -> str:
         except UnicodeDecodeError:
             continue
     return data.decode("utf-8", errors="replace")
+
+
+def _persist_parse_artifacts(filename: str, parsed: dict[str, Any]) -> None:
+    try:
+        # Parser-level entities catch things like imports; the NER pass catches
+        # broader concepts and named entities from the extracted text.
+        entities = entity_extractor.extract_from_parsed_document(parsed)
+        parser_entities = parsed.get("extra", {}).get("entities", [])
+        parsed_artifact_repository.replace_for_document(filename, parsed, [*parser_entities, *entities])
+    except Exception as exc:
+        log.warning("Could not persist parsed artifacts for %s: %s", filename, exc)
