@@ -553,6 +553,28 @@ that a detected threat never reaches storage. I still need to do a manual EICAR
 test with the real Docker ClamAV service, but the backend boundary is now wired
 instead of just documented.
 
+## 2026-05 — WebSocket Progress Stream
+
+I replaced the old placeholder WebSocket endpoint with a real job progress
+stream. The route is now mounted at `/ws/jobs/{job_id}` and watches Celery task
+state through `AsyncResult`.
+
+The first version of this module looked complete from the outside, but it had
+two gaps: the router was not included in the FastAPI app, and the background
+document task never called `update_state()`. That meant the browser would not
+have received real processing stages even if it connected successfully.
+
+The current version sends compact progress messages:
+
+- `PENDING` while the job is waiting
+- `PROGRESS` with `pct` and `step`
+- `SUCCESS` with the final result
+- `FAILURE` or `REVOKED` for terminal errors
+
+For local development, the Celery fallback now supports the small part of the
+bound-task API that this needs. It is still not a full queue, but tests can
+exercise progress-aware tasks without requiring Redis and a worker process.
+
 ## Current State
 
 As of May 2026, GraphMind has a working foundation:
@@ -579,6 +601,7 @@ As of May 2026, GraphMind has a working foundation:
 - SQLAlchemy persistence for users and document metadata
 - database-backed document metadata repository with sidecar fallback
 - optional ClamAV virus scan before file storage
+- WebSocket job progress stream for Celery-backed processing
 - Docker Compose for API + frontend
 - tests for the core backend pieces
 

@@ -1,5 +1,6 @@
 """Celery wiring, with a tiny local fallback."""
 
+from functools import wraps
 from typing import Any, Callable
 
 from app.core.config import settings
@@ -8,12 +9,32 @@ from app.core.config import settings
 class LocalTaskQueue:
     """Small stand-in used when Celery is not installed."""
 
-    def task(self, *_args: Any, **_kwargs: Any) -> Callable:
+    def task(self, *_args: Any, **kwargs: Any) -> Callable:
+        bind = bool(kwargs.get("bind"))
+
         def decorator(func: Callable) -> Callable:
-            func.delay = func  # type: ignore[attr-defined]
-            return func
+            @wraps(func)
+            def run(*args: Any, **call_kwargs: Any) -> Any:
+                if bind:
+                    return func(LocalTaskContext(), *args, **call_kwargs)
+                return func(*args, **call_kwargs)
+
+            run.delay = run  # type: ignore[attr-defined]
+            return run
 
         return decorator
+
+
+class LocalTaskContext:
+    """Enough of Celery's task API for local progress-aware tasks."""
+
+    def __init__(self) -> None:
+        self.state = "PENDING"
+        self.info: dict[str, Any] = {}
+
+    def update_state(self, state: str, meta: dict[str, Any]) -> None:
+        self.state = state
+        self.info = meta
 
 
 try:
