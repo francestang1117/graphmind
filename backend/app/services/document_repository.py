@@ -7,15 +7,21 @@ detail, search, graph, and chat request.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable, Optional
 
 from app.core.database import SessionLocal, db_enabled
+from app.core.errors import DatabaseOperationError
+
+log = logging.getLogger(__name__)
 
 try:
     from sqlalchemy import select
+    from sqlalchemy.exc import SQLAlchemyError
     from app.models.persistence import DocumentRecord
 except ImportError:  # pragma: no cover - only before DB deps are installed
     select = None
+    SQLAlchemyError = Exception
     DocumentRecord = None  # type: ignore[assignment]
 
 
@@ -31,6 +37,8 @@ class DocumentRepository:
         self.enabled = enabled
 
     def available(self) -> bool:
+        # Import-time DB dependencies are optional in local development, so the
+        # repository can be present without being usable.
         return bool(self.enabled() and self.session_factory and DocumentRecord and select)
 
     def save_metadata(self, metadata: dict[str, Any]) -> None:
@@ -38,76 +46,94 @@ class DocumentRepository:
             return
 
         record_id = metadata.get("stored_filename") or metadata["filename"]
-        with self.session_factory() as db:
-            record = db.get(DocumentRecord, record_id)
-            values = _document_values(metadata)
-            if record:
-                for key, value in values.items():
-                    setattr(record, key, value)
-            else:
-                db.add(DocumentRecord(id=record_id, **values))
-            db.commit()
+        try:
+            with self.session_factory() as db:
+                record = db.get(DocumentRecord, record_id)
+                values = _document_values(metadata)
+                if record:
+                    for key, value in values.items():
+                        setattr(record, key, value)
+                else:
+                    db.add(DocumentRecord(id=record_id, **values))
+                db.commit()
+        except (SQLAlchemyError, OSError, RuntimeError) as exc:
+            _raise_db_error("save document metadata", exc, {"filename": record_id})
 
     def list(self, user_id: Optional[str]) -> list[dict[str, Any]]:
         if not self.available():
             return []
 
-        with self.session_factory() as db:
-            stmt = select(DocumentRecord).where(DocumentRecord.deleted_at.is_(None))
-            if user_id:
-                stmt = stmt.where(DocumentRecord.user_id == user_id)
-            stmt = stmt.order_by(DocumentRecord.created_at.desc())
-            return [_record_to_metadata(record) for record in db.scalars(stmt).all()]
+        try:
+            with self.session_factory() as db:
+                stmt = select(DocumentRecord).where(DocumentRecord.deleted_at.is_(None))
+                if user_id:
+                    stmt = stmt.where(DocumentRecord.user_id == user_id)
+                stmt = stmt.order_by(DocumentRecord.created_at.desc())
+                return [_record_to_metadata(record) for record in db.scalars(stmt).all()]
+        except (SQLAlchemyError, OSError, RuntimeError) as exc:
+            _raise_db_error("list document metadata", exc, {"user_id": user_id or ""})
 
     def get(self, filename: str, user_id: Optional[str]) -> Optional[dict[str, Any]]:
         if not self.available():
             return None
 
-        with self.session_factory() as db:
-            stmt = select(DocumentRecord).where(
-                DocumentRecord.deleted_at.is_(None),
-                DocumentRecord.filename == filename,
-            )
-            if user_id:
-                stmt = stmt.where(DocumentRecord.user_id == user_id)
-            record = db.scalars(stmt).first()
-            return _record_to_metadata(record) if record else None
+        try:
+            with self.session_factory() as db:
+                stmt = select(DocumentRecord).where(
+                    DocumentRecord.deleted_at.is_(None),
+                    DocumentRecord.filename == filename,
+                )
+                if user_id:
+                    stmt = stmt.where(DocumentRecord.user_id == user_id)
+                record = db.scalars(stmt).first()
+                return _record_to_metadata(record) if record else None
+        except (SQLAlchemyError, OSError, RuntimeError) as exc:
+            _raise_db_error("get document metadata", exc, {"filename": filename})
 
     def has_any(self, user_id: Optional[str]) -> bool:
         """Return whether this user has any DB document records, including deleted ones."""
         if not self.available():
             return False
 
-        with self.session_factory() as db:
-            stmt = select(DocumentRecord.id)
-            if user_id:
-                stmt = stmt.where(DocumentRecord.user_id == user_id)
-            return db.scalars(stmt).first() is not None
+        try:
+            with self.session_factory() as db:
+                stmt = select(DocumentRecord.id)
+                if user_id:
+                    stmt = stmt.where(DocumentRecord.user_id == user_id)
+                return db.scalars(stmt).first() is not None
+        except (SQLAlchemyError, OSError, RuntimeError) as exc:
+            _raise_db_error("check document metadata", exc, {"user_id": user_id or ""})
 
     def has_record(self, filename: str, user_id: Optional[str]) -> bool:
         """Return whether a DB row exists for this filename, even if soft-deleted."""
         if not self.available():
             return False
 
-        with self.session_factory() as db:
-            stmt = select(DocumentRecord.id).where(DocumentRecord.filename == filename)
-            if user_id:
-                stmt = stmt.where(DocumentRecord.user_id == user_id)
-            return db.scalars(stmt).first() is not None
+        try:
+            with self.session_factory() as db:
+                stmt = select(DocumentRecord.id).where(DocumentRecord.filename == filename)
+                if user_id:
+                    stmt = stmt.where(DocumentRecord.user_id == user_id)
+                return db.scalars(stmt).first() is not None
+        except (SQLAlchemyError, OSError, RuntimeError) as exc:
+            _raise_db_error("check document metadata record", exc, {"filename": filename})
 
     def get_by_hash(self, file_hash: str, user_id: Optional[str]) -> Optional[dict[str, Any]]:
         if not self.available():
             return None
 
-        with self.session_factory() as db:
-            stmt = select(DocumentRecord).where(
-                DocumentRecord.deleted_at.is_(None),
-                DocumentRecord.file_hash == file_hash,
-            )
-            if user_id:
-                stmt = stmt.where(DocumentRecord.user_id == user_id)
-            record = db.scalars(stmt).first()
-            return _record_to_metadata(record) if record else None
+        try:
+            with self.session_factory() as db:
+                stmt = select(DocumentRecord).where(
+                    DocumentRecord.deleted_at.is_(None),
+                    DocumentRecord.file_hash == file_hash,
+                )
+                if user_id:
+                    stmt = stmt.where(DocumentRecord.user_id == user_id)
+                record = db.scalars(stmt).first()
+                return _record_to_metadata(record) if record else None
+        except (SQLAlchemyError, OSError, RuntimeError) as exc:
+            _raise_db_error("get document metadata by hash", exc, {"file_hash": file_hash})
 
     def mark_deleted(self, filename: str, user_id: Optional[str]) -> None:
         if not self.available():
@@ -115,14 +141,17 @@ class DocumentRepository:
 
         from app.models.persistence import utc_now
 
-        with self.session_factory() as db:
-            stmt = select(DocumentRecord).where(DocumentRecord.filename == filename)
-            if user_id:
-                stmt = stmt.where(DocumentRecord.user_id == user_id)
-            record = db.scalars(stmt).first()
-            if record:
-                record.deleted_at = utc_now()
-                db.commit()
+        try:
+            with self.session_factory() as db:
+                stmt = select(DocumentRecord).where(DocumentRecord.filename == filename)
+                if user_id:
+                    stmt = stmt.where(DocumentRecord.user_id == user_id)
+                record = db.scalars(stmt).first()
+                if record:
+                    record.deleted_at = utc_now()
+                    db.commit()
+        except (SQLAlchemyError, OSError, RuntimeError) as exc:
+            _raise_db_error("mark document deleted", exc, {"filename": filename})
 
 
 def _document_values(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -147,6 +176,16 @@ def _record_to_metadata(record: DocumentRecord) -> dict[str, Any]:
         "modified_at": record.modified_at.isoformat() if record.modified_at else "",
         "status": record.status,
     }
+
+
+def _raise_db_error(operation: str, exc: Exception, details: dict[str, Any]) -> None:
+    # Once a request chooses the DB path, silently falling back to sidecars can
+    # resurrect deleted documents or hide writes. Surface the dependency failure.
+    log.warning("Could not %s: %s", operation, exc)
+    raise DatabaseOperationError(
+        "Document metadata database is unavailable.",
+        details={"operation": operation, **details},
+    ) from exc
 
 
 document_repository = DocumentRepository()

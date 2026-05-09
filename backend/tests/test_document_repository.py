@@ -1,10 +1,12 @@
 """Database-backed document repository tests."""
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
+from app.core.errors import DatabaseOperationError
 from app.services.document_repository import DocumentRepository
 
 
@@ -83,3 +85,16 @@ def test_repository_has_any_is_user_scoped():
 
     assert repo.has_any("u1") is True
     assert repo.has_any("u2") is False
+
+
+def test_repository_wraps_database_failures():
+    def broken_session_factory():
+        raise RuntimeError("database offline")
+
+    repo = DocumentRepository(session_factory=broken_session_factory, enabled=lambda: True)
+
+    with pytest.raises(DatabaseOperationError) as exc:
+        repo.list("u1")
+
+    assert exc.value.code == "database_operation_failed"
+    assert exc.value.details["operation"] == "list document metadata"

@@ -196,7 +196,11 @@ I changed the parsed summary endpoint and viewer so every supported file can exp
 - figures/images
 - reading order
 
-For now, PDF reading order is basic. It works well enough for simple documents, but complex academic PDFs with multi-column layouts will need a more deliberate reading-order pass later.
+The PDF parser now prefers `pdfplumber` over `PyPDF2` so it can extract text
+page by page and turn simple tables into searchable table chunks. `PyPDF2`
+stays as a fallback for environments where pdfplumber is unavailable.
+
+For now, PDF reading order is basic. It works well enough for simple documents, but complex academic PDFs with multi-column layouts, scanned pages, and figures will need a more deliberate layout/OCR pass later.
 
 ## 2026-04 — Real Upload Edge Cases
 
@@ -330,6 +334,19 @@ I simplified the first graph builder into an in-memory service with a clear shap
 The graph API now rebuilds from the current uploaded documents, which is not the final persistence model, but it is honest for this stage. It means the Graph panel can show real data from uploaded files without pretending that Neo4j/Postgres graph persistence is already finished.
 
 I also replaced the old full-pipeline demo script with assertions. The test now checks the real path from Markdown parsing to entity extraction to graph construction.
+
+## 2026-05 — Graph Export
+
+I added a small export layer to the graph API so the graph is not trapped inside
+the browser view. The same rebuilt graph can now be downloaded as:
+
+- Cytoscape-style JSON for frontend graph tooling
+- GEXF for Gephi
+- CSV for quick spreadsheet inspection
+
+This is still based on the current in-memory graph rebuild, not long-term graph
+persistence. That feels right for now: export is useful for debugging and demos,
+while keeping the storage model flexible until the graph layer matures.
 
 ## 2026-04 — Search Module MVP
 
@@ -575,6 +592,91 @@ For local development, the Celery fallback now supports the small part of the
 bound-task API that this needs. It is still not a full queue, but tests can
 exercise progress-aware tasks without requiring Redis and a worker process.
 
+## 2026-05 — Error Handling Cleanup
+
+As the backend grew past upload and parsing, the rough exception handling became
+more noticeable. A few places were still catching broad `Exception`s and either
+returning an empty result or hiding the reason behind a generic message. That
+made debugging feel worse than the actual bugs.
+
+I added a small application error layer with stable error codes, then started
+using it at the user-facing boundaries:
+
+- upload validation now returns `upload_validation_failed`
+- duplicate uploads return `duplicate_file`
+- parse failures return `parse_failed` with file details
+- unsafe stored-file paths and missing stored files have separate codes
+- storage write/delete failures now return `storage_operation_failed`
+- metadata database failures now return `database_operation_failed`
+- ClamAV failures distinguish `malware_detected` from `virus_scanner_unavailable`
+
+I also changed graph and search rebuilds to log skipped files instead of
+silently ignoring them. A single bad document still should not break the whole
+graph or search panel, but now there is a trail in the logs when that happens.
+
+The service layer still keeps low-level exceptions close to the modules that
+raise them, but user-facing operations now cross the API boundary as stable
+application errors instead of random Python or database exceptions.
+
+## 2026-05 — QA Fallbacks Made Visible
+
+The chat endpoint can run without an OpenAI key, which is useful while the rest
+of the pipeline is still moving quickly. The problem was that every fallback
+looked the same from the outside: the user saw a weaker local answer, and the
+backend did not always say whether search, graph rebuild, or the optional LLM
+step had failed.
+
+I changed the QA engine so the local answer path reports a `fallback_reason`.
+For example:
+
+- `openai_not_configured` when no GPT provider is wired yet
+- `openai_package_missing` if the key is present but the SDK is not installed
+- `openai_request_failed` if the provider call fails
+- `no_retrieval_context` when search cannot find usable document context
+
+The chat API still returns a normal answer, but debugging is less guessy now.
+Search and graph context failures also write warnings instead of disappearing.
+This keeps the MVP usable while making the weak spots easier to improve later.
+
+## 2026-05 — Parser Fallback Logs
+
+I also went back through `document_parser.py` and cleaned up the quiet fallback
+paths. Some parser failures are normal, like a DOCX file not having comments or
+saved page-count metadata. Those now use debug logs. Cases that usually mean the
+file or XML part is damaged use warnings.
+
+The goal is not to make the parser noisy. It is to make parser behavior
+traceable when a PDF heading hint disappears, a DOCX XML part cannot be read, or
+CSV parsing falls back from pandas to the standard library.
+
+## 2026-05 — Web Scraper MVP
+
+I started the web ingestion module because only supporting local file upload
+feels too narrow for the project. A lot of useful knowledge starts as a web
+page, and later a browser extension would probably call into the same backend
+path.
+
+The current version is intentionally small and fits what the app can honestly do
+right now:
+
+- fetch a public page
+- remove obvious page chrome like scripts, nav, headers, and footers
+- keep the title and source URL
+- turn the readable text into a Markdown document
+- store it through the same upload service used by normal files
+
+That last part is important. Scraped pages should not become a separate kind of
+content that every later module has to special-case. By saving the page as a
+normal document, search, graph, and chat can pick it up through the existing
+rebuild paths.
+
+I also added a first safety boundary around URL fetching. The scraper blocks
+local/private network addresses, checks the final redirected URL too, caps the
+response size, accepts only readable HTML/text responses, and has its own rate
+limit. This is one of those features where a simple implementation can become
+dangerous quickly, so I would rather keep the MVP small and boring than make it
+look powerful but unsafe.
+
 ## Current State
 
 As of May 2026, GraphMind has a working foundation:
@@ -591,10 +693,12 @@ As of May 2026, GraphMind has a working foundation:
 - Markdown parse summary endpoint
 - frontend parse summary viewer
 - basic parsers for TXT, PDF, DOCX, Python, JavaScript, TypeScript, JSON, CSV, and HTML
+- pdfplumber-backed PDF text/page/table extraction with PyPDF2 fallback
 - entity extraction MVP with rule-based technical entities and optional spaCy NER
 - in-memory knowledge graph builder connected to uploaded documents
 - vector search MVP over parsed document chunks
-- retrieval-based chat endpoint with local fallback answers
+- retrieval-based chat endpoint with local fallback answers and visible fallback reasons
+- web scraper MVP that stores public pages as searchable Markdown documents
 - JWT auth MVP with access/refresh token flow
 - user-scoped document, graph, search, and chat reads
 - Redis-backed rate-limit wrapper with local no-op fallback
@@ -602,6 +706,7 @@ As of May 2026, GraphMind has a working foundation:
 - database-backed document metadata repository with sidecar fallback
 - optional ClamAV virus scan before file storage
 - WebSocket job progress stream for Celery-backed processing
+- stable API error codes for common upload, parse, and file access failures
 - Docker Compose for API + frontend
 - tests for the core backend pieces
 

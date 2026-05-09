@@ -1,5 +1,6 @@
 """Search API over parsed document chunks."""
 
+import logging
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Request
@@ -13,6 +14,7 @@ from app.services.vector_store import VectorStore, vector_store
 
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 class SearchRequest(BaseModel):
@@ -80,9 +82,17 @@ def rebuild_vector_index(user_id: Optional[str] = None) -> VectorStore:
         if not parsed:
             try:
                 parsed = parse_document_file(filename, metadata["file_path"], original_name)
-            except Exception:
+            except (OSError, ValueError, RuntimeError) as exc:
+                # Search should stay usable even if one stored file no longer
+                # parses, but the skip should not be invisible.
+                log.warning("Skipping %s while rebuilding search index: %s", original_name, exc)
                 continue
-        store.add_chunks(parsed.get("chunks", []), original_name)
+        try:
+            store.add_chunks(parsed.get("chunks", []), original_name)
+        except (TypeError, ValueError) as exc:
+            # Bad chunk shapes are parser bugs, not user mistakes. Log and keep
+            # indexing the rest of the library.
+            log.warning("Skipping search chunks for %s: %s", original_name, exc)
     return store
 
 

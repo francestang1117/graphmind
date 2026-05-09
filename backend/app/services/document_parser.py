@@ -31,7 +31,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
-# ── Standard output format ────────────────────────────────────────────────────
+# Parsed document shape
 
 @dataclass
 class Section:
@@ -83,7 +83,7 @@ class ParsedDocument:
     reading_time_min: int = 0
 
 
-# ── Chunking helper ───────────────────────────────────────────────────────────
+# Shared chunking
 
 def _chunk(text: str, chunk_size: int = 800, overlap: int = 150,
            chunk_type: str = "paragraph", meta: dict = None) -> list[dict]:
@@ -105,7 +105,7 @@ def _chunk(text: str, chunk_size: int = 800, overlap: int = 150,
     return chunks
 
 
-# ── Markdown Parser ───────────────────────────────────────────────────────────
+# Markdown files
 
 class MarkdownParser:
     """
@@ -123,8 +123,10 @@ class MarkdownParser:
             try:
                 import yaml
                 frontmatter = yaml.safe_load(fm_match.group(1)) or {}
-            except Exception:
-                pass
+            except ImportError:
+                log.debug("PyYAML not installed; ignoring Markdown frontmatter")
+            except yaml.YAMLError as exc:
+                log.warning("Invalid Markdown frontmatter in %s: %s", path.name, exc)
             text = text[fm_match.end():]
 
         sections = self._extract_sections(text)
@@ -228,7 +230,7 @@ class MarkdownParser:
         return chunks
 
 
-# ── Plain Text Parser ─────────────────────────────────────────────────────────
+# Plain text files
 
 class PlainTextParser:
 
@@ -258,13 +260,12 @@ class PlainTextParser:
         )
 
 
-# ── PDF Parser ────────────────────────────────────────────────────────────────
+# PDF files
 
 class PDFParser:
     """
-    Uses pdfplumber for layout-aware extraction.
-    Extracts text, tables, and detects headings by font size.
-    Falls back to PyPDF2 if pdfplumber is unavailable.
+    Prefer pdfplumber so PDFs can contribute page chunks and table chunks.
+    PyPDF2 stays as a fallback for environments where pdfplumber is missing.
     """
 
     def parse(self, path: Path) -> ParsedDocument:
@@ -285,14 +286,11 @@ class PDFParser:
                 all_text.append(page_text)
                 headings.extend(self._extract_layout_headings(page, page_num))
 
-                # Tables
                 for tbl in page.extract_tables():
-                    if tbl and len(tbl) > 1:
-                        headers = [str(c or "").strip() for c in tbl[0]]
-                        rows    = [[str(c or "").strip() for c in row] for row in tbl[1:]]
+                    headers, rows = self._normalise_table(tbl)
+                    if headers and rows:
                         tables.append(TableData(headers=headers, rows=rows,
                                                 caption=f"Page {page_num}"))
-                        # Table as text chunk
                         table_text = " | ".join(headers) + "\n"
                         table_text += "\n".join(" | ".join(r) for r in rows[:20])
                         chunks.append({"text": table_text, "type": "table",
@@ -318,6 +316,7 @@ class PDFParser:
             metadata     = {
                 "filename": path.name,
                 "pages": len(all_text),
+                "parser": "pdfplumber",
                 "headings": headings,
                 "table_count": len(tables),
             },
@@ -325,11 +324,31 @@ class PDFParser:
             reading_time_min = max(1, words // 250),
         )
 
+    def _normalise_table(self, table: Any) -> tuple[list[str], list[list[str]]]:
+        """Clean pdfplumber table output before it becomes searchable text."""
+        if not table or len(table) < 2:
+            return [], []
+
+        cleaned = [
+            [str(cell or "").strip() for cell in row]
+            for row in table
+            if row and any(str(cell or "").strip() for cell in row)
+        ]
+        if len(cleaned) < 2:
+            return [], []
+
+        width = max(len(row) for row in cleaned)
+        padded = [row + [""] * (width - len(row)) for row in cleaned]
+        headers = [cell or f"Column {index + 1}" for index, cell in enumerate(padded[0])]
+        rows = padded[1:]
+        return headers, rows
+
     def _extract_layout_headings(self, page: Any, page_num: int) -> list[dict]:
         """Best-effort heading hints from pdfplumber font sizes."""
         try:
             words = page.extract_words(extra_attrs=["size"])
-        except Exception:
+        except (TypeError, ValueError, AttributeError) as exc:
+            log.debug("Could not extract PDF heading hints on page %s: %s", page_num, exc)
             return []
         sizes = [float(word.get("size", 0)) for word in words if word.get("text")]
         if not sizes:
@@ -367,7 +386,7 @@ class PDFParser:
         )
 
 
-# ── DOCX Parser ───────────────────────────────────────────────────────────────
+# Word documents
 
 class DocxParser:
     """
@@ -403,7 +422,8 @@ class DocxParser:
                     buf = []
                 try:
                     current_level = int(style.split()[-1])
-                except (ValueError, IndexError):
+                except (ValueError, IndexError) as exc:
+                    log.debug("Could not read DOCX heading level from style %r in %s: %s", style, path.name, exc)
                     current_level = 1
                 current_heading = text
             else:
@@ -525,12 +545,17 @@ class DocxParser:
         try:
             with zipfile.ZipFile(path) as archive:
                 data = archive.read("docProps/app.xml")
-        except (KeyError, OSError, zipfile.BadZipFile):
+        except KeyError:
+            log.debug("DOCX %s has no docProps/app.xml metadata", path.name)
+            return {"pages": 0, "words": 0}
+        except (OSError, zipfile.BadZipFile) as exc:
+            log.warning("Could not read DOCX app properties from %s: %s", path.name, exc)
             return {"pages": 0, "words": 0}
 
         try:
             root = ElementTree.fromstring(data)
-        except ElementTree.ParseError:
+        except ElementTree.ParseError as exc:
+            log.warning("Invalid DOCX app properties XML in %s: %s", path.name, exc)
             return {"pages": 0, "words": 0}
 
         values = {"pages": 0, "words": 0}
@@ -539,7 +564,8 @@ class DocxParser:
             if tag in values and child.text:
                 try:
                     values[tag] = int(child.text)
-                except ValueError:
+                except ValueError as exc:
+                    log.debug("Ignoring non-numeric DOCX %s value in %s: %s", tag, path.name, exc)
                     values[tag] = 0
         return values
 
@@ -558,10 +584,15 @@ class DocxParser:
                 for name in dict.fromkeys(parts):
                     try:
                         root = ElementTree.fromstring(archive.read(name))
-                    except (KeyError, ElementTree.ParseError):
+                    except KeyError:
+                        log.debug("DOCX %s has no %s part", path.name, name)
+                        continue
+                    except ElementTree.ParseError as exc:
+                        log.warning("Skipping invalid DOCX XML part %s in %s: %s", name, path.name, exc)
                         continue
                     text.extend(node.text or "" for node in root.iter() if node.tag.endswith("}t"))
-        except (OSError, zipfile.BadZipFile):
+        except (OSError, zipfile.BadZipFile) as exc:
+            log.warning("Could not read visible DOCX text from %s: %s", path.name, exc)
             return ""
         return " ".join(piece.strip() for piece in text if piece.strip())
 
@@ -569,7 +600,14 @@ class DocxParser:
         try:
             with zipfile.ZipFile(path) as archive:
                 root = ElementTree.fromstring(archive.read("word/document.xml"))
-        except (KeyError, OSError, zipfile.BadZipFile, ElementTree.ParseError):
+        except KeyError:
+            log.debug("DOCX %s has no word/document.xml part", path.name)
+            return 0
+        except ElementTree.ParseError as exc:
+            log.warning("Invalid DOCX document XML in %s: %s", path.name, exc)
+            return 0
+        except (OSError, zipfile.BadZipFile) as exc:
+            log.warning("Could not count DOCX paragraphs in %s: %s", path.name, exc)
             return 0
 
         count = 0
@@ -588,12 +626,17 @@ class DocxParser:
         try:
             with zipfile.ZipFile(path) as archive:
                 data = archive.read("word/comments.xml")
-        except (KeyError, OSError, zipfile.BadZipFile):
+        except KeyError:
+            log.debug("DOCX %s has no comments.xml", path.name)
+            return 0
+        except (OSError, zipfile.BadZipFile) as exc:
+            log.warning("Could not read DOCX comments from %s: %s", path.name, exc)
             return 0
 
         try:
             root = ElementTree.fromstring(data)
-        except ElementTree.ParseError:
+        except ElementTree.ParseError as exc:
+            log.warning("Invalid DOCX comments XML in %s: %s", path.name, exc)
             return 0
         return sum(1 for node in root.iter() if node.tag.endswith("}comment"))
 
@@ -601,7 +644,7 @@ class DocxParser:
         return sum(1 for style in doc.styles if getattr(style, "base_style", None) is not None)
 
 
-# ── Python Parser ─────────────────────────────────────────────────────────────
+# Python files
 
 class PythonParser:
     """
@@ -650,8 +693,8 @@ class PythonParser:
         try:
             tree = ast.parse(source)
             module_doc = ast.get_docstring(tree) or ""
-        except Exception:
-            pass
+        except SyntaxError as exc:
+            log.debug("Skipping Python module docstring for invalid syntax in %s: %s", path.name, exc)
 
         if module_doc:
             sections.append(Section("Module", 1, module_doc))
@@ -708,7 +751,7 @@ class PythonParser:
         )
 
 
-# ── JavaScript / TypeScript Parser ────────────────────────────────────────────
+# JavaScript and TypeScript files
 
 class JavaScriptParser:
     """
@@ -799,7 +842,7 @@ class JavaScriptParser:
         )
 
 
-# ── JSON Parser ───────────────────────────────────────────────────────────────
+# JSON files
 
 class JSONParser:
     """
@@ -918,7 +961,7 @@ class JSONParser:
         return _dedupe_entity_dicts(entities)
 
 
-# ── CSV Parser ────────────────────────────────────────────────────────────────
+# CSV files
 
 class CSVParser:
     """
@@ -931,6 +974,7 @@ class CSVParser:
         try:
             return self._parse_pandas(path)
         except ImportError:
+            log.debug("pandas not installed; parsing CSV %s with stdlib csv", path.name)
             return self._parse_stdlib(path)
 
     def _parse_pandas(self, path: Path) -> ParsedDocument:
@@ -1042,7 +1086,7 @@ class CSVParser:
         )
 
 
-# ── HTML Parser ───────────────────────────────────────────────────────────────
+# HTML files
 
 class HTMLParser:
     """
@@ -1112,7 +1156,7 @@ class HTMLParser:
         )
 
 
-# ── Unified dispatcher ────────────────────────────────────────────────────────
+# Parser lookup
 
 PARSERS = {
     ".md":   MarkdownParser(),

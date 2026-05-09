@@ -15,8 +15,13 @@ from app.api.endpoints.documents_with_markdown import (
     parse_document_file,
 )
 from app.services.document_service import document_service
-from app.services.file_storage import DuplicateFileError
 from app.core.config import settings
+from app.core.errors import (
+    ParseError,
+    StorageAccessError,
+    StoredFileMissingError,
+    UploadRejectedError,
+)
 from app.core.rate_limit import upload_limit
 from app.utils.file_validator import UploadValidationError
 
@@ -116,18 +121,9 @@ async def upload_document(
     try:
         metadata = document_service.save_upload(file.filename or "upload", content, user_id=_user_id(user))
     except UploadValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except DuplicateFileError as exc:
-        existing = exc.metadata
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": "This file has already been uploaded.",
-                "existing_filename": existing["filename"],
-                "original_filename": existing["original_filename"],
-                "file_hash": existing["file_hash"],
-            },
-        ) from exc
+        # Keep upload failures machine-readable for the UI; raw exception text
+        # alone is hard to branch on.
+        raise UploadRejectedError(str(exc)) from exc
 
     background_tasks.add_task(
         parse_document_file,
@@ -171,7 +167,15 @@ async def get_parsed_document(
                 metadata["original_filename"],
             )
         except Exception as exc:
-            raise HTTPException(status_code=422, detail=f"Parse failed: {exc}") from exc
+            # Parsing can fail for format-specific reasons. Expose a stable
+            # code, but keep the original reason in details for debugging.
+            raise ParseError(
+                details={
+                    "filename": filename,
+                    "original_filename": metadata.get("original_filename", ""),
+                    "reason": str(exc),
+                }
+            ) from exc
     elif metadata["file_extension"] == ".docx":
         parsed = parse_document_file(
             filename,
@@ -200,10 +204,12 @@ async def open_document(
     }
     resolved_path = file_path.resolve()
     if not any(_is_within(resolved_path, root) for root in allowed_roots):
-        raise HTTPException(status_code=403, detail="Stored file path is invalid")
+        # Metadata should never point outside upload storage. If it does, block
+        # before FileResponse has a chance to touch the path.
+        raise StorageAccessError(details={"filename": filename})
 
     if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Stored file is missing")
+        raise StoredFileMissingError(details={"filename": filename})
 
     extension = metadata.get("file_extension", "").lower()
     # Browser preview is convenient, but inline HTML/code can execute in the

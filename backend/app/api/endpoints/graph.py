@@ -1,8 +1,13 @@
 """Knowledge graph API built from the current uploaded documents."""
 
+import csv
+from io import StringIO
+import logging
 from typing import Optional
+from xml.etree import ElementTree
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, Response
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.documents_with_markdown import get_cached_parse, parse_document_file
@@ -13,6 +18,7 @@ from app.services.graph_builder_enhanced import KnowledgeGraph, knowledge_graph
 
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
 @router.get("/")
@@ -79,6 +85,39 @@ async def graph_debug(
     return {**graph.export_detailed(), "stats": graph.get_stats()}
 
 
+@router.get("/export")
+@graph_read_limit
+async def export_graph(
+    format: str = Query("json", pattern="^(json|gexf|csv)$"),
+    user: UserRecord = Depends(current_user_or_dev),
+    request: Request = None,
+) -> Response:
+    """Export the full graph for external graph/table tools."""
+    graph = rebuild_graph_from_documents(user.id)
+    detailed = graph.export_detailed()
+    export_format = format.lower()
+
+    if export_format == "json":
+        return JSONResponse(
+            content=_to_cytoscape_json(detailed),
+            headers={"Content-Disposition": 'attachment; filename="graphmind-graph.json"'},
+        )
+    if export_format == "gexf":
+        return Response(
+            content=_to_gexf(detailed),
+            media_type="application/gexf+xml",
+            headers={"Content-Disposition": 'attachment; filename="graphmind-graph.gexf"'},
+        )
+    if export_format == "csv":
+        return Response(
+            content=_to_csv(detailed),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="graphmind-graph.csv"'},
+        )
+
+    raise HTTPException(status_code=400, detail="Unsupported graph export format")
+
+
 def rebuild_graph_from_documents(user_id: Optional[str] = None) -> KnowledgeGraph:
     """Build a fresh in-memory graph from stored files and cached parses."""
     graph = knowledge_graph
@@ -91,12 +130,146 @@ def rebuild_graph_from_documents(user_id: Optional[str] = None) -> KnowledgeGrap
         if not parsed:
             try:
                 parsed = parse_document_file(filename, metadata["file_path"], original_name)
-            except Exception:
-                # A single bad document should not make the whole graph panel fail.
+            except (OSError, ValueError, RuntimeError) as exc:
+                # One bad upload should not blank the whole graph. Log it so
+                # the skipped file is visible during local debugging.
+                log.warning("Skipping %s while rebuilding graph: %s", original_name, exc)
                 continue
 
-        entities = entity_extractor.extract_from_parsed_document(parsed)
-        relations = entity_extractor.extract_relations(entities, parsed.get("content", ""))
-        graph.add_document(original_name, entities, relations, document_id=f"doc:{filename}")
+        try:
+            entities = entity_extractor.extract_from_parsed_document(parsed)
+            relations = entity_extractor.extract_relations(entities, parsed.get("content", ""))
+            graph.add_document(original_name, entities, relations, document_id=f"doc:{filename}")
+        except (KeyError, TypeError, ValueError) as exc:
+            # Entity extraction is still evolving, so keep the graph panel
+            # resilient while making malformed parser output visible.
+            log.warning("Skipping graph extraction for %s: %s", original_name, exc)
 
     return graph
+
+
+def _to_cytoscape_json(graph: dict) -> dict:
+    """Cytoscape.js accepts nodes and edges under elements.*.data."""
+    nodes = [
+        {
+            "data": {
+                "id": node["id"],
+                "label": node["label"],
+                "type": node["type"],
+                "confidence": node.get("confidence", 1.0),
+                "sources": node.get("sources", []),
+                **node.get("properties", {}),
+            }
+        }
+        for node in graph.get("nodes", [])
+    ]
+    edges = [
+        {
+            "data": {
+                "id": f"{edge['source']}->{edge['target']}:{edge['type']}",
+                "source": edge["source"],
+                "target": edge["target"],
+                "label": edge["type"],
+                "type": edge["type"],
+                "weight": edge.get("weight", 1),
+                "confidence": edge.get("confidence", 1.0),
+                "sources": edge.get("sources", []),
+            }
+        }
+        for edge in graph.get("edges", [])
+    ]
+    return {"format": "cytoscape", "elements": {"nodes": nodes, "edges": edges}}
+
+
+def _to_gexf(graph: dict) -> str:
+    """GEXF is useful for Gephi and other desktop graph tools."""
+    ns = "http://www.gexf.net/1.2draft"
+    ElementTree.register_namespace("", ns)
+    root = ElementTree.Element(f"{{{ns}}}gexf", {"version": "1.2"})
+    graph_el = ElementTree.SubElement(root, f"{{{ns}}}graph", {"mode": "static", "defaultedgetype": "directed"})
+    node_attrs = ElementTree.SubElement(graph_el, f"{{{ns}}}attributes", {"class": "node"})
+    edge_attrs = ElementTree.SubElement(graph_el, f"{{{ns}}}attributes", {"class": "edge"})
+    for attr_id, title in (("type", "type"), ("confidence", "confidence"), ("sources", "sources")):
+        ElementTree.SubElement(node_attrs, f"{{{ns}}}attribute", {"id": attr_id, "title": title, "type": "string"})
+        ElementTree.SubElement(edge_attrs, f"{{{ns}}}attribute", {"id": attr_id, "title": title, "type": "string"})
+    nodes_el = ElementTree.SubElement(graph_el, f"{{{ns}}}nodes")
+    edges_el = ElementTree.SubElement(graph_el, f"{{{ns}}}edges")
+
+    for node in graph.get("nodes", []):
+        node_el = ElementTree.SubElement(
+            nodes_el,
+            f"{{{ns}}}node",
+            {"id": node["id"], "label": node["label"]},
+        )
+        attvalues = ElementTree.SubElement(node_el, f"{{{ns}}}attvalues")
+        _gexf_att(attvalues, "type", node.get("type", "ENTITY"), ns)
+        _gexf_att(attvalues, "confidence", node.get("confidence", 1.0), ns)
+        _gexf_att(attvalues, "sources", ", ".join(node.get("sources", [])), ns)
+
+    for index, edge in enumerate(graph.get("edges", [])):
+        edge_el = ElementTree.SubElement(
+            edges_el,
+            f"{{{ns}}}edge",
+            {
+                "id": str(index),
+                "source": edge["source"],
+                "target": edge["target"],
+                "label": edge.get("type", "RELATED_TO"),
+                "weight": str(edge.get("weight", 1)),
+            },
+        )
+        attvalues = ElementTree.SubElement(edge_el, f"{{{ns}}}attvalues")
+        _gexf_att(attvalues, "type", edge.get("type", "RELATED_TO"), ns)
+        _gexf_att(attvalues, "confidence", edge.get("confidence", 1.0), ns)
+        _gexf_att(attvalues, "sources", ", ".join(edge.get("sources", [])), ns)
+
+    return ElementTree.tostring(root, encoding="unicode", xml_declaration=True)
+
+
+def _gexf_att(parent: ElementTree.Element, name: str, value: object, ns: str) -> None:
+    ElementTree.SubElement(parent, f"{{{ns}}}attvalue", {"for": name, "value": str(value)})
+
+
+def _to_csv(graph: dict) -> str:
+    """Single-table CSV keeps exports simple for spreadsheet tools."""
+    output = StringIO()
+    writer = csv.DictWriter(
+        output,
+        fieldnames=[
+            "kind",
+            "id",
+            "label",
+            "type",
+            "source",
+            "target",
+            "weight",
+            "confidence",
+            "sources",
+        ],
+    )
+    writer.writeheader()
+    for node in graph.get("nodes", []):
+        writer.writerow({
+            "kind": "node",
+            "id": node.get("id", ""),
+            "label": node.get("label", ""),
+            "type": node.get("type", ""),
+            "source": "",
+            "target": "",
+            "weight": "",
+            "confidence": node.get("confidence", ""),
+            "sources": "; ".join(node.get("sources", [])),
+        })
+    for edge in graph.get("edges", []):
+        writer.writerow({
+            "kind": "edge",
+            "id": f"{edge.get('source', '')}->{edge.get('target', '')}:{edge.get('type', '')}",
+            "label": edge.get("type", ""),
+            "type": edge.get("type", ""),
+            "source": edge.get("source", ""),
+            "target": edge.get("target", ""),
+            "weight": edge.get("weight", ""),
+            "confidence": edge.get("confidence", ""),
+            "sources": "; ".join(edge.get("sources", [])),
+        })
+    return output.getvalue()

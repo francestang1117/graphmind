@@ -48,7 +48,7 @@ except Exception:  # pragma: no cover - exercised only when passlib is absent
     log.warning("passlib[bcrypt] is not installed; using PBKDF2 fallback for local auth")
 
 
-# ── API schemas ───────────────────────────────────────────────────────────────
+# Request and response models
 
 class UserCreate(BaseModel):
     email: str
@@ -78,7 +78,7 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
-# ── Local stores ──────────────────────────────────────────────────────────────
+# Local auth state
 
 @dataclass
 class UserRecord:
@@ -99,7 +99,7 @@ _users: dict[str, UserRecord] = {}
 _refresh_tokens: dict[str, RefreshRecord] = {}
 
 
-# ── Password helpers ──────────────────────────────────────────────────────────
+# Password hashing
 
 def _hash_password(password: str) -> str:
     """Hash a password. bcrypt is preferred; PBKDF2 keeps local dev dependency-light."""
@@ -141,7 +141,7 @@ def _verify_password(password: str, hashed: str) -> bool:
         return False
 
 
-# ── JWT helpers ───────────────────────────────────────────────────────────────
+# Access tokens
 
 def _b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
@@ -198,7 +198,7 @@ def _create_refresh_token() -> str:
     return secrets.token_urlsafe(48)
 
 
-# ── Refresh token storage ─────────────────────────────────────────────────────
+# Refresh tokens
 
 async def _redis_client():
     """Return a Redis client when redis-py is installed and reachable."""
@@ -258,7 +258,7 @@ async def _revoke_refresh_token(token: str) -> None:
     _refresh_tokens.pop(token, None)
 
 
-# ── Shared helpers ────────────────────────────────────────────────────────────
+# Auth helpers
 
 def _normalize_email(email: str) -> str:
     clean = email.strip().lower()
@@ -324,7 +324,7 @@ def _ensure_dev_user() -> UserRecord:
     return _users[email]
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# Auth routes
 
 @router.post("/register", response_model=TokenPair, status_code=status.HTTP_201_CREATED)
 async def register(body: UserCreate) -> TokenPair:

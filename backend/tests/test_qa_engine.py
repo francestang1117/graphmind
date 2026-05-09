@@ -18,6 +18,50 @@ def test_local_answer_works_without_llm_key(monkeypatch):
     assert "FastAPI uses Python" in answer
 
 
+def test_answer_reports_local_fallback_reason(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+
+    engine = QAEngine()
+    monkeypatch.setattr(
+        engine,
+        "_get_vector_context",
+        lambda question, user_id: "[From: notes.md | Relevance: 77.0%]\nFastAPI uses Python.",
+    )
+    monkeypatch.setattr(
+        engine,
+        "_get_graph_context",
+        lambda question, user_id: "No graph context available.",
+    )
+
+    result = engine.answer("What uses FastAPI?")
+
+    assert result["mode"] == "local"
+    assert result["fallback_reason"] == "openai_not_configured"
+
+
+def test_answer_reports_missing_retrieval_context(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_MODEL", raising=False)
+
+    engine = QAEngine()
+    monkeypatch.setattr(
+        engine,
+        "_get_vector_context",
+        lambda question, user_id: "No relevant context found.",
+    )
+    monkeypatch.setattr(
+        engine,
+        "_get_graph_context",
+        lambda question, user_id: "No graph context available.",
+    )
+
+    result = engine.answer("What is in my documents?")
+
+    assert result["fallback_reason"] == "no_retrieval_context"
+    assert "couldn't find relevant context" in result["answer"]
+
+
 def test_extract_sources_deduplicates_documents():
     engine = QAEngine()
     sources = engine._extract_sources(

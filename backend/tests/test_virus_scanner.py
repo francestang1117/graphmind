@@ -2,10 +2,10 @@
 
 import pytest
 
+from app.core.errors import MalwareDetectedError, StorageOperationError, VirusScannerUnavailableError
 from app.services.document_service import DocumentService
-from app.services.file_storage import FileStorage
+from app.services.file_storage import FileStorage, FileStorageError
 from app.services.virus_scanner import ScanResult, VirusScanner
-from app.utils.file_validator import UploadValidationError
 
 
 class FakeScanner:
@@ -16,6 +16,11 @@ class FakeScanner:
     def scan(self, content: bytes) -> ScanResult:
         self.calls += 1
         return self.result
+
+
+class BrokenStorage(FileStorage):
+    def save_file(self, *args, **kwargs):
+        raise FileStorageError("disk full")
 
 
 def test_parse_clamav_clean_response():
@@ -58,7 +63,7 @@ def test_document_service_scans_before_storage_write(tmp_path):
         virus_scan_enabled=True,
     )
 
-    with pytest.raises(UploadValidationError, match="Malware detected"):
+    with pytest.raises(MalwareDetectedError, match="Malware detected"):
         service.save_upload("note.txt", b"plain text")
 
     assert scanner.calls == 1
@@ -78,3 +83,37 @@ def test_document_service_can_skip_scanner_for_local_dev(tmp_path):
 
     assert scanner.calls == 0
     assert metadata["original_filename"] == "note.txt"
+
+
+def test_document_service_blocks_when_scanner_is_fail_closed(tmp_path):
+    scanner = FakeScanner(
+        ScanResult(clean=False, source="clamav-unavailable", error="connection refused")
+    )
+    service = DocumentService(
+        storage=FileStorage(tmp_path),
+        scanner=scanner,
+        use_database=False,
+        virus_scan_enabled=True,
+    )
+
+    with pytest.raises(VirusScannerUnavailableError) as exc:
+        service.save_upload("note.txt", b"plain text")
+
+    assert exc.value.code == "virus_scanner_unavailable"
+    assert exc.value.details["scanner"] == "clamav-unavailable"
+    assert service.list_documents() == []
+
+
+def test_document_service_wraps_storage_write_errors(tmp_path):
+    service = DocumentService(
+        storage=BrokenStorage(tmp_path),
+        scanner=None,
+        use_database=False,
+        virus_scan_enabled=False,
+    )
+
+    with pytest.raises(StorageOperationError) as exc:
+        service.save_upload("note.txt", b"plain text")
+
+    assert exc.value.code == "storage_operation_failed"
+    assert exc.value.details["filename"] == "note.txt"

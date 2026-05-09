@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_SEARCH: str = "60/minute"
     RATE_LIMIT_GRAPH_READ: str = "120/minute"
     RATE_LIMIT_VIDEO: str = "5/hour"
+    RATE_LIMIT_SCRAPE: str = "10/hour"
     TRUSTED_PROXY_IPS: List[str] = ["127.0.0.1", "::1"]
 
     CORS_ORIGINS: List[str] = [

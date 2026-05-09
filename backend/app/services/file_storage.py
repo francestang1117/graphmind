@@ -2,11 +2,14 @@
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Union
 
 from app.core.config import settings
+
+log = logging.getLogger(__name__)
 
 
 class FileStorageError(IOError):
@@ -49,19 +52,27 @@ class FileStorage:
             if existing:
                 raise DuplicateFileError(existing)
 
+        # Write to a temp path first so an interrupted upload does not leave a
+        # half-written file at the final content-addressed name.
         tmp = dest.with_suffix(dest.suffix + ".tmp")
         try:
             tmp.write_bytes(data)
             tmp.rename(dest)
-        except Exception as exc:
+        except OSError as exc:
             tmp.unlink(missing_ok=True)
             raise FileStorageError(f"Failed to write {dest}: {exc}") from exc
 
         metadata = self._build_metadata(dest, original_filename, file_hash, mime_type, user_id)
-        self._metadata_path(dest).write_text(
-            json.dumps(metadata, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        try:
+            self._metadata_path(dest).write_text(
+                json.dumps(metadata, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            # A file without its sidecar is hard to list/delete cleanly, so roll
+            # back the bytes if metadata cannot be written.
+            dest.unlink(missing_ok=True)
+            raise FileStorageError(f"Failed to write metadata for {dest}: {exc}") from exc
         return metadata
 
     def list_files(self, user_id: Optional[str] = None) -> list[dict[str, Any]]:
@@ -70,7 +81,11 @@ class FileStorage:
         for metadata_path in self.root.glob("*/*.json"):
             try:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+            except OSError as exc:
+                log.warning("Could not read file metadata %s: %s", metadata_path, exc)
+                continue
+            except json.JSONDecodeError as exc:
+                log.warning("Invalid file metadata JSON %s: %s", metadata_path, exc)
                 continue
             if self._is_metadata_file(metadata_path, metadata) and self._belongs_to_user(metadata, user_id):
                 files.append(metadata)
@@ -101,6 +116,7 @@ class FileStorage:
                 target.unlink()
                 deleted = True
             except FileNotFoundError:
+                # Delete should be idempotent once the document was found.
                 pass
             except OSError as exc:
                 raise FileStorageError(f"Could not delete {target}: {exc}") from exc
@@ -114,7 +130,10 @@ class FileStorage:
         path = Path(info["file_path"])
         if not self._is_under_root(path):
             raise FileStorageError(f"Refusing to read path outside upload root: {path}")
-        return path.read_bytes()
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            raise FileStorageError(f"Could not read {path}: {exc}") from exc
 
     def _dest_path(self, file_hash: str, extension: str) -> Path:
         ext = _normalise_ext(extension)
@@ -180,7 +199,7 @@ class FileStorage:
         try:
             path.resolve().relative_to(self.root.resolve())
             return True
-        except ValueError:
+        except (OSError, ValueError):
             return False
 
 

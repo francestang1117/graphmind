@@ -45,6 +45,7 @@ async def chat(
         "sources": result["sources"],
         "conversation_id": conv_id,
         "mode": result.get("mode", "local"),
+        "fallback_reason": result.get("fallback_reason"),
     }
 
 
@@ -54,5 +55,11 @@ async def stream_response(message: str, conv_id: str, user_id: str):
     text = result["answer"]
     for start in range(0, len(text), 80):
         yield f"data: {json.dumps({'text': text[start:start + 80]})}\n\n"
-    yield f"data: {json.dumps({'sources': result['sources'], 'conversation_id': conv_id, 'mode': result.get('mode', 'local')})}\n\n"
+    final_event = {
+        "sources": result["sources"],
+        "conversation_id": conv_id,
+        "mode": result.get("mode", "local"),
+        "fallback_reason": result.get("fallback_reason"),
+    }
+    yield f"data: {json.dumps(final_event)}\n\n"
     yield "data: [DONE]\n\n"

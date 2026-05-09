@@ -41,6 +41,8 @@ class VirusScanner:
                 s.settimeout(self.timeout)
                 s.connect((self.host, self.port))
 
+                # clamd's INSTREAM protocol accepts length-prefixed chunks, so
+                # uploads can be scanned before they ever touch disk.
                 s.sendall(b"zINSTREAM\0")
 
                 chunk_size = 4096
@@ -59,22 +61,20 @@ class VirusScanner:
                 result.clean = False
             return result
 
+        except socket.timeout:
+            log.warning("ClamAV scan timed out after %ds", self.timeout)
+            return self._unavailable("clamav-timeout", "ClamAV scan timed out")
         except ConnectionRefusedError:
             log.warning("ClamAV daemon unreachable at %s:%d", self.host, self.port)
             return self._unavailable("clamav-unavailable", "ClamAV daemon is unreachable")
         except OSError as exc:
             log.warning("ClamAV scan could not connect to %s:%d: %s", self.host, self.port, exc)
             return self._unavailable("clamav-unavailable", str(exc))
-        except socket.timeout:
-            log.warning("ClamAV scan timed out after %ds", self.timeout)
-            return self._unavailable("clamav-timeout", "ClamAV scan timed out")
-        except Exception as exc:
-            log.error("ClamAV scan error: %s", exc)
-            return self._unavailable("clamav-error", str(exc))
 
     def _unavailable(self, source: str, error: str) -> ScanResult:
         """Handle the case where clamd is down or unreachable."""
-        # Local dev can be loose; Docker/prod should not be.
+        # Local dev can fail open so the app is usable without Docker services.
+        # Docker/prod should normally fail closed through settings.
         return ScanResult(clean=self.fail_open, source=source, error=error)
 
     @staticmethod
@@ -101,5 +101,5 @@ try:
         timeout=getattr(settings, "CLAMAV_TIMEOUT_SECONDS", 30),
         fail_open=getattr(settings, "VIRUS_SCAN_FAIL_OPEN", True),
     )
-except Exception:
+except (ImportError, AttributeError):
     virus_scanner = VirusScanner()

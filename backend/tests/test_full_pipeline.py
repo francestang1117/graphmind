@@ -8,6 +8,7 @@ relation hints become edges.
 from app.services.entity_extractor import EntityExtractor
 from app.services.graph_builder_enhanced import KnowledgeGraph
 from app.services.markdown_parser import MarkdownParser
+from app.api.endpoints.graph import _to_csv, _to_cytoscape_json, _to_gexf
 
 
 SAMPLE_MARKDOWN = """# Machine Learning with Python
@@ -93,3 +94,27 @@ def test_document_edges_use_semantic_relation_names():
     assert "USES" in edge_types
     assert "CONTAINS" in edge_types
     assert "MENTIONS" not in edge_types
+
+
+def test_graph_exports_for_external_tools():
+    extractor = EntityExtractor()
+    entities = extractor.extract_from_text("React uses JavaScript.")
+    relations = extractor.extract_relations(entities, "React uses JavaScript.")
+
+    graph = KnowledgeGraph()
+    graph.add_document("frontend.md", entities, relations)
+    detailed = graph.export_detailed()
+
+    cytoscape = _to_cytoscape_json(detailed)
+    gexf = _to_gexf(detailed)
+    csv_text = _to_csv(detailed)
+
+    assert cytoscape["format"] == "cytoscape"
+    assert cytoscape["elements"]["nodes"]
+    assert cytoscape["elements"]["edges"]
+    assert "<gexf" in gexf
+    assert "<node" in gexf
+    assert "<edge" in gexf
+    assert "kind,id,label,type,source,target,weight,confidence,sources" in csv_text
+    assert "node," in csv_text
+    assert "edge," in csv_text

@@ -10,6 +10,7 @@ from app import init_app
 from app.api import router as api_router
 from app.api.endpoints.websocket import router as websocket_router
 from app.core.config import settings
+from app.core.errors import register_error_handlers
 from app.core.rate_limit import configure_rate_limiting
 
 import uvicorn
@@ -45,6 +46,7 @@ app.add_middleware(
 )
 
 configure_rate_limiting(app)
+register_error_handlers(app)
 app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 app.include_router(websocket_router)
 

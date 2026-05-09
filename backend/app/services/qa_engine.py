@@ -4,9 +4,15 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+import logging
 import os
 import re
 from typing import Any, Dict, List, Optional
+
+log = logging.getLogger(__name__)
+
+NO_VECTOR_CONTEXT = "No relevant context found."
+NO_GRAPH_CONTEXT = "No graph context available."
 
 
 @dataclass
@@ -15,6 +21,7 @@ class QAResult:
     sources: list[dict[str, str]]
     conversation_id: Optional[str] = None
     mode: str = "local"
+    fallback_reason: Optional[str] = None
 
 
 class QAEngine:
@@ -34,9 +41,16 @@ class QAEngine:
         graph_context = self._get_graph_context(question, user_id)
         history = self._get_history(conversation_id)
 
-        llm_answer = self._answer_with_optional_llm(question, context, graph_context, history)
+        llm_answer, fallback_reason = self._answer_with_optional_llm(
+            question,
+            context,
+            graph_context,
+            history,
+        )
         mode = "llm" if llm_answer else "local"
         answer_text = llm_answer or self._build_local_answer(question, context, graph_context, user_id)
+        if not llm_answer and context == NO_VECTOR_CONTEXT:
+            fallback_reason = "no_retrieval_context"
 
         if conversation_id:
             self._save_to_history(conversation_id, question, answer_text)
@@ -46,12 +60,14 @@ class QAEngine:
             sources=self._extract_sources(context),
             conversation_id=conversation_id,
             mode=mode,
+            fallback_reason=fallback_reason if mode == "local" else None,
         )
         return {
             "answer": result.answer,
             "sources": result.sources,
             "conversation_id": result.conversation_id,
             "mode": result.mode,
+            "fallback_reason": result.fallback_reason,
         }
 
     def _get_vector_context(self, question: str, user_id: Optional[str]) -> str:
@@ -61,8 +77,11 @@ class QAEngine:
 
             store = rebuild_vector_index(user_id)
             return store.get_context_for_qa(question, n_chunks=5)
-        except Exception:
-            return "No relevant context found."
+        except (ImportError, RuntimeError, ValueError, OSError, AttributeError) as exc:
+            # Chat should still answer politely if search is temporarily broken.
+            # The warning is the part that lets us fix the real cause later.
+            log.warning("QA vector context unavailable: %s", exc)
+            return NO_VECTOR_CONTEXT
 
     def _get_graph_context(self, question: str, user_id: Optional[str]) -> str:
         """Rebuild graph context from current uploads for a graph-augmented hint."""
@@ -71,20 +90,26 @@ class QAEngine:
 
             graph = rebuild_graph_from_documents(user_id)
             nodes = graph.search_nodes(question, limit=5)
-        except Exception:
+        except (ImportError, RuntimeError, ValueError, OSError, AttributeError) as exc:
+            log.warning("QA graph context unavailable: %s", exc)
             nodes = []
 
         if not nodes:
-            return "No graph context available."
+            return NO_GRAPH_CONTEXT
 
         parts = []
         for node in nodes:
             try:
                 neighbors = graph.get_neighbors(node["id"], max_depth=1)
-            except Exception:
+            except (KeyError, TypeError, ValueError) as exc:
+                log.debug("Skipping graph neighbors for QA node %s: %s", node, exc)
                 neighbors = []
-            related = [item["node"]["label"] for item in neighbors[:3] if item.get("node")]
-            line = f"- {node['label']} ({node['type']})"
+            related = [
+                item["node"]["label"]
+                for item in neighbors[:3]
+                if isinstance(item, dict) and item.get("node")
+            ]
+            line = f"- {node.get('label', 'Unknown')} ({node.get('type', 'ENTITY')})"
             if related:
                 line += f" -> related to: {', '.join(related)}"
             parts.append(line)
@@ -96,25 +121,40 @@ class QAEngine:
         context: str,
         graph_context: str,
         history: list[dict[str, str]],
-    ) -> Optional[str]:
-        """Use OpenAI only when a key/model is configured."""
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Use OpenAI only when a key/model is configured.
+
+        The project currently works without an LLM key. Returning a reason here
+        keeps that fallback honest instead of making the chat feel mysteriously
+        less capable.
+        """
         api_key = os.getenv("OPENAI_API_KEY")
         model = os.getenv("OPENAI_MODEL")
         if not api_key or not model:
-            return None
+            return None, "openai_not_configured"
 
         try:
             from openai import OpenAI
         except ImportError:
-            return None
+            log.warning("OPENAI_API_KEY is set, but the openai package is not installed.")
+            return None, "openai_package_missing"
 
-        client = OpenAI(api_key=api_key)
-        response = client.responses.create(
-            model=model,
-            instructions=self._build_system_prompt(context, graph_context),
-            input=[*history, {"role": "user", "content": question}],
-        )
-        return getattr(response, "output_text", None)
+        try:
+            client = OpenAI(api_key=api_key)
+            response = client.responses.create(
+                model=model,
+                instructions=self._build_system_prompt(context, graph_context),
+                input=[*history, {"role": "user", "content": question}],
+            )
+        except Exception as exc:
+            log.warning("OpenAI QA call failed; using local answer instead: %s", exc)
+            return None, "openai_request_failed"
+
+        output = getattr(response, "output_text", None)
+        if not output:
+            log.warning("OpenAI QA call returned no output_text; using local answer.")
+            return None, "openai_empty_response"
+        return output, None
 
     def _build_system_prompt(self, context: str, graph_context: str) -> str:
         return f"""You answer questions using the user's uploaded documents.
@@ -151,7 +191,7 @@ Respond in the same language as the user's question."""
             if framework_answer:
                 return framework_answer
 
-        if "No relevant context found." in context:
+        if NO_VECTOR_CONTEXT in context:
             return (
                 "I couldn't find relevant context in the uploaded documents yet. "
                 "Try uploading a document or asking with terms that appear in the files."
@@ -170,7 +210,7 @@ Respond in the same language as the user's question."""
             for source, body in snippets[:3]:
                 lines.append(f"- {source}: {self._safe_excerpt(body)}")
 
-        if graph_context != "No graph context available.":
+        if graph_context != NO_GRAPH_CONTEXT:
             lines.append("")
             lines.append("Related graph context:")
             lines.append(graph_context)
@@ -211,7 +251,8 @@ Respond in the same language as the user's question."""
         try:
             from app.api.endpoints.documents_with_markdown import get_cached_parse, parse_document_file
             from app.services.document_service import document_service
-        except Exception:
+        except ImportError as exc:
+            log.warning("Named-document QA unavailable: %s", exc)
             return None
 
         query_tokens = self._content_tokens(question)
@@ -230,7 +271,8 @@ Respond in the same language as the user's question."""
             if not parsed:
                 try:
                     parsed = parse_document_file(filename, file_path, original)
-                except Exception:
+                except (OSError, ValueError, RuntimeError) as exc:
+                    log.warning("Could not parse %s while answering named-document question: %s", original, exc)
                     continue
             if best is None or score > best[0]:
                 best = (score, original, parsed)
@@ -313,7 +355,8 @@ Respond in the same language as the user's question."""
         try:
             from app.api.endpoints.documents_with_markdown import get_cached_parse, parse_document_file
             from app.services.document_service import document_service
-        except Exception:
+        except ImportError as exc:
+            log.warning("Collection summary unavailable: %s", exc)
             return "I couldn't access the uploaded document list yet."
 
         summaries = []
@@ -327,7 +370,8 @@ Respond in the same language as the user's question."""
             if not parsed:
                 try:
                     parsed = parse_document_file(filename, file_path, original)
-                except Exception:
+                except (OSError, ValueError, RuntimeError) as exc:
+                    log.warning("Skipping %s while building collection summary: %s", original, exc)
                     continue
             summary = self._summarize_parsed_document(original, parsed)
             if summary:
@@ -525,11 +569,11 @@ Respond in the same language as the user's question."""
         for line in context.splitlines():
             if not line.startswith("[From:"):
                 continue
-            try:
-                doc = line.split("From:", 1)[1].split("|", 1)[0].strip()
-                score = line.split("Relevance:", 1)[1].split("]", 1)[0].strip()
-            except Exception:
+            if "From:" not in line or "Relevance:" not in line:
+                log.debug("Skipping malformed source line: %s", line)
                 continue
+            doc = line.split("From:", 1)[1].split("|", 1)[0].strip()
+            score = line.split("Relevance:", 1)[1].split("]", 1)[0].strip()
             sources.append({"document": doc, "relevance": score})
 
         unique = []

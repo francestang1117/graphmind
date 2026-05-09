@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks, UploadFile
 import pytest
 
 from app.api.endpoints import documents
+from app.core.errors import DuplicateUploadError, UploadRejectedError
 from app.services.document_service import DocumentService
 from app.services.file_storage import FileStorage
 
@@ -129,7 +130,7 @@ def test_parsed_document_persists_chunks_and_entities(temp_document_service, mon
 
 
 def test_invalid_upload_raises_http_error(temp_document_service):
-    with pytest.raises(documents.HTTPException) as exc:
+    with pytest.raises(UploadRejectedError) as exc:
         run(
             documents.upload_document(
                 BackgroundTasks(),
@@ -138,3 +139,25 @@ def test_invalid_upload_raises_http_error(temp_document_service):
         )
 
     assert exc.value.status_code == 400
+    assert exc.value.code == "upload_validation_failed"
+
+
+def test_duplicate_upload_has_stable_error_code(temp_document_service):
+    run(
+        documents.upload_document(
+            BackgroundTasks(),
+            make_upload("notes.md", b"# Notes"),
+        )
+    )
+
+    with pytest.raises(DuplicateUploadError) as exc:
+        run(
+            documents.upload_document(
+                BackgroundTasks(),
+                make_upload("copy.md", b"# Notes"),
+            )
+        )
+
+    assert exc.value.status_code == 409
+    assert exc.value.code == "duplicate_file"
+    assert exc.value.details["original_filename"] == "notes.md"
