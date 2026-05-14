@@ -12,6 +12,7 @@ from typing import Any, Iterable, Optional
 
 VECTOR_SIZE = 384
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+#.-]*")
+SOURCE_LINE_RE = re.compile(r"^\s*Source:\s*https?://\S+\s*$", re.IGNORECASE)
 
 
 @dataclass
@@ -38,7 +39,7 @@ class VectorStore:
         """Index parsed text chunks for one document."""
         added = 0
         for index, chunk in enumerate(chunks):
-            text = str(chunk.get("text", "")).strip()
+            text = searchable_chunk_text(str(chunk.get("text", "")))
             if not text:
                 continue
             chunk_id = self._chunk_id(document_name, index, text)
@@ -76,7 +77,7 @@ class VectorStore:
             score = cosine_similarity(query_vector, chunk.vector)
             if score <= 0:
                 continue
-            results.append(self._result(chunk, score))
+            results.append(self._result(chunk, score, query))
 
         results.sort(key=lambda item: item["score"], reverse=True)
         return results[:n_results]
@@ -121,8 +122,8 @@ class VectorStore:
             vector[slot] += sign * (1.0 + math.log(count))
         return normalize(vector)
 
-    def _result(self, chunk: IndexedChunk, score: float) -> dict[str, Any]:
-        excerpt = compact_excerpt(chunk.text)
+    def _result(self, chunk: IndexedChunk, score: float, query: str = "") -> dict[str, Any]:
+        excerpt = compact_excerpt(chunk.text, query=query)
         title = self._result_title(chunk)
         return {
             "id": chunk.id,
@@ -179,11 +180,84 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return max(0.0, sum(left * right for left, right in zip(a, b)))
 
 
-def compact_excerpt(text: str, max_len: int = 220) -> str:
-    clean = " ".join(text.split())
+def compact_excerpt(text: str, max_len: int = 220, query: str = "") -> str:
+    clean = markdown_for_excerpt(text)
     if len(clean) <= max_len:
         return clean
-    return f"{clean[: max_len - 3].rstrip()}..."
+
+    # Open near the matched term when we can; first-220-chars snippets often
+    # show page chrome instead of the part the user searched for.
+    center = _best_excerpt_center(clean, query)
+    if center is None:
+        return _finish_excerpt(clean[: max_len - 3])
+
+    start = max(0, center - max_len // 3)
+    end = min(len(clean), start + max_len - 3)
+    start = _snap_start(clean, start)
+    end = _snap_end(clean, end)
+
+    excerpt = clean[start:end].strip()
+    if start > 0:
+        excerpt = f"...{excerpt}"
+    if end < len(clean):
+        excerpt = f"{excerpt}..."
+    return excerpt
+
+
+def markdown_for_excerpt(text: str) -> str:
+    """Make Markdown readable before clipping it for search results."""
+    # Raw Markdown links are noisy in a short card, but dropping the URL loses
+    # useful source context for scraped pages.
+    text = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r"\1 (\2)", text)
+    return " ".join(text.split())
+
+
+def searchable_chunk_text(text: str) -> str:
+    """Remove source-only metadata lines before a chunk enters search."""
+    lines = []
+    for line in text.splitlines():
+        # Scraped pages keep the URL in the saved Markdown. It is useful there,
+        # but as its own search result it just looks broken.
+        if SOURCE_LINE_RE.match(line):
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
+def _best_excerpt_center(text: str, query: str) -> Optional[int]:
+    terms = sorted(set(tokenize(query)), key=len, reverse=True)
+    lowered = text.lower()
+    positions = [lowered.find(term.lower()) for term in terms]
+    positions = [pos for pos in positions if pos >= 0]
+    return min(positions) if positions else None
+
+
+def _snap_start(text: str, start: int) -> int:
+    if start <= 0:
+        return 0
+    # A nearby sentence edge is nicer than starting in the middle of a word.
+    sentence = max(text.rfind(". ", 0, start), text.rfind("? ", 0, start), text.rfind("! ", 0, start))
+    if sentence >= 0 and start - sentence < 80:
+        return sentence + 2
+    space = text.find(" ", start)
+    return space + 1 if space >= 0 else start
+
+
+def _snap_end(text: str, end: int) -> int:
+    if end >= len(text):
+        return len(text)
+    # Same on the right edge: take the sentence if it is close, otherwise trim
+    # back to a word boundary.
+    sentence_candidates = [pos for pos in (text.find(". ", end), text.find("? ", end), text.find("! ", end)) if pos >= 0]
+    sentence = min(sentence_candidates) if sentence_candidates else -1
+    if sentence >= 0 and sentence - end < 80:
+        return sentence + 1
+    space = text.rfind(" ", 0, end)
+    return space if space > 0 else end
+
+
+def _finish_excerpt(text: str) -> str:
+    return f"{text.rstrip()}..."
 
 
 def readable_document_title(filename: str) -> str:

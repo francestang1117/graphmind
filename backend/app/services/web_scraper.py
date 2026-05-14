@@ -8,7 +8,7 @@ import logging
 import re
 import socket
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -39,6 +39,75 @@ class WebScraper:
     """Small first pass at web ingestion."""
 
     SKIP_TAGS = {"script", "style", "nav", "footer", "header", "aside", "form", "noscript"}
+    # Page chrome. Keep this list conservative so we do not strip article
+    # content just because a site picked an unfortunate class name.
+    NOISE_SELECTORS = [
+        "[role='navigation']",
+        "[role='search']",
+        "[aria-label*='breadcrumb' i]",
+        "[class*='sidebar' i]",
+        "[id*='sidebar' i]",
+        "[class*='breadcrumb' i]",
+        "[id*='breadcrumb' i]",
+        "[class*='toc' i]",
+        "[id*='toc' i]",
+        "[class*='table-of-contents' i]",
+        "[id*='table-of-contents' i]",
+        "[class*='search' i]",
+        "[id*='search' i]",
+        "[class*='theme' i]",
+        "[id*='theme' i]",
+        "[class*='menu' i]",
+        "[id*='menu' i]",
+        "[class*='pagination' i]",
+        "[id*='pagination' i]",
+        "[class*='related' i]",
+        "[id*='related' i]",
+        "[class*='advert' i]",
+        "[id*='advert' i]",
+        "[class*='cookie' i]",
+        "[id*='cookie' i]",
+        "[class*='banner' i]",
+        "[id*='banner' i]",
+        ".sphinxsidebar",
+        ".headerlink",
+        ".skip-link",
+    ]
+    # Ordered from most explicit to broadest. Docs pages and rendered Markdown
+    # tend to advertise their main body if we ask in the right places.
+    MAIN_SELECTORS = [
+        "main[role='main']",
+        "article",
+        "main",
+        "[itemprop='articleBody']",
+        ".markdown-body",
+        ".post-content",
+        ".entry-content",
+        ".article-content",
+        ".document",
+        ".body",
+        ".content",
+        "#content",
+        "#main",
+        "#article",
+    ]
+    UI_TEXT_LINES = {
+        "next",
+        "previous",
+        "search",
+        "navigation",
+        "theme",
+        "auto",
+        "light",
+        "dark",
+        "menu",
+        "contents",
+        "index",
+        "back to top",
+        "edit this page",
+        "skip to content",
+        "toggle navigation",
+    }
     ALLOWED_SCHEMES = {"http", "https"}
     MAX_RESPONSE_BYTES = 2 * 1024 * 1024
     TIMEOUT_SECONDS = 12
@@ -65,7 +134,7 @@ class WebScraper:
         await self._assert_public_url(final_url)
 
         title = self._extract_title(html) or urlparse(final_url).netloc
-        text = self._extract_text(html)
+        text = self._extract_text(html, final_url)
         if len(text.split()) < 20:
             raise WebScrapeError(
                 "This page did not contain enough readable text.",
@@ -114,6 +183,8 @@ class WebScraper:
 
     def _assert_supported_response(self, response: httpx.Response) -> None:
         content_type = response.headers.get("content-type", "").split(";")[0].lower()
+        # The scraper stores text for the parser. PDFs/images/downloads should
+        # still go through the upload path where file validation already exists.
         if content_type and content_type not in {"text/html", "application/xhtml+xml", "text/plain"}:
             raise WebScrapeError(
                 "Only readable web pages can be ingested.",
@@ -132,6 +203,8 @@ class WebScraper:
         if parsed.scheme.lower() not in self.ALLOWED_SCHEMES or not parsed.hostname:
             raise WebScrapeError("Only http and https URLs are supported.", details={"url": url})
 
+        # Validate the resolved IP, not just the hostname string. Names like
+        # "safe-looking.example" can still resolve to a private address.
         addresses = await asyncio.to_thread(_resolve_host, parsed.hostname)
         if not addresses:
             raise WebScrapeError("This URL could not be resolved.", details={"host": parsed.hostname})
@@ -143,21 +216,37 @@ class WebScraper:
                 details={"host": parsed.hostname},
             )
 
-    def _extract_text(self, html: str) -> str:
+    def _extract_text(self, html: str, base_url: str = "") -> str:
+        # Reader-mode first, local cleanup if it gives up.
+        html = _readability_summary(html) or html
         soup = BeautifulSoup(html, "html.parser")
         for tag in soup(list(self.SKIP_TAGS)):
             tag.decompose()
+        # Drop obvious site furniture before choosing the main block, otherwise
+        # a large sidebar can win the "largest readable block" fallback below.
+        for tag in soup.select(", ".join(self.NOISE_SELECTORS)):
+            tag.decompose()
 
-        # Prefer the author-written body when the page gives us one. If not,
-        # fall back gently instead of failing useful but plain pages.
-        main = (
-            soup.find("article")
-            or soup.find("main")
-            or soup.find(id=re.compile(r"content|main|article", re.I))
-            or soup.find("body")
-            or soup
-        )
-        return " ".join(main.get_text(separator=" ").split())
+        main = self._find_main_content(soup)
+        # Keep enough structure for the Markdown parser to do useful work.
+        return self._extract_markdown(main, base_url)
+
+    def _find_main_content(self, soup: BeautifulSoup):
+        # This is still rule-based, but these selectors cover the pages this
+        # project is likely to ingest first: docs sites, blogs, and GitHub-like
+        # rendered Markdown.
+        for selector in self.MAIN_SELECTORS:
+            match = soup.select_one(selector)
+            if match and _word_count(match.get_text(" ")) >= 20:
+                return match
+
+        # If the site uses custom classes, pick the largest readable block
+        # instead of the whole body. It is a small approximation of readability.
+        candidates = soup.find_all(["article", "main", "section", "div"])
+        best = max(candidates, key=lambda tag: _word_count(tag.get_text(" ")), default=None)
+        if best and _word_count(best.get_text(" ")) >= 20:
+            return best
+        return soup.find("body") or soup
 
     def _extract_title(self, html: str) -> str:
         soup = BeautifulSoup(html, "html.parser")
@@ -165,6 +254,50 @@ class WebScraper:
             return " ".join(soup.title.string.split())
         h1 = soup.find("h1")
         return " ".join(h1.get_text(" ").split()) if h1 else ""
+
+    def _clean_text(self, text: str) -> str:
+        lines = []
+        for raw_line in text.splitlines():
+            line = _clean_inline_text(raw_line)
+            if not line:
+                continue
+            # Keep this narrow; these words show up in real prose too.
+            if _looks_like_ui_line(line, self.UI_TEXT_LINES):
+                continue
+            lines.append(line)
+        return " ".join(lines)
+
+    def _extract_markdown(self, main, base_url: str = "") -> str:
+        blocks = []
+        # This is not trying to be a full HTML-to-Markdown converter yet. It
+        # just keeps the parts that matter most for chunking: headings, prose,
+        # and simple lists.
+        for tag in main.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "pre"]):
+            if tag.name == "pre":
+                # Keep code as code, not another paragraph.
+                code = _clean_code_text(tag.get_text("\n"))
+                if code:
+                    language = _code_language(tag)
+                    blocks.append(f"```{language}\n{code}\n```")
+                continue
+
+            text = _markdown_inline_text(tag, base_url)
+            if not text or _looks_like_ui_line(text, self.UI_TEXT_LINES):
+                continue
+
+            if tag.name.startswith("h"):
+                # Keep headings as Markdown so the parser can recover sections
+                # instead of seeing the page as one long paragraph.
+                level = min(int(tag.name[1]), 6)
+                blocks.append(f"{'#' * level} {text}")
+            elif tag.name == "li":
+                blocks.append(f"- {text}")
+            else:
+                blocks.append(text)
+
+        if blocks:
+            return "\n\n".join(blocks)
+        return self._clean_text(main.get_text(separator="\n"))
 
 
 def _resolve_host(hostname: str) -> set[str]:
@@ -191,12 +324,96 @@ def _is_blocked_address(address: str) -> bool:
 
 def _filename_for_url(url: str, title: str) -> str:
     host = urlparse(url).netloc.replace(":", "_") or "web"
+    # Keep the source recognizable in the UI without trusting the page title as
+    # a filesystem name.
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", title.lower()).strip("-")[:48] or "page"
     return f"web-{host}-{slug}.md"
 
 
 def _document_text(page: ScrapedPage) -> str:
     return f"# {page.title}\n\nSource: {page.final_url}\n\n{page.text}\n"
+
+
+def _word_count(text: str) -> int:
+    return len(text.split())
+
+
+def _clean_inline_text(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _readability_summary(html: str) -> str:
+    try:
+        from readability import Document
+    except ImportError:
+        return ""
+
+    try:
+        # Nice when it works; optional when it does not.
+        return Document(html).summary(html_partial=True)
+    except Exception as exc:
+        log.debug("readability extraction failed: %s", exc)
+        return ""
+
+
+def _markdown_inline_text(tag, base_url: str = "") -> str:
+    clone = BeautifulSoup(str(tag), "html.parser")
+    for link in clone.find_all("a"):
+        label = _clean_inline_text(link.get_text(" "))
+        href = _safe_link(link.get("href", ""), base_url)
+        # Keep useful source links, but do not let odd schemes leak into the
+        # generated Markdown.
+        link.replace_with(f"[{label}]({href})" if label and href else label)
+    return _clean_inline_text(clone.get_text(" "))
+
+
+def _safe_link(href: str, base_url: str = "") -> str:
+    if not href:
+        return ""
+    resolved = urljoin(base_url, href)
+    scheme = urlparse(resolved).scheme.lower()
+    # Body links are useful metadata; javascript/mailto/etc. are not.
+    return resolved if scheme in {"http", "https"} else ""
+
+
+def _clean_code_text(text: str) -> str:
+    lines = [line.rstrip() for line in text.splitlines()]
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return "\n".join(lines)
+
+
+def _code_language(tag) -> str:
+    classes = list(tag.get("class", []))
+    code = tag.find("code")
+    if code:
+        classes.extend(code.get("class", []))
+
+    # Common docs-generator class names; leave blank if none match.
+    for cls in classes:
+        match = re.match(r"(?:language|lang|highlight)-(.+)", cls)
+        if match:
+            return match.group(1).lower()
+    return ""
+
+
+def _looks_like_ui_line(line: str, blocked_lines: set[str]) -> bool:
+    normalized = re.sub(r"\s+", " ", line).strip().lower()
+    if normalized in blocked_lines:
+        return True
+    # Common tiny control clusters from docs themes.
+    if len(normalized.split()) <= 4 and normalized in {
+        "next previous",
+        "previous next",
+        "light dark",
+        "auto light dark",
+        "show source",
+        "view source",
+    }:
+        return True
+    return False
 
 
 web_scraper = WebScraper()

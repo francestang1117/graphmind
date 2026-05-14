@@ -27,6 +27,8 @@ python-docx==1.2.0
 pdfplumber[non-visual]==0.11.5
 pandas==2.2.3
 beautifulsoup4==4.12.3
+readability-lxml==0.8.1
+lxml_html_clean==0.4.3
 PyYAML==6.0.2
 
 # Tests

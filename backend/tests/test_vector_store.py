@@ -1,6 +1,6 @@
 """Vector search tests for Module 5."""
 
-from app.services.vector_store import VectorStore
+from app.services.vector_store import VectorStore, compact_excerpt, markdown_for_excerpt, searchable_chunk_text
 
 
 def test_hybrid_search_finds_relevant_chunk():
@@ -42,3 +42,47 @@ def test_context_for_qa_includes_sources():
 
     assert "ml.md" in context
     assert "TensorFlow" in context
+
+
+def test_excerpt_starts_near_query_without_breaking_markdown_links():
+    text = (
+        "Intro text before the useful part. "
+        "The same site also contains distributions of and pointers to many free "
+        "third party [Python modules](https://www.python.org/) and tools."
+    )
+
+    excerpt = compact_excerpt(text, max_len=110, query="python modules")
+
+    assert "Python modules (https://www.python.org/)" in excerpt
+    assert "](https://" not in excerpt
+    assert excerpt.endswith("...") or excerpt.startswith("...")
+
+
+def test_markdown_links_are_readable_in_search_excerpts():
+    text = "See [The Python Standard Library](https://docs.python.org/3/library/) for details."
+
+    assert markdown_for_excerpt(text) == (
+        "See The Python Standard Library (https://docs.python.org/3/library/) for details."
+    )
+
+
+def test_source_only_lines_do_not_become_search_results():
+    store = VectorStore()
+    added = store.add_chunks(
+        [
+            {"text": "Source: https://docs.python.org/3/tutorial/index.html", "type": "section"},
+            {
+                "text": (
+                    "Source: https://docs.python.org/3/tutorial/index.html\n\n"
+                    "Python modules and packages are covered in this tutorial."
+                ),
+                "type": "section",
+            },
+        ],
+        "python-tutorial.md",
+    )
+
+    assert added == 1
+    indexed_text = next(iter(store.chunks.values())).text
+    assert indexed_text == "Python modules and packages are covered in this tutorial."
+    assert searchable_chunk_text("Source: https://example.com") == ""

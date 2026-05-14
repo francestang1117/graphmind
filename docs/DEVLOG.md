@@ -363,6 +363,22 @@ I changed the first search module into a lightweight local vector index:
 
 This is not a production vector database yet. It is a stable MVP that proves the parser output can feed search, and it leaves room to swap in ChromaDB later behind the same service interface.
 
+## 2026-05 — Search Excerpt Cleanup
+
+After adding web scraping, I noticed one search result that only said:
+`Source: https://docs.python.org/3/tutorial/index.html`. The URL is useful in
+the saved Markdown, but it is not useful as a standalone search result. It made
+the search page look like it had found content when it had really found page
+metadata.
+
+I fixed this at the vector-store boundary instead of deleting the line from the
+saved file. Before a parsed chunk is indexed, source-only lines are removed. If
+the chunk becomes empty, it is skipped. This keeps the saved Markdown honest
+while preventing metadata-only cards from showing up in search.
+
+I also tuned excerpt generation so result cards open closer to the matched query
+terms and do not clip raw Markdown links in the middle.
+
 ## 2026-05 — Retrieval-Based Chat MVP
 
 I added the first version of Module 6 and Module 7: a question-answering engine
