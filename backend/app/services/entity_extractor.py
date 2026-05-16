@@ -10,7 +10,11 @@ from typing import Any, Callable, Iterable, Optional, Union
 
 log = logging.getLogger(__name__)
 DEFAULT_SPACY_MODEL = "en_core_web_sm"
+DEFAULT_EXTRA_SPACY_MODELS = ("zh_core_web_sm",)
 _SPACY_MODEL_CACHE: dict[str, Any] = {}
+# `None` means "turn spaCy off" in tests and light installs. This sentinel lets
+# the normal constructor still read the model names from settings.
+_USE_CONFIGURED_MODEL = object()
 
 
 @dataclass
@@ -258,6 +262,22 @@ TECH_TERMS: dict[str, str] = {
     "reranking": "CONCEPT",
     "document ingestion": "CONCEPT",
     "text extraction": "CONCEPT",
+    "知识图谱": "CONCEPT",
+    "知识库": "CONCEPT",
+    "实体识别": "CONCEPT",
+    "命名实体识别": "CONCEPT",
+    "语义搜索": "CONCEPT",
+    "混合搜索": "CONCEPT",
+    "向量数据库": "CONCEPT",
+    "向量嵌入": "CONCEPT",
+    "文档解析": "CONCEPT",
+    "文档上传": "CONCEPT",
+    "检索增强生成": "CONCEPT",
+    "大语言模型": "CONCEPT",
+    "机器学习": "CONCEPT",
+    "深度学习": "CONCEPT",
+    "自然语言处理": "CONCEPT",
+    "人工智能": "CONCEPT",
     "api": "CONCEPT",
     "graphql": "CONCEPT",
     "rest": "CONCEPT",
@@ -301,6 +321,22 @@ CANONICAL_TERMS = {
     "redis": "Redis",
     "docker": "Docker",
     "celery": "Celery",
+    "知识图谱": "Knowledge Graph",
+    "知识库": "Knowledge Base",
+    "实体识别": "Entity Extraction",
+    "命名实体识别": "Named Entity Recognition",
+    "语义搜索": "Semantic Search",
+    "混合搜索": "Hybrid Search",
+    "向量数据库": "Vector Database",
+    "向量嵌入": "Vector Embedding",
+    "文档解析": "Document Parsing",
+    "文档上传": "Document Upload",
+    "检索增强生成": "Retrieval Augmented Generation",
+    "大语言模型": "Large Language Model",
+    "机器学习": "Machine Learning",
+    "深度学习": "Deep Learning",
+    "自然语言处理": "Natural Language Processing",
+    "人工智能": "Artificial Intelligence",
 }
 
 
@@ -355,12 +391,28 @@ DOMAIN_TERMS: tuple[DomainTerm, ...] = (
     DomainTerm("Reranking", "CONCEPT", ("reranking", "rerank", "reranker")),
     DomainTerm("Document Ingestion", "CONCEPT", ("document ingestion",)),
     DomainTerm("Text Extraction", "CONCEPT", ("text extraction",)),
+    DomainTerm("Document Parsing", "CONCEPT", ("document parsing", "文档解析")),
+    DomainTerm("Document Upload", "CONCEPT", ("document upload", "文档上传")),
     DomainTerm("Machine Learning", "CONCEPT", ("machine learning", "ml")),
     DomainTerm("Deep Learning", "CONCEPT", ("deep learning",)),
     DomainTerm("Neural Network", "CONCEPT", ("neural network", "neural networks")),
     DomainTerm("Artificial Intelligence", "CONCEPT", ("artificial intelligence", "ai")),
     DomainTerm("Natural Language Processing", "CONCEPT", ("natural language processing", "nlp")),
     DomainTerm("Computer Vision", "CONCEPT", ("computer vision",)),
+    DomainTerm("Knowledge Graph", "CONCEPT", ("知识图谱",)),
+    DomainTerm("Knowledge Base", "CONCEPT", ("知识库",)),
+    DomainTerm("Entity Extraction", "CONCEPT", ("实体识别",)),
+    DomainTerm("Named Entity Recognition", "CONCEPT", ("命名实体识别",)),
+    DomainTerm("Semantic Search", "CONCEPT", ("语义搜索",)),
+    DomainTerm("Hybrid Search", "CONCEPT", ("混合搜索",)),
+    DomainTerm("Vector Database", "CONCEPT", ("向量数据库",)),
+    DomainTerm("Vector Embedding", "CONCEPT", ("向量嵌入",)),
+    DomainTerm("Retrieval Augmented Generation", "CONCEPT", ("检索增强生成",)),
+    DomainTerm("Large Language Model", "CONCEPT", ("大语言模型",)),
+    DomainTerm("Machine Learning", "CONCEPT", ("机器学习",)),
+    DomainTerm("Deep Learning", "CONCEPT", ("深度学习",)),
+    DomainTerm("Natural Language Processing", "CONCEPT", ("自然语言处理",)),
+    DomainTerm("Artificial Intelligence", "CONCEPT", ("人工智能",)),
 )
 
 
@@ -381,22 +433,35 @@ class EntityExtractor:
 
     def __init__(
         self,
-        model_name: Optional[str] = DEFAULT_SPACY_MODEL,
+        model_name: Optional[str] | object = _USE_CONFIGURED_MODEL,
+        extra_model_names: Optional[Iterable[str]] = None,
         min_confidence: float = 0.7,
         llm_enhancer: Optional[LlmEnhancer] = None,
         relation_enhancer: Optional[RelationEnhancer] = None,
         semantic_similarity: Optional[SemanticSimilarity] = None,
         semantic_merge_threshold: float = 0.92,
     ) -> None:
-        # spaCy is an opportunistic enhancer. If the local model exists, use it;
-        # otherwise keep the rule/domain pass running without network downloads.
+        # spaCy adds names, places, and orgs when the local model is available.
+        # If it is missing, the domain dictionary still carries the module.
         self.model_name = model_name
         self.min_confidence = min_confidence
         self.llm_enhancer = llm_enhancer
         self.relation_enhancer = relation_enhancer
         self.semantic_similarity = semantic_similarity
         self.semantic_merge_threshold = semantic_merge_threshold
-        self.nlp = self._load_spacy_model(model_name) if model_name else None
+        configured_model: Optional[str]
+        if model_name is _USE_CONFIGURED_MODEL:
+            configured_model = _configured_spacy_model()
+        else:
+            configured_model = model_name if isinstance(model_name, str) or model_name is None else None
+        self.model_name = configured_model
+        self.extra_model_names = (
+            list(extra_model_names)
+            if extra_model_names is not None
+            else (_configured_extra_spacy_models() if self.model_name else [])
+        )
+        self.spacy_models = self._load_spacy_models(self.model_name, self.extra_model_names)
+        self.nlp = self.spacy_models[0][1] if self.spacy_models else None
 
     def extract_from_text(self, text: str) -> list[Entity]:
         """Extract entities from plain text using spaCy when available plus rules."""
@@ -501,6 +566,23 @@ class EntityExtractor:
                 relations.append(EntityRelation(source, target, relation, confidence))
         return relations
 
+    def _load_spacy_models(
+        self,
+        model_name: Optional[str],
+        extra_model_names: Iterable[str] = (),
+    ) -> list[tuple[str, Any]]:
+        if not model_name:
+            return []
+
+        model_names = [model_name, *extra_model_names]
+
+        models = []
+        for name in dict.fromkeys(model_names):
+            model = self._load_spacy_model(name)
+            if model is not None:
+                models.append((name, model))
+        return models
+
     def _load_spacy_model(self, model_name: str) -> Any:
         if model_name in _SPACY_MODEL_CACHE:
             return _SPACY_MODEL_CACHE[model_name]
@@ -521,27 +603,28 @@ class EntityExtractor:
             return None
 
     def _extract_with_spacy(self, text: str) -> list[Entity]:
-        if self.nlp is None:
+        if not self.spacy_models:
             return []
 
         entities = []
-        doc = self.nlp(text)
-        for ent in doc.ents:
-            label = SPACY_LABELS.get(ent.label_)
-            if not label:
-                continue
-            context = text[max(0, ent.start_char - 60) : min(len(text), ent.end_char + 60)]
-            entities.append(
-                self._entity(
-                    ent.text,
-                    label,
-                    ent.start_char,
-                    ent.end_char,
-                    0.82,
-                    "spacy",
-                    context,
+        for model_name, nlp in self.spacy_models:
+            doc = nlp(text)
+            for ent in doc.ents:
+                label = SPACY_LABELS.get(ent.label_)
+                if not label:
+                    continue
+                context = text[max(0, ent.start_char - 60) : min(len(text), ent.end_char + 60)]
+                entities.append(
+                    self._entity(
+                        ent.text,
+                        label,
+                        ent.start_char,
+                        ent.end_char,
+                        0.82,
+                        f"spacy:{model_name}",
+                        context,
+                    )
                 )
-            )
         return entities
 
     def _extract_domain_terms(self, text: str) -> list[Entity]:
@@ -789,7 +872,7 @@ class EntityExtractor:
             return True
         if not text or lowered in STOP_CONCEPTS or self._is_noise_entity(text):
             return True
-        if entity.label == "LOCATION" and entity.source == "spacy":
+        if entity.label == "LOCATION" and entity.source.startswith("spacy"):
             return not self._has_geography_context(entity.context)
         if entity.label == "CONCEPT" and entity.source in {"context", "parser", "symbol"}:
             is_domain_concept = lowered in {term for term, label in TECH_TERMS.items() if label == "CONCEPT"}
@@ -923,6 +1006,10 @@ class EntityExtractor:
         )
 
     def _term_pattern(self, term: str) -> str:
+        # Chinese terms do not have the word boundaries that English regexes
+        # rely on, so a plain escaped phrase is the safer match.
+        if _has_cjk(term):
+            return re.escape(term)
         if re.search(r"\W", term):
             return rf"(?<!\w){re.escape(term)}(?!\w)"
         return rf"\b{re.escape(term)}\b"
@@ -932,12 +1019,33 @@ class EntityExtractor:
         domain_term = DOMAIN_LOOKUP.get(compact.lower())
         return domain_term.canonical if domain_term else CANONICAL_TERMS.get(compact.lower(), compact)
 
-
-entity_extractor = EntityExtractor()
-
-
 def split_identifier(value: str) -> list[str]:
     """Split code-ish identifiers into readable concept words."""
     spaced = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", value.strip("_"))
     parts = re.split(r"[^A-Za-z0-9]+", spaced)
     return [part for part in parts if part]
+
+
+def _has_cjk(text: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+
+def _configured_spacy_model() -> str:
+    try:
+        from app.core.config import settings
+
+        return settings.SPACY_MODEL or DEFAULT_SPACY_MODEL
+    except Exception:
+        return DEFAULT_SPACY_MODEL
+
+
+def _configured_extra_spacy_models() -> list[str]:
+    try:
+        from app.core.config import settings
+
+        return list(settings.SPACY_EXTRA_MODELS or [])
+    except Exception:
+        return list(DEFAULT_EXTRA_SPACY_MODELS)
+
+
+entity_extractor = EntityExtractor()

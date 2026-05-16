@@ -40,7 +40,7 @@ def test_default_constructor_attempts_spacy_without_requiring_it(monkeypatch):
 
     extractor = EntityExtractor()
 
-    assert calls == ["en_core_web_sm"]
+    assert calls == ["en_core_web_sm", "zh_core_web_sm"]
     assert extractor.nlp is None
 
 
@@ -51,6 +51,33 @@ def test_spacy_loader_uses_model_cache(monkeypatch):
     extractor = EntityExtractor(model_name="cached_model")
 
     assert extractor.nlp is sentinel_model
+
+
+def test_extra_spacy_models_are_configurable(monkeypatch):
+    calls = []
+
+    def fake_loader(self, model_name):
+        calls.append(model_name)
+        return None
+
+    monkeypatch.setattr(EntityExtractor, "_load_spacy_model", fake_loader)
+
+    EntityExtractor(model_name="en_core_web_sm", extra_model_names=["ja_core_news_sm", "fr_core_news_sm"])
+
+    assert calls == ["en_core_web_sm", "ja_core_news_sm", "fr_core_news_sm"]
+
+
+def test_chinese_domain_terms_work_without_zh_spacy_model():
+    entities = EntityExtractor(model_name=None).extract_from_text(
+        "这个系统把文档上传后做文档解析、实体识别、知识图谱和语义搜索。"
+    )
+    found = {entity.normalized for entity in entities}
+
+    assert "Document Upload" in found
+    assert "Document Parsing" in found
+    assert "Entity Extraction" in found
+    assert "Knowledge Graph" in found
+    assert "Semantic Search" in found
 
 
 def test_extracts_markdown_context_entities():

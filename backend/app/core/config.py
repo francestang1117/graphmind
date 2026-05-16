@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     AUTH_REQUIRED: bool = False
     DATABASE_URL: str = "sqlite:///./graphmind.db"
+    CELERY_BROKER_URL: str = "memory://"
+    CELERY_RESULT_BACKEND: str = "cache+memory://"
+    # Off by default: reindexing is handy, surprise background work is not.
+    CELERY_REINDEX_ENABLED: bool = False
+    CELERY_REINDEX_INTERVAL_SECONDS: int = 86400
+
+    SPACY_MODEL: str = "en_core_web_sm"
+    SPACY_EXTRA_MODELS: List[str] = ["zh_core_web_sm"]
 
     RATE_LIMIT_ENABLED: bool = True
     # Empty means "use REDIS_URL". This lets production override rate-limit

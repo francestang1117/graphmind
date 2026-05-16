@@ -23,6 +23,7 @@ from app.core.errors import (
     UploadRejectedError,
 )
 from app.core.rate_limit import upload_limit
+from app.services.pipeline import process_uploaded_document
 from app.utils.file_validator import UploadValidationError
 
 
@@ -126,7 +127,7 @@ async def upload_document(
         raise UploadRejectedError(str(exc)) from exc
 
     background_tasks.add_task(
-        parse_document_file,
+        process_uploaded_document,
         metadata["stored_filename"],
         metadata["file_path"],
         metadata["original_filename"],

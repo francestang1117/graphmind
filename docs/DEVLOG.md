@@ -316,6 +316,19 @@ hover tooltip, and the canvas skips labels that would collide with already drawn
 labels. The graph still needs a richer relation-extraction pass, but it is much
 closer to a readable working view than the first dense cluster.
 
+I also added the first multilingual boundary. The extractor now reads its spaCy
+models from configuration: `SPACY_MODEL` for the primary model and
+`SPACY_EXTRA_MODELS` for optional extras. The default is English plus Chinese,
+but other installed spaCy models can be added without changing code. Missing
+models are skipped, so upload, search, and graph rebuilds do not depend on a
+specific local NLP install.
+
+I also added a small Chinese technical glossary for terms already used by this
+project, including `知识图谱`, `实体识别`, `语义搜索`, `向量数据库`, `文档上传`, and
+`文档解析`. These normalize back to the same canonical graph nodes as the
+English terms, so Chinese and English notes do not split the same idea into two
+separate entities.
+
 ## 2026-04 — First Knowledge Graph Builder
 
 I added Module 4 to turn extracted entities into a graph. The first version used a demo-style NetworkX wrapper, but it was not wired into the API router and it added a new dependency before the current project really needed it.
@@ -692,6 +705,57 @@ response size, accepts only readable HTML/text responses, and has its own rate
 limit. This is one of those features where a simple implementation can become
 dangerous quickly, so I would rather keep the MVP small and boring than make it
 look powerful but unsafe.
+
+## 2026-05 — Processing Pipeline Integration
+
+I added a small processing pipeline service to connect the modules that were
+previously working mostly on their own. A stored document now has one backend
+path for:
+
+- parsing the file
+- persisting parsed chunks and extracted entities
+- extracting graph entities and relation hints
+- updating the in-memory knowledge graph
+- indexing chunks into the local search store
+- reporting progress for background workers
+
+The first version had the right shape but was too script-like: it printed status
+messages, swallowed exceptions into `success: false`, and imported an API helper
+at module import time. That created a circular import once the upload route also
+started using the pipeline.
+
+I tightened it into a real service. Upload background tasks now call the same
+pipeline wrapper as the Celery task, errors are logged and raised as
+`PipelineError`, and progress updates go through a callback instead of `print`.
+The parser/cache helper is imported lazily so the current API structure keeps
+working without a circular dependency.
+
+This is still not a distributed production pipeline. It is the current local MVP
+path that proves the pieces can work together before replacing the in-memory
+graph/search layers with persistent infrastructure.
+
+## 2026-05 — Scheduled Reindex Task
+
+With the processing pipeline in place, I added the first scheduled maintenance
+task. The goal is simple: if parser rules, entity extraction, or search indexing
+change, the backend needs a clean way to refresh existing documents without
+re-uploading them.
+
+The current version adds:
+
+- `reindex_document(filename)` for one stored file
+- `reindex_all_documents()` for the current document set
+- optional Celery beat wiring controlled by `CELERY_REINDEX_ENABLED`
+- `CELERY_REINDEX_INTERVAL_SECONDS` for the schedule interval
+
+The beat schedule is off by default. That keeps local development predictable,
+but the task code is ready for a worker/beat setup. The all-documents task keeps
+going if one document fails and returns the failures in the task result instead
+of hiding them.
+
+This does not implement relation-strength decay or incremental indexing yet. It
+is the basic operational hook: run the same pipeline again over stored files and
+refresh parsed artifacts, graph state, and search chunks.
 
 ## Current State
 

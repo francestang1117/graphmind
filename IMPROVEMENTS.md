@@ -10,37 +10,30 @@ These items affect the core product experience and should come before advanced e
 
 Current state:
 
-- The app is effectively single-user.
-- Upload/list/delete endpoints do not require a real account.
-- `auth.py` is currently a placeholder.
+- JWT authentication exists as an MVP.
+- Access tokens, refresh tokens, logout, and `/auth/me` are implemented.
+- Auth can stay optional in local development through configuration.
 
-Target:
+Still needed:
 
-```text
-POST /api/v1/auth/register
-POST /api/v1/auth/login
-GET  /api/v1/auth/me
-```
-
-Likely implementation:
-
-- JWT access tokens
-- password hashing
-- user table in the database
-- frontend auth state
+- OAuth2/social login is not implemented.
+- Frontend login/register screens still need to be connected cleanly.
+- Team/workspace isolation is still future work.
 
 ### 2. Data Persistence
 
 Current state:
 
 - Uploaded file bytes are stored locally.
-- File metadata is stored in sidecar JSON files.
-- The document model still uses an in-memory registry for some future workflow pieces.
+- Document metadata can be mirrored into SQLAlchemy-backed storage.
+- Parsed chunks and extracted entities can be persisted.
+- The knowledge graph itself is still rebuilt in memory.
 
 Target:
 
-- PostgreSQL + SQLAlchemy for document metadata, users, and processing records.
-- Later, either Neo4j or a relational graph schema for graph persistence.
+- PostgreSQL for production document/user metadata.
+- Either Neo4j or relational edge tables for graph persistence.
+- Migrations before the schema becomes harder to change.
 
 Possible direction:
 
@@ -54,14 +47,15 @@ Uploaded files    -> local disk first, S3/MinIO later
 
 Current state:
 
-- The frontend search panel exists.
-- Backend semantic search is not implemented yet.
+- Search is implemented as a local hashed-vector MVP over parsed chunks.
+- Hybrid scoring combines vector similarity with keyword overlap.
+- Search excerpts are cleaned and centered near query terms.
 
 Target:
 
-- Generate embeddings for document chunks.
+- Replace the local vector MVP with real embedding models.
 - Store vectors in ChromaDB or another vector database.
-- Add `/api/v1/search` endpoint.
+- Add persistent indexing instead of rebuilding from local state.
 
 Local service option:
 
@@ -77,8 +71,9 @@ These improve functionality once the core upload, parse, graph, and search path 
 
 Current state:
 
-- WebSocket endpoint exists as a placeholder.
-- Upload progress is mostly frontend upload progress, not backend processing progress.
+- A WebSocket endpoint exists for Celery-style job progress.
+- The processing pipeline reports progress through callbacks.
+- Upload does not yet return a real Celery job id to the frontend.
 
 Target:
 
@@ -103,26 +98,22 @@ Likely needs:
 
 Current state:
 
-- PDF parsing uses PyPDF2 for basic text extraction.
+- PDF parsing prefers `pdfplumber` and falls back to PyPDF2.
+- Basic page chunks and table chunks are supported.
 
 Target:
 
-- Use `pdfplumber` for stronger table and layout extraction.
-
-Possible dependency:
-
-```bash
-pip install pdfplumber
-```
+- Improve complex table extraction.
+- Add image/OCR handling.
+- Add stronger multi-column layout support if real documents need it.
 
 ### 6. Graph Export
 
 Current state:
 
-- Graph backend is planned.
-- Graph UI currently uses demo/fallback data.
+- Graph export is implemented for the current in-memory graph.
 
-Target:
+Implemented:
 
 ```text
 GET /api/v1/graph/export?format=json
@@ -135,6 +126,10 @@ Use cases:
 - Cytoscape.js JSON for frontend visualization.
 - GEXF for Gephi.
 - CSV for spreadsheet workflows.
+
+Still needed:
+
+- Persistent graph storage before exports can represent long-term graph history.
 
 ## Low Priority
 
@@ -156,48 +151,47 @@ Possible stack:
 
 ### 8. Multilingual Support
 
-Goal:
+Current state:
 
-- Chinese and English document understanding.
-- Language-aware entity extraction.
+- spaCy model names are configurable.
+- English is the primary model by default.
+- Chinese `zh_core_web_sm` is an optional extra model.
+- A small Chinese technical glossary maps terms such as `知识图谱`, `实体识别`, and `语义搜索` into the same canonical graph nodes as English terms.
 
-Possible direction:
+Still needed:
 
-```bash
-python -m spacy download zh_core_web_sm
-```
+- Install and test additional language models only when real documents need them.
+- Add language detection if multilingual uploads become common.
 
 ### 9. Scheduled Jobs
 
-Goal:
+Current state:
 
-- Re-index stale documents.
-- Refresh graph relation strength.
-- Run cleanup tasks.
+- `reindex_document(filename)` exists.
+- `reindex_all_documents()` exists.
+- Optional Celery beat schedule is configured behind `CELERY_REINDEX_ENABLED`.
 
-Possible direction:
+Still needed:
 
-```python
-@celery.task
-def reindex_document(filename: str):
-    pipeline.process(filename)
-```
+- Run Celery worker/beat with Redis in a real deployment.
+- Add cleanup tasks.
+- Add relation-strength refresh/decay logic if the graph needs it.
 
 ## Technical Debt
 
-| Area | Current State | Improvement |
+| Area | Current State | Remaining Work |
 | --- | --- | --- |
-| User system | No real login | JWT + OAuth2-style flow |
-| Metadata storage | Local sidecars / in-memory pieces | PostgreSQL + SQLAlchemy |
-| Graph storage | Not implemented yet | Neo4j or persistent edge tables |
-| File storage | Local disk | S3 / MinIO later |
-| Task queue | FastAPI background tasks | Celery + Redis for heavy jobs |
-| WebSocket progress | Placeholder | Real job progress events |
-| Error tracking | Local logs | Sentry or similar |
-| Logging | Mixed simple logging/prints | Structured logging |
-| Tests | Backend coverage for current modules | Add frontend tests and coverage targets |
-| API docs | Auto-generated OpenAPI + docs/API.md | Add examples as endpoints mature |
-| Monitoring | None | Prometheus metrics |
+| Graph storage | In-memory graph rebuilt from documents | Add Neo4j or persistent relational edge tables |
+| User system | JWT + refresh-token MVP | Add frontend auth flow, OAuth2/social login, and workspace/team boundaries |
+| Metadata storage | SQLAlchemy-backed document metadata and parsed artifacts are available; local SQLite is the default dev path | Use PostgreSQL in production and add migrations |
+| File storage | Local SHA-256 content-addressed storage | Add S3/MinIO backend for multi-instance deployments |
+| Task queue | Processing pipeline, Celery-compatible task, and scheduled reindex task exist | Run real Celery worker/beat with Redis and return job ids from upload |
+| WebSocket progress | Celery-style progress stream exists | Connect upload UI to real backend job ids |
+| Error tracking | Structured API errors and backend logging exist | Add Sentry or another error tracking service |
+| Logging | Most service-level `print()` paths have been replaced with logging | Move toward structured JSON logs for production |
+| Tests | Pytest suite covers current backend modules | Add frontend tests and define coverage targets |
+| API docs | FastAPI OpenAPI plus `docs/API.md` exist | Add more real request/response examples as endpoints stabilize |
+| Monitoring | No metrics endpoint yet | Add Prometheus-compatible metrics and health dashboards |
 
 ## Frontend Notes
 
@@ -216,20 +210,15 @@ What is real now:
 - document list
 - delete action
 - Markdown parse summary viewer
-
-What is currently demo/fallback:
-
-- graph data
-- search results
-- chat replies
-
-The API wrapper already has functions for future graph/search/chat endpoints, but the panels fall back gracefully when those backend modules are missing.
+- graph data from uploaded documents
+- backend search results from parsed chunks
+- chat replies from local retrieval context
 
 ## Suggested Next Step
 
 The next practical milestone is:
 
-1. Keep Docker running with the backend and frontend.
-2. Expand the Markdown viewer to show full structure and chunks.
-3. Add persistent document metadata.
-4. Build the first graph extraction module from Markdown chunks.
+1. Connect upload UI to real backend job ids and WebSocket progress.
+2. Move production metadata to PostgreSQL with migrations.
+3. Replace the local vector-search MVP with ChromaDB or another vector store.
+4. Add graph persistence before the graph model becomes more complex.

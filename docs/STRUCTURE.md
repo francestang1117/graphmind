@@ -147,7 +147,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `rate_limit.py` wraps slowapi. Redis-backed limits are supported, with a local
   fallback for development.
 - `celery_app.py` provides Celery configuration and a small eager/local fallback
-  so tests can exercise task-style progress without a worker.
+  so tests can exercise task-style progress without a worker. Optional beat
+  wiring can run the all-documents reindex task on a schedule.
 
 ## Services
 
@@ -158,6 +159,9 @@ SQLite files, and virtual environments are intentionally left out of this map.
   sidecar fallback for local development.
 - `persistence_service.py` and `parsed_artifact_repository.py` persist parsed
   chunks and extracted entities.
+- `pipeline.py` is the current single-document processing path used after
+  upload and by the Celery-compatible task: parse, persist artifacts, extract
+  entities/relations, update the in-memory graph, and index search chunks.
 - `document_parser.py` is the unified parser for Markdown, TXT, PDF, DOCX,
   Python, JavaScript, TypeScript, JSON, CSV, and HTML. PDF parsing prefers
   pdfplumber and falls back to PyPDF2.
