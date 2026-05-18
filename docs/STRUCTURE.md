@@ -37,6 +37,7 @@ GraphMind/
 │   │   │   ├── config.py
 │   │   │   ├── database.py
 │   │   │   ├── errors.py
+│   │   │   ├── metrics.py
 │   │   │   └── rate_limit.py
 │   │   ├── models/
 │   │   │   ├── document.py
@@ -144,6 +145,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `database.py` provides SQLAlchemy setup. Local development can use SQLite;
   PostgreSQL is the intended production direction.
 - `errors.py` centralizes application error payloads and FastAPI handlers.
+- `metrics.py` exposes `/metrics` and records request, upload, search, chat,
+  and pipeline counters for Prometheus.
 - `rate_limit.py` wraps slowapi. Redis-backed limits are supported, with a local
   fallback for development.
 - `celery_app.py` provides Celery configuration and a small eager/local fallback
@@ -209,6 +212,7 @@ The backend currently has tests for:
 - virus scanner behavior
 - WebSocket job snapshots
 - application error payloads
+- metrics wiring through the FastAPI app
 
 Run the current backend suite with:
 
@@ -219,8 +223,8 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ## Still Early
 
 The project now has real modules for upload, parsing, entity extraction, graph,
-search, chat, auth, rate limiting, persistence, and WebSocket progress. The main
-things that are still early are:
+search, chat, auth, rate limiting, persistence, metrics, and WebSocket progress.
+The main things that are still early are:
 
 - graph persistence beyond the current in-memory graph builder
 - production-grade user/workspace isolation across every artifact
@@ -228,3 +232,4 @@ things that are still early are:
 - full Celery upload pipeline wiring
 - GPT-backed answer generation
 - richer relation extraction and graph quality tuning
+- a real Prometheus/Grafana deployment around the `/metrics` endpoint

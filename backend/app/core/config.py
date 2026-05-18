@@ -55,6 +55,8 @@ class Settings(BaseSettings):
     RATE_LIMIT_SCRAPE: str = "10/hour"
     TRUSTED_PROXY_IPS: List[str] = ["127.0.0.1", "::1"]
 
+    METRICS_ENABLED: bool = True
+
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://localhost:5173",

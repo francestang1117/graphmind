@@ -6,6 +6,7 @@ from typing import Optional
 import uuid
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
+from app.core.metrics import record_chat
 from app.core.rate_limit import chat_limit
 from app.services.qa_engine import qa_engine
 
@@ -29,6 +30,8 @@ async def chat(
     conv_id = body.conversation_id or str(uuid.uuid4())
 
     if body.stream:
+        # Streamed replies do not have a final size yet.
+        record_chat("stream", True)
         return StreamingResponse(
             stream_response(body.message, conv_id, user.id),
             media_type="text/event-stream",
@@ -39,6 +42,8 @@ async def chat(
         conversation_id=conv_id,
         user_id=user.id,
     )
+    # Keep local fallback separate from the future GPT path.
+    record_chat(result.get("mode", "local"), False, result.get("answer", ""))
 
     return {
         "answer": result["answer"],

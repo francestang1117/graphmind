@@ -6,6 +6,22 @@ Interactive docs: `http://localhost:8000/docs`
 
 ---
 
+## Operations
+
+### `GET /metrics`
+
+Prometheus scrape endpoint. It is outside the `/api/v1` prefix.
+
+```bash
+curl http://localhost:8000/metrics
+```
+
+It includes request counters, request latency, upload counts, pipeline timing,
+search counts, and chat counts. Set `METRICS_ENABLED=false` to hide it in local
+runs where you do not want the endpoint.
+
+---
+
 ## Auth
 
 ### `POST /auth/register`

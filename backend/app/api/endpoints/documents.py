@@ -22,6 +22,7 @@ from app.core.errors import (
     StoredFileMissingError,
     UploadRejectedError,
 )
+from app.core.metrics import record_upload
 from app.core.rate_limit import upload_limit
 from app.services.pipeline import process_uploaded_document
 from app.utils.file_validator import UploadValidationError
@@ -124,8 +125,10 @@ async def upload_document(
     except UploadValidationError as exc:
         # Keep upload failures machine-readable for the UI; raw exception text
         # alone is hard to branch on.
+        record_upload("rejected", file.filename or "upload", len(content))
         raise UploadRejectedError(str(exc)) from exc
 
+    record_upload("accepted", metadata["original_filename"], metadata["file_size"])
     background_tasks.add_task(
         process_uploaded_document,
         metadata["stored_filename"],

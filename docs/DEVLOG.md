@@ -757,6 +757,28 @@ This does not implement relation-strength decay or incremental indexing yet. It
 is the basic operational hook: run the same pipeline again over stored files and
 refresh parsed artifacts, graph state, and search chunks.
 
+## 2026-05 — Prometheus Metrics
+
+I added the first observability pass so the backend has something better than
+"check the terminal and hope." The app now exposes a Prometheus-compatible
+`/metrics` endpoint and records the pieces I keep needing while testing:
+
+- HTTP request count and latency by route
+- upload attempts by result and extension
+- upload size buckets
+- processing pipeline runs and duration
+- search request count and result counts
+- chat request count and answer length
+
+The route labels use FastAPI's route pattern instead of raw URLs. That matters
+because filenames and hashes would otherwise create a new metric series for
+every uploaded file.
+
+This is not a full monitoring stack yet. There is no Prometheus server,
+Grafana dashboard, alerting, or Sentry integration. The useful part for now is
+that the API has a stable metrics surface, so production monitoring can plug in
+without rewriting the app later.
+
 ## Current State
 
 As of May 2026, GraphMind has a working foundation:
@@ -786,6 +808,7 @@ As of May 2026, GraphMind has a working foundation:
 - database-backed document metadata repository with sidecar fallback
 - optional ClamAV virus scan before file storage
 - WebSocket job progress stream for Celery-backed processing
+- Prometheus-compatible `/metrics` endpoint for API and pipeline counters
 - stable API error codes for common upload, parse, and file access failures
 - Docker Compose for API + frontend
 - tests for the core backend pieces

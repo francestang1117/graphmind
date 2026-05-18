@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.documents_with_markdown import get_cached_parse, parse_document_file
+from app.core.metrics import record_search
 from app.core.rate_limit import search_limit
 from app.services.document_service import document_service
 from app.services.vector_store import VectorStore, vector_store
@@ -42,6 +43,9 @@ async def search_documents(
     else:
         results = [_api_result(item) for item in store.hybrid_search(body.query, body.limit, body.document)]
 
+    # Empty-result searches are worth tracking; they usually mean bad indexing
+    # or a query the current parser does not handle well.
+    record_search(body.search_type, len(results))
     return {
         "query": body.query,
         "search_type": body.search_type,

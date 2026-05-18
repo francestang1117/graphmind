@@ -191,7 +191,7 @@ Still needed:
 | Logging | Most service-level `print()` paths have been replaced with logging | Move toward structured JSON logs for production |
 | Tests | Pytest suite covers current backend modules | Add frontend tests and define coverage targets |
 | API docs | FastAPI OpenAPI plus `docs/API.md` exist | Add more real request/response examples as endpoints stabilize |
-| Monitoring | No metrics endpoint yet | Add Prometheus-compatible metrics and health dashboards |
+| Monitoring | Prometheus-compatible `/metrics` endpoint exists with API, upload, pipeline, search, and chat counters | Add Prometheus/Grafana deployment and alerts |
 
 ## Frontend Notes
 

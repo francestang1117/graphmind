@@ -11,6 +11,7 @@ from typing import Any, Callable, Optional
 from app.services.entity_extractor import EntityExtractor, entity_extractor
 from app.services.graph_builder_enhanced import KnowledgeGraph, knowledge_graph
 from app.services.vector_store import VectorStore, vector_store
+from app.core.metrics import record_pipeline
 
 
 log = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ class ProcessingPipeline:
                 graph_edges=int(graph_stats.get("total_edges", 0)),
                 time_seconds=round(time.time() - started_at, 2),
             )
+            record_pipeline("indexed", result.format, result.time_seconds)
             log.info(
                 "Processed %s: %d chunks, %d entities, %d relations",
                 display_name,
@@ -114,6 +116,7 @@ class ProcessingPipeline:
         except Exception as exc:
             log.exception("Document processing failed for %s", display_name)
             self._progress(on_progress, "Failed", 100)
+            record_pipeline("failed", "", time.time() - started_at)
             raise PipelineError(f"Could not process {display_name}: {exc}") from exc
 
     def _progress(self, callback: Optional[ProgressCallback], step: str, pct: int) -> None:
