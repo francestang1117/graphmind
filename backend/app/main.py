@@ -13,8 +13,12 @@ from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.metrics import configure_metrics
 from app.core.rate_limit import configure_rate_limiting
+from app.core.sentry import configure_sentry
 
 import uvicorn
+
+
+configure_sentry()
 
 
 @asynccontextmanager

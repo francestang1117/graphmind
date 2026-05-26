@@ -2,6 +2,7 @@
 fastapi==0.115.6
 uvicorn==0.39.0
 python-multipart==0.0.20
+celery[redis]==5.4.0
 
 # Settings
 pydantic-settings==2.7.1
@@ -16,6 +17,7 @@ passlib[bcrypt]==1.7.4
 redis==5.2.1
 slowapi==0.1.9
 prometheus-client==0.21.1
+sentry-sdk==2.19.2
 
 # Upload validation
 python-magic==0.4.27

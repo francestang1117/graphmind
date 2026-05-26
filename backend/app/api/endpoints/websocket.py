@@ -24,7 +24,7 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
         last_state: dict[str, Any] = {}
 
         while True:
-            current = _task_snapshot(task)
+            current = task_snapshot(task)
 
             # Keep the socket quiet while Celery is reporting the same state.
             if current != last_state:
@@ -51,7 +51,7 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
             pass
 
 
-def _task_snapshot(task) -> dict[str, Any]:
+def task_snapshot(task) -> dict[str, Any]:
     """Extract a serialisable snapshot from a Celery AsyncResult."""
     state = task.state
 
@@ -74,7 +74,15 @@ def _task_snapshot(task) -> dict[str, Any]:
             "result": task.result if isinstance(task.result, dict) else {},
         }
 
-    if state in ("FAILURE", "REVOKED"):
+    if state == "REVOKED":
+        return {
+            "state": "REVOKED",
+            "pct":   0,
+            "step":  "Cancelled",
+            "error": "Cancelled",
+        }
+
+    if state == "FAILURE":
         return {
             "state": state,
             "pct":   0,
@@ -114,3 +122,5 @@ class JobBroadcaster:
 
 
 broadcaster = JobBroadcaster()
+
+_task_snapshot = task_snapshot

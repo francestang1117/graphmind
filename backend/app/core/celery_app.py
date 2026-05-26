@@ -9,6 +9,9 @@ from app.core.config import settings
 class LocalTaskQueue:
     """Small stand-in used when Celery is not installed."""
 
+    def __init__(self) -> None:
+        self.control = LocalTaskControl()
+
     def task(self, *_args: Any, **kwargs: Any) -> Callable:
         bind = bool(kwargs.get("bind"))
 
@@ -24,6 +27,9 @@ class LocalTaskQueue:
 
         return decorator
 
+    def AsyncResult(self, _job_id: str) -> "LocalTaskResult":
+        return LocalTaskResult()
+
 
 class LocalTaskContext:
     """Enough of Celery's task API for local progress-aware tasks."""
@@ -35,6 +41,21 @@ class LocalTaskContext:
     def update_state(self, state: str, meta: dict[str, Any]) -> None:
         self.state = state
         self.info = meta
+
+
+class LocalTaskControl:
+    """Local mode has nothing to revoke, but the API can keep one shape."""
+
+    def revoke(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
+class LocalTaskResult:
+    """Fallback shape for the WebSocket route when no worker exists."""
+
+    state = "PENDING"
+    info: dict[str, Any] = {}
+    result: dict[str, Any] = {}
 
 
 try:
@@ -58,6 +79,10 @@ else:
         timezone="UTC",
         enable_utc=True,
         task_track_started=True,
+        task_default_queue=settings.CELERY_TASK_DEFAULT_QUEUE,
+        task_routes={
+            "app.tasks.process_document.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+        },
     )
     # Beat is opt-in. Reindexing is useful, but local dev should not suddenly
     # wake up and reprocess uploads just because Celery is installed.

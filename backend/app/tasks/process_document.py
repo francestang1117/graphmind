@@ -12,12 +12,17 @@ log = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True, name="app.tasks.process_document.process_document")
-def process_document(self, file_path: str, filename: str = "") -> Dict[str, Any]:
+def process_document(
+    self,
+    file_path: str,
+    filename: str = "",
+    original_filename: str = "",
+) -> Dict[str, Any]:
     _progress(self, 5, "Queued document pipeline")
     return pipeline.process(
         file_path,
         filename or file_path.rsplit("/", 1)[-1],
-        filename or "",
+        original_filename or filename or "",
         on_progress=lambda step, pct: _progress(self, pct, step),
     )
 
@@ -93,4 +98,7 @@ def _progress(task, pct: int, step: str) -> None:
     """Best-effort progress update for Celery workers and the local fallback."""
     update_state = getattr(task, "update_state", None)
     if update_state:
+        request = getattr(task, "request", None)
+        if request is not None and getattr(request, "id", None) is None:
+            return
         update_state(state="PROGRESS", meta={"pct": pct, "step": step})

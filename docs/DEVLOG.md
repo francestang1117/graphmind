@@ -775,9 +775,97 @@ because filenames and hashes would otherwise create a new metric series for
 every uploaded file.
 
 This is not a full monitoring stack yet. There is no Prometheus server,
-Grafana dashboard, alerting, or Sentry integration. The useful part for now is
-that the API has a stable metrics surface, so production monitoring can plug in
-without rewriting the app later.
+Grafana dashboard, or alerting. The useful part for now is that the API has a
+stable metrics surface, so production monitoring can plug in without rewriting
+the app later.
+
+## 2026-05 — Sentry Error Tracking
+
+After metrics, I added the first error-tracking hook. Local development stays
+quiet by default, but production can set `SENTRY_ENABLED=true` and
+`SENTRY_DSN=...` to report backend exceptions.
+
+The current pass does three things:
+
+- initializes Sentry with environment and release metadata
+- keeps personally identifying request data off by default
+- reports controlled 5xx `AppError` failures with the API code, path, method,
+  and details
+
+Unhandled FastAPI errors are also covered once the SDK is initialized. Expected
+4xx errors are not reported; bad uploads and duplicates are normal user flow,
+not production incidents.
+
+This is still intentionally small. There are no custom dashboards, issue
+ownership rules, or alert policies yet.
+
+## 2026-05 — Redis-backed Celery Worker and Beat
+
+I moved the background-task story from "the code can pretend to be Celery" to a
+real Docker path with Redis, a worker, and beat.
+
+The current shape is:
+
+- `redis` stores Celery broker messages and task results
+- `celery-worker` runs the document processing queue
+- `celery-beat` can trigger `reindex_all_documents()` on a schedule
+- API upload keeps the local fallback, but returns `job_id` when Celery is on
+- `/ws/jobs/{job_id}` can watch that task id for progress updates
+
+Local development still defaults to `CELERY_ENABLED=false`. That keeps the
+single-process workflow simple when I am only testing upload or parsing. Docker
+turns Celery on so the production-like path is available without changing code.
+
+This left one visible gap: the backend had the job id, but the upload UI was
+still using the old local progress.
+
+## 2026-05 — Upload Progress Uses Celery Jobs
+
+I connected the upload hook to the Celery job id returned by the backend. The
+frontend now keeps the simple local path for `CELERY_ENABLED=false`, but when
+the backend returns `job_id`, it opens `/ws/jobs/{job_id}` and uses the worker's
+progress messages for the upload row.
+
+That means the row can now move through backend states like queued, parsing,
+extracting entities, indexing chunks, and done instead of only showing browser
+file-transfer progress. Once the job finishes, the document list refreshes from
+the API.
+
+This is still intentionally narrow. It does not add retry controls or a full job
+history panel yet.
+
+## 2026-05 — Upload Job Controls
+
+I added the first small controls around background upload jobs. There is now an
+HTTP job endpoint for checking a task state, plus a cancel endpoint that asks
+Celery to revoke a queued or running task.
+
+The upload row now keeps the original browser `File` object while it is active.
+That lets the UI do two useful things without asking the user to pick the file
+again:
+
+- cancel a running worker job
+- retry a failed or cancelled upload row
+
+This still is not a full job center. There is no persisted job history yet, and
+cancel depends on the worker seeing the revoke request. For the current upload
+flow, though, the user is no longer stuck watching a long-running row with no
+way out.
+
+## 2026-05 — Upload Row Processing Mode
+
+The cancel button only appears when the backend returns a real Celery `job_id`.
+That is correct, but it was easy to misread in local development: small files
+finished quickly and the missing cancel button looked like a bug.
+
+I added a small processing-mode label to the upload row:
+
+- `Local` means the upload is being handled in the normal single-process dev path
+- `Worker job` means the row is tied to a Celery task and can be watched/cancelled
+
+Completed local uploads now stay visible briefly before the row disappears. It
+is a tiny UI detail, but it makes the system behavior easier to understand while
+testing.
 
 ## Current State
 
@@ -808,7 +896,10 @@ As of May 2026, GraphMind has a working foundation:
 - database-backed document metadata repository with sidecar fallback
 - optional ClamAV virus scan before file storage
 - WebSocket job progress stream for Celery-backed processing
+- frontend upload rows can follow returned Celery `job_id` progress
+- Redis-backed Celery worker and beat services in Docker Compose
 - Prometheus-compatible `/metrics` endpoint for API and pipeline counters
+- optional Sentry error tracking for production 5xx failures
 - stable API error codes for common upload, parse, and file access failures
 - Docker Compose for API + frontend
 - tests for the core backend pieces

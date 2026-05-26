@@ -13,6 +13,8 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.core.sentry import capture_exception
+
 log = logging.getLogger(__name__)
 
 
@@ -112,4 +114,11 @@ def register_error_handlers(app: FastAPI) -> None:
         # we kept control of the response but still need a server-side breadcrumb.
         if exc.status_code >= 500:
             log.error("%s: %s", exc.code, exc.message)
+            capture_exception(
+                exc,
+                code=exc.code,
+                path=str(_request.url.path),
+                method=_request.method,
+                details=exc.details,
+            )
         return JSONResponse(status_code=exc.status_code, content=error_payload(exc))

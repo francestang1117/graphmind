@@ -1,4 +1,12 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
     environment:
@@ -28,13 +36,72 @@ services:
       UPLOAD_DIR: /app/uploads
       MAX_UPLOAD_SIZE_MB: "50"
       DATABASE_URL: postgresql+psycopg://graphmind:graphmind@postgres:5432/graphmind
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_STORAGE_URI: redis://redis:6379/0
+      CELERY_ENABLED: "true"
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_TASK_DEFAULT_QUEUE: documents
       VIRUS_SCAN_ENABLED: "true"
       VIRUS_SCAN_FAIL_OPEN: "false"
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"
     depends_on:
       - postgres
+      - redis
       - clamav
+    restart: unless-stopped
+
+  celery-worker:
+    build:
+      context: ./backend
+    command: celery -A app.core.celery_app:celery_app worker -Q documents --loglevel=info
+    volumes:
+      - ./backend/app:/app/app
+      - upload_data:/app/uploads
+    environment:
+      PROJECT_NAME: GraphMind
+      VERSION: 0.1.0
+      ENVIRONMENT: development
+      UPLOAD_DIR: /app/uploads
+      DATABASE_URL: postgresql+psycopg://graphmind:graphmind@postgres:5432/graphmind
+      REDIS_URL: redis://redis:6379/0
+      CELERY_ENABLED: "true"
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_TASK_DEFAULT_QUEUE: documents
+      VIRUS_SCAN_ENABLED: "false"
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
+    depends_on:
+      - postgres
+      - redis
+    restart: unless-stopped
+
+  celery-beat:
+    build:
+      context: ./backend
+    command: celery -A app.core.celery_app:celery_app beat --loglevel=info
+    volumes:
+      - ./backend/app:/app/app
+      - upload_data:/app/uploads
+    environment:
+      PROJECT_NAME: GraphMind
+      VERSION: 0.1.0
+      ENVIRONMENT: development
+      UPLOAD_DIR: /app/uploads
+      DATABASE_URL: postgresql+psycopg://graphmind:graphmind@postgres:5432/graphmind
+      REDIS_URL: redis://redis:6379/0
+      CELERY_ENABLED: "true"
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      CELERY_REINDEX_ENABLED: "true"
+      CELERY_REINDEX_INTERVAL_SECONDS: "86400"
+      CELERY_TASK_DEFAULT_QUEUE: documents
+    depends_on:
+      - postgres
+      - redis
+      - celery-worker
     restart: unless-stopped
 
   clamav:
@@ -69,4 +136,5 @@ services:
 volumes:
   upload_data:
   postgres_data:
+  redis_data:
   clamav_data:

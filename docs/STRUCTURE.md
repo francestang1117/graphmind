@@ -38,7 +38,8 @@ GraphMind/
 │   │   │   ├── database.py
 │   │   │   ├── errors.py
 │   │   │   ├── metrics.py
-│   │   │   └── rate_limit.py
+│   │   │   ├── rate_limit.py
+│   │   │   └── sentry.py
 │   │   ├── models/
 │   │   │   ├── document.py
 │   │   │   └── persistence.py
@@ -136,8 +137,9 @@ SQLite files, and virtual environments are intentionally left out of this map.
   resolution for local work.
 - `graph.py`, `search.py`, and `chat.py` are connected to real uploaded content.
   They are MVP implementations, not demo-only screens anymore.
-- `websocket.py` exposes Celery-style job progress snapshots. Upload does not
-  yet fully return and consume a real Celery job id in the frontend flow.
+- `jobs.py` exposes small HTTP controls for worker jobs: check status and cancel.
+- `websocket.py` exposes Celery-style job progress snapshots. Upload can return
+  a Celery job id, and the frontend upload hook can watch it.
 
 ## Core Layer
 
@@ -149,9 +151,11 @@ SQLite files, and virtual environments are intentionally left out of this map.
   and pipeline counters for Prometheus.
 - `rate_limit.py` wraps slowapi. Redis-backed limits are supported, with a local
   fallback for development.
+- `sentry.py` initializes optional Sentry reporting when a production DSN is
+  configured.
 - `celery_app.py` provides Celery configuration and a small eager/local fallback
-  so tests can exercise task-style progress without a worker. Optional beat
-  wiring can run the all-documents reindex task on a schedule.
+  so tests can exercise task-style progress without a worker. Docker Compose
+  runs the Redis-backed worker and beat services for the production-like path.
 
 ## Services
 
@@ -193,7 +197,10 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `services/api.ts` centralizes HTTP calls.
 - `stores/appStore.ts` keeps shared UI state.
 - `hooks/useUpload.ts` and `hooks/useGraph.ts` keep upload and graph data
-  fetching out of the main components.
+  fetching out of the main components. Upload also watches Celery job progress
+  when the backend returns a `job_id`, and keeps enough local state to cancel or
+  retry an active upload row. Upload rows also show whether the work is running
+  locally or as a worker job, which helps during development.
 
 ## Test Coverage
 
@@ -211,6 +218,7 @@ The backend currently has tests for:
 - rate limiting
 - virus scanner behavior
 - WebSocket job snapshots
+- job status/cancel endpoints
 - application error payloads
 - metrics wiring through the FastAPI app
 
@@ -223,13 +231,12 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ## Still Early
 
 The project now has real modules for upload, parsing, entity extraction, graph,
-search, chat, auth, rate limiting, persistence, metrics, and WebSocket progress.
-The main things that are still early are:
+search, chat, auth, rate limiting, persistence, metrics, Celery workers, and
+WebSocket progress. The main things that are still early are:
 
 - graph persistence beyond the current in-memory graph builder
 - production-grade user/workspace isolation across every artifact
 - frontend login/register flow and token storage
-- full Celery upload pipeline wiring
 - GPT-backed answer generation
 - richer relation extraction and graph quality tuning
 - a real Prometheus/Grafana deployment around the `/metrics` endpoint

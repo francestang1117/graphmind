@@ -35,9 +35,12 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./graphmind.db"
     CELERY_BROKER_URL: str = "memory://"
     CELERY_RESULT_BACKEND: str = "cache+memory://"
+    # Local uploads still use FastAPI background tasks unless this is enabled.
+    CELERY_ENABLED: bool = False
     # Off by default: reindexing is handy, surprise background work is not.
     CELERY_REINDEX_ENABLED: bool = False
     CELERY_REINDEX_INTERVAL_SECONDS: int = 86400
+    CELERY_TASK_DEFAULT_QUEUE: str = "documents"
 
     SPACY_MODEL: str = "en_core_web_sm"
     SPACY_EXTRA_MODELS: List[str] = ["zh_core_web_sm"]
@@ -56,6 +59,9 @@ class Settings(BaseSettings):
     TRUSTED_PROXY_IPS: List[str] = ["127.0.0.1", "::1"]
 
     METRICS_ENABLED: bool = True
+    SENTRY_ENABLED: bool = False
+    SENTRY_DSN: str = ""
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.0
 
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",

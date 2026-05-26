@@ -5,6 +5,24 @@ const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 const http = axios.create({ baseURL: `${API_BASE}/api/v1`, timeout: 30_000 });
 
+export interface UploadResponse {
+  filename: string;
+  original_filename: string;
+  file_size: number;
+  file_type: string;
+  file_hash: string;
+  status: string;
+  job_id?: string | null;
+}
+
+export interface JobProgress {
+  state: "PENDING" | "PROGRESS" | "SUCCESS" | "FAILURE" | "REVOKED" | "ERROR" | string;
+  pct: number;
+  step: string;
+  result?: Record<string, unknown>;
+  error?: string;
+}
+
 export interface GraphNode {
   id: string;
   label: string;
@@ -75,7 +93,7 @@ export const checkHealth = () =>
 export const uploadDocument = (
   file: File,
   onProgress?: (n: number) => void,
-) => {
+): Promise<UploadResponse> => {
   const form = new FormData();
   form.append("file", file);
   return http
@@ -87,6 +105,40 @@ export const uploadDocument = (
     })
     .then((r) => r.data);
 };
+
+export function watchJobProgress(
+  jobId: string,
+  onProgress: (progress: JobProgress) => void,
+) {
+  return new Promise<JobProgress>((resolve, reject) => {
+    const ws = new WebSocket(`${toWsBase(API_BASE)}/ws/jobs/${encodeURIComponent(jobId)}`);
+
+    ws.onmessage = (event) => {
+      const progress = JSON.parse(event.data) as JobProgress;
+      onProgress(progress);
+
+      if (progress.state === "SUCCESS") {
+        ws.close();
+        resolve(progress);
+      }
+
+      if (["FAILURE", "REVOKED", "ERROR"].includes(progress.state)) {
+        ws.close();
+        reject(new Error(progress.error || progress.step || "Processing failed"));
+      }
+    };
+
+    ws.onerror = () => {
+      reject(new Error("Could not connect to the processing job."));
+    };
+  });
+}
+
+export const getJob = (jobId: string): Promise<JobProgress> =>
+  http.get(`/jobs/${encodeURIComponent(jobId)}`).then((r) => r.data);
+
+export const cancelJob = (jobId: string): Promise<JobProgress> =>
+  http.post(`/jobs/${encodeURIComponent(jobId)}/cancel`).then((r) => r.data);
 
 export const listDocuments = (): Promise<FileInfo[]> =>
   http.get("/documents/").then((r) => r.data.files ?? []);
@@ -146,3 +198,9 @@ function normalizeGraph(data: unknown): GraphData {
 }
 
 export default http;
+
+function toWsBase(baseUrl: string) {
+  const url = new URL(baseUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString().replace(/\/$/, "");
+}

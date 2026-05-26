@@ -100,7 +100,12 @@ sqlite3 graphmind.db "select label, text from parsed_entities limit 10;"
   so no running API server is needed for the normal test suite.
 - ClamAV is optional in local development. The scanner is tested with fake
   responses; a real EICAR test still requires the Docker ClamAV service.
-- WebSocket progress is implemented on the backend, but the upload API does not
-  yet return a Celery `job_id`, so the frontend is not fully wired to it yet.
+- WebSocket progress is implemented on the backend. Upload returns `job_id`
+  when `CELERY_ENABLED=true`; local background-task mode still returns `null`.
+- Job controls are covered by backend tests. For a manual browser check, upload
+  a larger file with Celery enabled, cancel the active row, then retry it from
+  the same row.
+- In local mode, upload rows should show `Local` briefly before disappearing.
+  In Celery mode, active rows should show `Worker job` and expose cancel.
 - Coverage reporting is useful later, but there is no enforced 80% coverage gate
   in this repo right now.

@@ -75,7 +75,7 @@ export default function UploadPanel() {
   const [parsedLabel, setParsedLabel] = useState("");
   const [parsedFilename, setParsedFilename] = useState("");
   const [loadingParsed, setLoadingParsed] = useState(false);
-  const { uploads, uploadMany, dismissUpload } = useUpload();
+  const { uploads, uploadMany, cancelUpload, retryUpload, dismissUpload } = useUpload();
   const { files, setFiles, removeFile } = useAppStore();
 
   useEffect(() => {
@@ -141,7 +141,9 @@ export default function UploadPanel() {
         activeParsedFilename={parsedFilename}
         onFilterChange={setFilter}
         onDelete={handleDelete}
+        onCancelUpload={cancelUpload}
         onDismissUpload={dismissUpload}
+        onRetryUpload={retryUpload}
         onOpenFile={handleOpenFile}
         onViewParsed={handleViewParsed}
       />

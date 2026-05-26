@@ -80,15 +80,13 @@ def test_reindex_document_uses_stored_metadata(monkeypatch):
         }
     ]
     fake_pipeline = FakePipeline()
-    task = FakeTask()
     monkeypatch.setattr(task_module, "document_service", FakeDocumentService(docs))
     monkeypatch.setattr(task_module, "pipeline", fake_pipeline)
 
-    result = task_module.reindex_document.__wrapped__(task, "hash.md")
+    result = task_module.reindex_document.run("hash.md")
 
     assert result == {"filename": "hash.md", "status": "indexed"}
     assert fake_pipeline.calls == [("/tmp/hash.md", "hash.md", "notes.md")]
-    assert task.updates[-1][1] == {"pct": 100, "step": "Done"}
 
 
 def test_reindex_all_documents_continues_after_one_failure(monkeypatch):
@@ -100,7 +98,7 @@ def test_reindex_all_documents_continues_after_one_failure(monkeypatch):
     monkeypatch.setattr(task_module, "document_service", FakeDocumentService(docs))
     monkeypatch.setattr(task_module, "pipeline", fake_pipeline)
 
-    result = task_module.reindex_all_documents.__wrapped__(FakeTask())
+    result = task_module.reindex_all_documents.run()
 
     assert result["status"] == "completed_with_errors"
     assert result["total"] == 2

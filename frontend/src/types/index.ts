@@ -2,12 +2,11 @@
 export interface UploadResponse {
   filename: string;
   original_filename: string;
-  size: number;
+  file_size: number;
   file_type: string;
   file_hash: string;
   status: string;
-  message: string;
-  deduplicated: boolean;
+  job_id?: string | null;
 }
 
 export interface GraphNode {

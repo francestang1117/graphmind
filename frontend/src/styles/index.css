@@ -754,10 +754,42 @@ button {
   white-space: nowrap;
 }
 
-.document-main span {
+.document-main > span {
   color: var(--muted);
   font-size: 11px;
   font-weight: 700;
+}
+
+.row-meta {
+  /* File size, current step, and processing mode belong together visually. */
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.row-meta span {
+  min-width: 0;
+}
+
+.row-meta span + span:not(.processing-tag)::before {
+  content: "·";
+  margin-right: 7px;
+  color: var(--soft);
+}
+
+.processing-tag {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.045);
+  color: #c9c5bd;
+  font-size: 10px;
+  letter-spacing: 0;
 }
 
 .row-progress {
@@ -827,6 +859,12 @@ button {
 
 .upload-row.error-row::before {
   background: linear-gradient(#fb7185, #f97316);
+}
+
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .row-action {

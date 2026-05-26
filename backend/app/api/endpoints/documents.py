@@ -25,6 +25,7 @@ from app.core.errors import (
 from app.core.metrics import record_upload
 from app.core.rate_limit import upload_limit
 from app.services.pipeline import process_uploaded_document
+from app.tasks.process_document import process_document
 from app.utils.file_validator import UploadValidationError
 
 
@@ -50,6 +51,7 @@ class UploadResponse(BaseModel):
     file_type: str
     file_hash: str
     status: str = "uploaded"
+    job_id: str | None = None
 
 
 class DuplicateResponse(BaseModel):
@@ -129,12 +131,7 @@ async def upload_document(
         raise UploadRejectedError(str(exc)) from exc
 
     record_upload("accepted", metadata["original_filename"], metadata["file_size"])
-    background_tasks.add_task(
-        process_uploaded_document,
-        metadata["stored_filename"],
-        metadata["file_path"],
-        metadata["original_filename"],
-    )
+    job_id = _queue_processing(background_tasks, metadata)
 
     return UploadResponse(
         filename=metadata["stored_filename"],
@@ -142,6 +139,7 @@ async def upload_document(
         file_size=metadata["file_size"],
         file_type=metadata["file_type"],
         file_hash=metadata["file_hash"],
+        job_id=job_id,
     )
 
 
@@ -235,6 +233,26 @@ def _is_within(path: Path, root: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _queue_processing(background_tasks: BackgroundTasks, metadata: dict) -> str | None:
+    if settings.CELERY_ENABLED:
+        # In Docker/prod the worker owns parsing, graph updates, and indexing.
+        # The id is what the WebSocket endpoint watches.
+        result = process_document.delay(
+            metadata["file_path"],
+            metadata["stored_filename"],
+            metadata["original_filename"],
+        )
+        return getattr(result, "id", None)
+
+    background_tasks.add_task(
+        process_uploaded_document,
+        metadata["stored_filename"],
+        metadata["file_path"],
+        metadata["original_filename"],
+    )
+    return None
 
 
 @router.get("/{filename}", response_model=FileInfo)

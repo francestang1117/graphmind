@@ -78,7 +78,9 @@ Invalidate a refresh token immediately.
 
 ### `POST /documents/upload`
 
-Upload a file. The file is validated and stored immediately; parsing is queued through FastAPI background work after the response.
+Upload a file. The file is validated and stored immediately. Local dev queues
+parsing through FastAPI background work; when `CELERY_ENABLED=true`, parsing is
+sent to Redis/Celery and the response includes a `job_id`.
 
 ```bash
 curl -X POST /api/v1/documents/upload \
@@ -94,7 +96,8 @@ curl -X POST /api/v1/documents/upload \
   "file_size": 14500,
   "file_type": ".md",
   "file_hash": "a1b2c3d4...",
-  "status": "uploaded"
+  "status": "uploaded",
+  "job_id": "4c1b2..."
 }
 ```
 
@@ -108,7 +111,7 @@ curl -X POST /api/v1/documents/upload \
 6. ClamAV scan runs when `VIRUS_SCAN_ENABLED=true`.
 7. File is written to content-addressed local storage.
 8. Duplicate content returns `409`.
-9. Parser work is queued as background work.
+9. Parser work is queued as FastAPI background work or a Celery job.
 
 ### `GET /documents/`
 
@@ -296,7 +299,35 @@ ws.onmessage = (e) => {
 
 Connection closes automatically when the job reaches a terminal state.
 
-The backend WebSocket stream is implemented, but the current upload API does not yet return a Celery `job_id`, so the frontend upload flow is not fully wired to this endpoint yet.
+When `CELERY_ENABLED=true`, the upload response returns `job_id`. The frontend
+can connect to this WebSocket URL to show real processing progress.
+
+## Jobs
+
+### `GET /jobs/{job_id}`
+
+Return the latest job snapshot without keeping a WebSocket open.
+
+```json
+{
+  "state": "PROGRESS",
+  "pct": 45,
+  "step": "Extracting entities"
+}
+```
+
+### `POST /jobs/{job_id}/cancel`
+
+Ask the worker to stop a queued or running job. The frontend uses this for the
+cancel button on an active upload row.
+
+```json
+{
+  "state": "REVOKED",
+  "pct": 0,
+  "step": "Cancelled"
+}
+```
 
 ---
 

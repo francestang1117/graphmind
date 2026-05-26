@@ -16,6 +16,8 @@ interface Props {
   onFilterChange: (filter: StatusFilter) => void;
   onDelete: (filename: string) => void;
   onDismissUpload?: (id: string) => void;
+  onCancelUpload?: (id: string) => void;
+  onRetryUpload?: (id: string) => void;
   onOpenFile?: (filename: string) => void;
   onViewParsed?: (filename: string, label: string) => void;
 }
@@ -86,6 +88,8 @@ export default function DocumentList({
   onFilterChange,
   onDelete,
   onDismissUpload,
+  onCancelUpload,
+  onRetryUpload,
   onOpenFile,
   onViewParsed,
 }: Props) {
@@ -127,7 +131,13 @@ export default function DocumentList({
         {isEmpty && <EmptyDocuments />}
         {hasNoFilteredFiles && <EmptyFilter />}
         {filteredUploads.map((upload) => (
-          <UploadRow upload={upload} key={upload.id} onDismiss={onDismissUpload} />
+          <UploadRow
+            upload={upload}
+            key={upload.id}
+            onCancel={onCancelUpload}
+            onDismiss={onDismissUpload}
+            onRetry={onRetryUpload}
+          />
         ))}
         {filteredFiles.map((file) => (
           <DocumentRow

@@ -73,7 +73,11 @@ Current state:
 
 - A WebSocket endpoint exists for Celery-style job progress.
 - The processing pipeline reports progress through callbacks.
-- Upload does not yet return a real Celery job id to the frontend.
+- Upload returns a Celery `job_id` when `CELERY_ENABLED=true`.
+- The upload hook watches `/ws/jobs/{job_id}` and updates the active upload row.
+- Active upload rows can cancel a Celery job.
+- Failed or cancelled upload rows can retry when the original `File` object is
+  still available in the browser.
 
 Target:
 
@@ -92,7 +96,7 @@ Likely needs:
 
 - job table or Redis job state
 - background worker updates
-- frontend progress subscription hook
+- job history or queue dashboard if long-running jobs become common
 
 ### 5. PDF Parsing Upgrade
 
@@ -170,12 +174,14 @@ Current state:
 - `reindex_document(filename)` exists.
 - `reindex_all_documents()` exists.
 - Optional Celery beat schedule is configured behind `CELERY_REINDEX_ENABLED`.
+- Docker Compose includes Redis, a Celery worker, and Celery beat.
+- Upload returns a `job_id` when `CELERY_ENABLED=true`.
 
 Still needed:
 
-- Run Celery worker/beat with Redis in a real deployment.
 - Add cleanup tasks.
 - Add relation-strength refresh/decay logic if the graph needs it.
+- Persist a small job history if users need to review past failures.
 
 ## Technical Debt
 
@@ -185,9 +191,9 @@ Still needed:
 | User system | JWT + refresh-token MVP | Add frontend auth flow, OAuth2/social login, and workspace/team boundaries |
 | Metadata storage | SQLAlchemy-backed document metadata and parsed artifacts are available; local SQLite is the default dev path | Use PostgreSQL in production and add migrations |
 | File storage | Local SHA-256 content-addressed storage | Add S3/MinIO backend for multi-instance deployments |
-| Task queue | Processing pipeline, Celery-compatible task, and scheduled reindex task exist | Run real Celery worker/beat with Redis and return job ids from upload |
-| WebSocket progress | Celery-style progress stream exists | Connect upload UI to real backend job ids |
-| Error tracking | Structured API errors and backend logging exist | Add Sentry or another error tracking service |
+| Task queue | Redis-backed Celery worker/beat are wired in Docker Compose, with local fallback mode | Add cleanup tasks and production worker tuning |
+| WebSocket progress | Upload rows follow Celery `job_id` progress over WebSocket when Celery is enabled; active rows can cancel and retry | Add job history |
+| Error tracking | Optional Sentry reporting exists for production 5xx errors | Add issue ownership and alert policies |
 | Logging | Most service-level `print()` paths have been replaced with logging | Move toward structured JSON logs for production |
 | Tests | Pytest suite covers current backend modules | Add frontend tests and define coverage targets |
 | API docs | FastAPI OpenAPI plus `docs/API.md` exist | Add more real request/response examples as endpoints stabilize |
@@ -218,7 +224,7 @@ What is real now:
 
 The next practical milestone is:
 
-1. Connect upload UI to real backend job ids and WebSocket progress.
-2. Move production metadata to PostgreSQL with migrations.
-3. Replace the local vector-search MVP with ChromaDB or another vector store.
-4. Add graph persistence before the graph model becomes more complex.
+1. Move production metadata to PostgreSQL with migrations.
+2. Replace the local vector-search MVP with ChromaDB or another vector store.
+3. Add graph persistence before the graph model becomes more complex.
+4. Add a lightweight job history view for long-running background jobs.

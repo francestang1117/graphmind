@@ -39,6 +39,35 @@ def test_upload_returns_stored_file_metadata(temp_document_service):
     assert response.original_filename == "notes.md"
     assert response.status == "uploaded"
     assert response.file_type == ".md"
+    assert response.job_id is None
+
+
+def test_upload_can_queue_celery_job(temp_document_service, monkeypatch):
+    queued = {}
+
+    class FakeAsyncResult:
+        id = "job-123"
+
+    class FakeTask:
+        def delay(self, file_path, filename, original_filename):
+            queued["file_path"] = file_path
+            queued["filename"] = filename
+            queued["original_filename"] = original_filename
+            return FakeAsyncResult()
+
+    monkeypatch.setattr(documents.settings, "CELERY_ENABLED", True)
+    monkeypatch.setattr(documents, "process_document", FakeTask())
+
+    response = run(
+        documents.upload_document(
+            BackgroundTasks(),
+            make_upload("notes.md", b"# Notes\n\nUseful text."),
+        )
+    )
+
+    assert response.job_id == "job-123"
+    assert queued["filename"] == response.filename
+    assert queued["original_filename"] == "notes.md"
 
 
 def test_list_get_and_delete_document(temp_document_service):

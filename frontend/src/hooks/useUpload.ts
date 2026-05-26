@@ -1,7 +1,7 @@
 import axios from "axios";
 import type { Dispatch, SetStateAction } from "react";
 import { useState } from "react";
-import { listDocuments, uploadDocument } from "../services/api";
+import { cancelJob, listDocuments, uploadDocument, watchJobProgress } from "../services/api";
 import { useAppStore } from "../stores/appStore";
 
 export interface UploadState {
@@ -12,8 +12,11 @@ export interface UploadState {
   progress: number;
   step: string;
   status: "uploading" | "done" | "error";
+  processingMode?: "local" | "worker";
+  jobId?: string | null;
+  sourceFile?: File;
   error?: string;
-  errorKind?: "unsupported" | "duplicate" | "failed";
+  errorKind?: "unsupported" | "duplicate" | "failed" | "cancelled";
 }
 
 const steps = ["Uploading", "Validating", "Saving", "Parsing", "Indexing", "Done"];
@@ -21,6 +24,9 @@ const allowedExtensions = new Set([
   ".md", ".pdf", ".txt", ".docx", ".py", ".js", ".ts", ".json", ".csv", ".html", ".htm",
 ]);
 const supportedLabel = ".md, .pdf, .txt, .docx, .py, .js, .ts, .json, .csv, .html";
+// Tiny files can finish before the user sees what happened. Keep the final row
+// around for a beat so "local" vs "worker" is visible.
+const settleDelayMs = 750;
 
 function fileExtension(filename: string) {
   const ext = filename.includes(".") ? `.${filename.split(".").pop()?.toLowerCase() ?? ""}` : "";
@@ -42,8 +48,16 @@ function removeUpload(
   });
 }
 
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function friendlyUploadError(error: unknown, ext: string) {
   // Keep transport-level errors out of the UI; users need the next action, not status codes.
+  if (error instanceof Error && error.message.toLowerCase().includes("cancel")) {
+    return { kind: "cancelled" as const, message: "Processing was cancelled." };
+  }
+
   if (!allowedExtensions.has(ext)) {
     return {
       kind: "unsupported" as const,
@@ -117,15 +131,49 @@ export function useUpload() {
         progress: 0,
         step: steps[0],
         status: "uploading",
+        processingMode: "local",
+        sourceFile: file,
       },
     }));
 
     try {
-      await uploadDocument(file, (pct) => {
+      const uploaded = await uploadDocument(file, (pct) => {
         const step = steps[Math.min(Math.floor(pct / 20), steps.length - 1)];
         update(id, { progress: pct, step });
       });
 
+      if (uploaded.job_id) {
+        // Celery mode: the browser follows the worker instead of guessing.
+        update(id, {
+          jobId: uploaded.job_id,
+          processingMode: "worker",
+          progress: 15,
+          step: "Queued",
+        });
+
+        await watchJobProgress(uploaded.job_id, (job) => {
+          update(id, {
+            progress: Math.max(0, Math.min(100, job.pct ?? 0)),
+            step: job.step || "Processing",
+          });
+        });
+        update(id, {
+          status: "done",
+          progress: 100,
+          step: "Processed by worker",
+        });
+      } else {
+        // Local mode is expected during normal dev. No job id means there is
+        // nothing useful for the cancel button to stop.
+        update(id, {
+          status: "done",
+          progress: 100,
+          step: "Processed locally",
+          processingMode: "local",
+        });
+      }
+
+      await wait(settleDelayMs);
       removeUpload(setUploads, id);
       setFiles(await listDocuments());
     } catch (error) {
@@ -169,7 +217,44 @@ export function useUpload() {
   const uploadMany = (files: FileList | File[]) =>
     Promise.all(Array.from(files).filter(isUsableFile).map((file) => uploadFile(file)));
 
+  const cancelUpload = async (id: string) => {
+    const upload = uploads[id];
+    if (!upload?.jobId) {
+      removeUpload(setUploads, id);
+      return;
+    }
+
+    try {
+      await cancelJob(upload.jobId);
+    } finally {
+      update(id, {
+        status: "error",
+        errorKind: "cancelled",
+        error: "Processing was cancelled.",
+        step: "Cancelled",
+        progress: 0,
+      });
+    }
+  };
+
+  const retryUpload = async (id: string) => {
+    const upload = uploads[id];
+    if (!upload?.sourceFile) {
+      removeUpload(setUploads, id);
+      return;
+    }
+    removeUpload(setUploads, id);
+    await uploadFile(upload.sourceFile);
+  };
+
   const dismissUpload = (id: string) => removeUpload(setUploads, id);
 
-  return { uploads: Object.values(uploads), uploadFile, uploadMany, dismissUpload };
+  return {
+    uploads: Object.values(uploads),
+    uploadFile,
+    uploadMany,
+    cancelUpload,
+    retryUpload,
+    dismissUpload,
+  };
 }

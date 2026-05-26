@@ -4,7 +4,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './styles/index.css'
 import App from './App.tsx'
 
-// React Query is already here for graph/search; uploads still use direct calls.
+// React Query is already here for graph/search; uploads keep their own flow
+// because file transfer and job progress are easier to reason about together.
 const queryClient = new QueryClient()
 
 createRoot(document.getElementById('root')!).render(
