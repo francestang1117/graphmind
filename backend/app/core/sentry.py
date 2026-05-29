@@ -27,11 +27,22 @@ def configure_sentry() -> None:
     sentry_sdk.init(
         dsn=settings.SENTRY_DSN,
         environment=settings.ENVIRONMENT,
-        release=f"{settings.PROJECT_NAME}@{settings.VERSION}",
+        release=sentry_release(),
         traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
         send_default_pii=False,
     )
     log.info("Sentry error tracking enabled for %s", settings.ENVIRONMENT)
+
+
+def sentry_release() -> str:
+    """Build a release name that can point back to a deployed commit."""
+    base = f"{settings.PROJECT_NAME}@{settings.VERSION}"
+    sha = settings.GIT_SHA.strip()
+    if not sha:
+        return base
+    # Twelve chars is enough to identify the commit without making Sentry's
+    # release name noisy.
+    return f"{base}+{sha[:12]}"
 
 
 def capture_exception(exc: BaseException, **context: Any) -> None:
@@ -48,4 +59,3 @@ def capture_exception(exc: BaseException, **context: Any) -> None:
     except Exception as report_error:  # pragma: no cover - do not let reporting break API errors
         # Sentry is helpful, but it should never become the new outage.
         log.warning("Could not report exception to Sentry: %s", report_error)
-

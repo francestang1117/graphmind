@@ -31,6 +31,7 @@ services:
     environment:
       PROJECT_NAME: GraphMind
       VERSION: 0.1.0
+      GIT_SHA: ${GIT_SHA:-}
       ENVIRONMENT: development
       API_V1_PREFIX: /api/v1
       UPLOAD_DIR: /app/uploads
@@ -62,6 +63,7 @@ services:
     environment:
       PROJECT_NAME: GraphMind
       VERSION: 0.1.0
+      GIT_SHA: ${GIT_SHA:-}
       ENVIRONMENT: development
       UPLOAD_DIR: /app/uploads
       DATABASE_URL: postgresql+psycopg://graphmind:graphmind@postgres:5432/graphmind
@@ -88,6 +90,7 @@ services:
     environment:
       PROJECT_NAME: GraphMind
       VERSION: 0.1.0
+      GIT_SHA: ${GIT_SHA:-}
       ENVIRONMENT: development
       UPLOAD_DIR: /app/uploads
       DATABASE_URL: postgresql+psycopg://graphmind:graphmind@postgres:5432/graphmind

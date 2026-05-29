@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     PROJECT_NAME: str = "GraphMind"
     VERSION: str = "0.1.0"
+    # Filled by CI/Docker when available. Local runs can leave it blank.
+    GIT_SHA: str = ""
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
     API_V1_PREFIX: str = "/api/v1"

@@ -788,6 +788,8 @@ quiet by default, but production can set `SENTRY_ENABLED=true` and
 The current pass does three things:
 
 - initializes Sentry with environment and release metadata
+- includes `VERSION` and optional `GIT_SHA` in the release name, so production
+  errors can point back to a specific build
 - keeps personally identifying request data off by default
 - reports controlled 5xx `AppError` failures with the API code, path, method,
   and details
