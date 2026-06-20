@@ -11,6 +11,7 @@ import {
 import { useAppStore } from "../stores/appStore";
 import DocumentList, { type StatusFilter } from "./upload/DocumentList";
 import DocumentOverview from "./upload/DocumentOverview";
+import JobHistory from "./upload/JobHistory";
 import UploadDropzone from "./upload/UploadDropzone";
 
 function parsedHighlights(parsed: ParsedDocumentSummary) {
@@ -77,6 +78,9 @@ export default function UploadPanel() {
   const [loadingParsed, setLoadingParsed] = useState(false);
   const { uploads, uploadMany, cancelUpload, retryUpload, dismissUpload } = useUpload();
   const { files, setFiles, removeFile } = useAppStore();
+  const jobRefreshKey = uploads
+    .map((upload) => `${upload.id}:${upload.jobId ?? ""}:${upload.status}`)
+    .join("|");
 
   useEffect(() => {
     listDocuments()
@@ -132,6 +136,7 @@ export default function UploadPanel() {
     <div className="documents-panel">
       <UploadDropzone onFiles={uploadMany} />
       <DocumentOverview files={files} uploads={uploads} />
+      <JobHistory refreshKey={jobRefreshKey} />
       <DocumentList
         files={files}
         uploads={uploads}

@@ -30,6 +30,7 @@ GraphMind/
 │   │   │       ├── documents.py
 │   │   │       ├── documents_with_markdown.py
 │   │   │       ├── graph.py
+│   │   │       ├── jobs.py
 │   │   │       ├── search.py
 │   │   │       └── websocket.py
 │   │   ├── core/
@@ -50,6 +51,7 @@ GraphMind/
 │   │   │   ├── entity_extractor.py
 │   │   │   ├── file_storage.py
 │   │   │   ├── graph_builder_enhanced.py
+│   │   │   ├── job_repository.py
 │   │   │   ├── markdown_parser.py
 │   │   │   ├── parsed_artifact_repository.py
 │   │   │   ├── persistence_service.py
@@ -166,9 +168,15 @@ SQLite files, and virtual environments are intentionally left out of this map.
   sidecar fallback for local development.
 - `persistence_service.py` and `parsed_artifact_repository.py` persist parsed
   chunks and extracted entities.
+- `graph_repository.py` persists graph nodes and edges in relational tables.
+  The API reads those rows first and only rebuilds from documents when no
+  persisted graph exists yet.
+- `job_repository.py` stores recent background job state so upload work remains
+  visible after refreshes and old finished jobs can be cleaned up.
 - `pipeline.py` is the current single-document processing path used after
   upload and by the Celery-compatible task: parse, persist artifacts, extract
-  entities/relations, update the in-memory graph, and index search chunks.
+  entities/relations, persist graph nodes/edges, update the in-memory graph,
+  and index search chunks.
 - `document_parser.py` is the unified parser for Markdown, TXT, PDF, DOCX,
   Python, JavaScript, TypeScript, JSON, CSV, and HTML. PDF parsing prefers
   pdfplumber and falls back to PyPDF2.
@@ -201,6 +209,9 @@ SQLite files, and virtual environments are intentionally left out of this map.
   when the backend returns a `job_id`, and keeps enough local state to cancel or
   retry an active upload row. Upload rows also show whether the work is running
   locally or as a worker job, which helps during development.
+- `hooks/useJobs.ts` and `components/upload/JobHistory.tsx` show recent
+  processing jobs in the Documents panel, including status, step, progress,
+  errors, and cancel controls for active worker jobs.
 
 ## Test Coverage
 
@@ -219,6 +230,7 @@ The backend currently has tests for:
 - virus scanner behavior
 - WebSocket job snapshots
 - job status/cancel endpoints
+- job history persistence and cleanup
 - application error payloads
 - metrics wiring through the FastAPI app
 
@@ -234,7 +246,7 @@ The project now has real modules for upload, parsing, entity extraction, graph,
 search, chat, auth, rate limiting, persistence, metrics, Celery workers, and
 WebSocket progress. The main things that are still early are:
 
-- graph persistence beyond the current in-memory graph builder
+- deeper graph persistence tooling beyond the current node/edge tables
 - production-grade user/workspace isolation across every artifact
 - frontend login/register flow and token storage
 - GPT-backed answer generation

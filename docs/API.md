@@ -159,6 +159,10 @@ Passive formats such as `.pdf`, `.txt`, `.md`, `.json`, and `.csv` can open inli
 
 ## Knowledge Graph
 
+Graph endpoints read persisted `graph_nodes` / `graph_edges` rows when they
+exist. If a workspace has not been reprocessed since graph persistence was
+added, the API falls back to rebuilding the graph from stored documents.
+
 ### `GET /graph`
 
 Full graph for visualisation:
@@ -303,6 +307,31 @@ When `CELERY_ENABLED=true`, the upload response returns `job_id`. The frontend
 can connect to this WebSocket URL to show real processing progress.
 
 ## Jobs
+
+### `GET /jobs/`
+
+Return recent background jobs for the current user. This is the lightweight
+history behind upload processing; the UI does not have a full job center yet.
+
+```json
+{
+  "total": 1,
+  "jobs": [
+    {
+      "job_id": "4c1b2...",
+      "document_id": "hash.md",
+      "original_filename": "report.md",
+      "status": "SUCCESS",
+      "step": "Done",
+      "progress": 100,
+      "error": "",
+      "created_at": "2026-05-29T00:00:00+00:00",
+      "updated_at": "2026-05-29T00:00:03+00:00",
+      "finished_at": "2026-05-29T00:00:03+00:00"
+    }
+  ]
+}
+```
 
 ### `GET /jobs/{job_id}`
 

@@ -32,7 +32,8 @@ Current state:
 Target:
 
 - PostgreSQL for production document/user metadata.
-- Either Neo4j or relational edge tables for graph persistence.
+- Relational node/edge tables are in place for the MVP graph.
+- Neo4j or richer graph-query tables can come later if traversal needs grow.
 - Migrations before the schema becomes harder to change.
 
 Possible direction:
@@ -78,6 +79,8 @@ Current state:
 - Active upload rows can cancel a Celery job.
 - Failed or cancelled upload rows can retry when the original `File` object is
   still available in the browser.
+- Recent Celery-backed jobs are stored in `processing_jobs` and exposed through
+  `/api/v1/jobs/`.
 
 Target:
 
@@ -96,7 +99,7 @@ Likely needs:
 
 - job table or Redis job state
 - background worker updates
-- job history or queue dashboard if long-running jobs become common
+- queue dashboard if long-running jobs become common
 
 ### 5. PDF Parsing Upgrade
 
@@ -133,7 +136,7 @@ Use cases:
 
 Still needed:
 
-- Persistent graph storage before exports can represent long-term graph history.
+- Stronger persisted graph queries before exports need historical graph views.
 
 ## Low Priority
 
@@ -181,18 +184,18 @@ Still needed:
 
 - Add cleanup tasks.
 - Add relation-strength refresh/decay logic if the graph needs it.
-- Persist a small job history if users need to review past failures.
+- Expand job cleanup rules if job volume grows.
 
 ## Technical Debt
 
 | Area | Current State | Remaining Work |
 | --- | --- | --- |
-| Graph storage | In-memory graph rebuilt from documents | Add Neo4j or persistent relational edge tables |
+| Graph storage | SQLAlchemy-backed graph node/edge tables with in-memory fallback | Add migrations, richer graph queries, or Neo4j if needed |
 | User system | JWT + refresh-token MVP | Add frontend auth flow, OAuth2/social login, and workspace/team boundaries |
 | Metadata storage | SQLAlchemy-backed document metadata and parsed artifacts are available; local SQLite is the default dev path | Use PostgreSQL in production and add migrations |
 | File storage | Local SHA-256 content-addressed storage | Add S3/MinIO backend for multi-instance deployments |
-| Task queue | Redis-backed Celery worker/beat are wired in Docker Compose, with local fallback mode | Add cleanup tasks and production worker tuning |
-| WebSocket progress | Upload rows follow Celery `job_id` progress over WebSocket when Celery is enabled; active rows can cancel and retry | Add job history |
+| Task queue | Redis-backed Celery worker/beat are wired in Docker Compose, with local fallback mode and old job cleanup task | Add production worker tuning |
+| WebSocket progress | Upload rows follow Celery `job_id` progress over WebSocket when Celery is enabled; active rows can cancel/retry and recent jobs are persisted and shown in the Documents panel | Add filters and a detail view for larger queues |
 | Error tracking | Optional Sentry reporting exists for production 5xx errors | Add issue ownership and alert policies |
 | Logging | Most service-level `print()` paths have been replaced with logging | Move toward structured JSON logs for production |
 | Tests | Pytest suite covers current backend modules | Add frontend tests and define coverage targets |
@@ -226,5 +229,5 @@ The next practical milestone is:
 
 1. Move production metadata to PostgreSQL with migrations.
 2. Replace the local vector-search MVP with ChromaDB or another vector store.
-3. Add graph persistence before the graph model becomes more complex.
-4. Add a lightweight job history view for long-running background jobs.
+3. Add graph migrations and relation-quality tooling before the graph model becomes more complex.
+4. Expand the job history UI with filters and per-job details once queue volume grows.

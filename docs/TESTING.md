@@ -15,7 +15,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 Expected current result:
 
 ```text
-95 passed
+134 passed
 ```
 
 If you are starting from a fresh environment:
@@ -46,9 +46,11 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 | `backend/tests/test_document_repository.py` | SQLAlchemy document metadata repository |
 | `backend/tests/test_persistence_service.py` | Lightweight persistence helpers |
 | `backend/tests/test_parsed_artifact_repository.py` | Database persistence for parsed chunks and entities |
+| `backend/tests/test_graph_repository.py` | Database persistence for graph nodes/edges |
 | `backend/tests/test_rate_limit.py` | slowapi wrapper and no-op fallback |
 | `backend/tests/test_virus_scanner.py` | ClamAV response parsing and upload scan boundary |
 | `backend/tests/test_websocket.py` | Celery-style job progress snapshots and WebSocket stream |
+| `backend/tests/test_job_repository.py` | DB-backed job history and cleanup |
 
 ## Running Specific Tests
 
@@ -105,6 +107,9 @@ sqlite3 graphmind.db "select label, text from parsed_entities limit 10;"
 - Job controls are covered by backend tests. For a manual browser check, upload
   a larger file with Celery enabled, cancel the active row, then retry it from
   the same row.
+- Job history is covered by repository tests. With Celery enabled, `GET
+  /api/v1/jobs/` should show recent upload jobs, and the Documents panel should
+  show the same jobs in the Recent jobs section.
 - In local mode, upload rows should show `Local` briefly before disappearing.
   In Celery mode, active rows should show `Worker job` and expose cancel.
 - Coverage reporting is useful later, but there is no enforced 80% coverage gate

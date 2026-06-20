@@ -869,9 +869,81 @@ Completed local uploads now stay visible briefly before the row disappears. It
 is a tiny UI detail, but it makes the system behavior easier to understand while
 testing.
 
+## 2026-05 — Job History and Cleanup
+
+The upload flow now records Celery-backed jobs in the database. Celery is still
+the thing doing the work, but `processing_jobs` keeps the app's view of that
+work: document id, filename, status, step, progress, error, and timestamps.
+
+That gives the backend a place to answer questions like:
+
+- what happened to this job after the browser refreshed?
+- did it finish, fail, or get cancelled?
+- when did it last update?
+
+The `/api/v1/jobs/` endpoint returns recent jobs, while `/api/v1/jobs/{job_id}`
+still returns the live snapshot shape used by the WebSocket flow. Cancel now
+marks the stored row as `REVOKED` too, so the database and the UI do not drift
+apart.
+
+I also added a Celery cleanup task for old terminal jobs. It is opt-in through
+beat settings, with Docker enabling it for the production-like path. The goal is
+to keep useful recent history without turning the jobs table into an audit log
+forever.
+
+The frontend now has a small Recent jobs panel in Documents. It shows the latest
+worker-backed tasks with their current step, progress, error text, and a cancel
+button when the task is still active. It is meant to answer the simple question
+I kept running into during testing: "what is the worker doing right now?"
+
+## 2026-06 — Persisting Graph Nodes and Edges
+
+The graph is no longer only a canvas-time rebuild. After the pipeline extracts
+entities and relation hints for a document, it now writes that document's graph
+slice into `graph_nodes` and `graph_edges`.
+
+I kept this first version relational instead of jumping straight to Neo4j. The
+entity and relation rules are still changing, and SQLAlchemy tables are easier
+to adjust while the model is moving. Each edge carries a `source_document_id`,
+so deleting or reindexing one document can replace just that slice without
+wiping the whole graph.
+
+The Graph API now reads persisted graph rows first. If the database has no graph
+yet, it still falls back to the old rebuild-from-documents path, which keeps old
+local data usable after upgrading.
+
+## 2026-06 — Making the Graph Readable
+
+After graph persistence landed, the graph finally had real rows to draw, but the
+first view was still hard to read. File nodes pulled the canvas into a star, and
+weak relations like `RELATED_TO` and `ASSOCIATED_WITH` made the center look much
+busier than it actually was.
+
+I split the graph view into two modes:
+
+- `Entities` hides source files and focuses on stronger entity/entity edges.
+- `Sources` brings file nodes back, but keeps document edges quieter.
+
+The right panel now does more of the reading work. Selecting a node shows its
+strong relations, source files, and how many weak links are being kept out of
+the canvas. That feels better than trying to draw every label directly on top of
+the graph.
+
+I also removed the old demo graph fallback. It was useful before the backend was
+connected, but it became misleading once deletes and persisted graph rows were
+working: deleting every document should show an empty graph, not a fake neural
+network sample.
+
+On the backend side, relation extraction now has a small project-specific
+stack-relation pass. It can recognize common edges such as `React →
+INTEGRATES_WITH → FastAPI`, `FastAPI → USES → PostgreSQL`, and `Celery → USES →
+Redis` when both entities appear in the same sentence or paragraph. It is still
+rule-based, but it gives the graph a few more useful strong edges without
+pulling in an LLM yet.
+
 ## Current State
 
-As of May 2026, GraphMind has a working foundation:
+As of June 2026, GraphMind has a working foundation:
 
 - FastAPI backend
 - React + TypeScript frontend
@@ -887,18 +959,21 @@ As of May 2026, GraphMind has a working foundation:
 - basic parsers for TXT, PDF, DOCX, Python, JavaScript, TypeScript, JSON, CSV, and HTML
 - pdfplumber-backed PDF text/page/table extraction with PyPDF2 fallback
 - entity extraction MVP with rule-based technical entities and optional spaCy NER
-- in-memory knowledge graph builder connected to uploaded documents
+- SQLAlchemy-backed graph node/edge persistence with in-memory fallback
+- graph UI with entity/source modes and node detail panel
 - vector search MVP over parsed document chunks
 - retrieval-based chat endpoint with local fallback answers and visible fallback reasons
 - web scraper MVP that stores public pages as searchable Markdown documents
 - JWT auth MVP with access/refresh token flow
 - user-scoped document, graph, search, and chat reads
 - Redis-backed rate-limit wrapper with local no-op fallback
-- SQLAlchemy persistence for users and document metadata
+- SQLAlchemy persistence for users, document metadata, parsed artifacts, graph
+  nodes/edges, and job history
 - database-backed document metadata repository with sidecar fallback
 - optional ClamAV virus scan before file storage
 - WebSocket job progress stream for Celery-backed processing
 - frontend upload rows can follow returned Celery `job_id` progress
+- frontend Recent jobs panel shows persisted worker job history
 - Redis-backed Celery worker and beat services in Docker Compose
 - Prometheus-compatible `/metrics` endpoint for API and pipeline counters
 - optional Sentry error tracking for production 5xx failures
@@ -907,15 +982,15 @@ As of May 2026, GraphMind has a working foundation:
 - tests for the core backend pieces
 
 The project is not yet a full knowledge graph system. The graph, search, and
-chat screens can now use real extracted data, but persistence and production
-auth are still early-stage.
+chat screens can now use real extracted data, but relation quality, graph query
+depth, and production auth are still early-stage.
 
 ## Next Steps
 
 The next realistic steps are:
 
 1. Expand the Markdown viewer to show full sections and chunks.
-2. Persist parsed chunks, extracted entities, and graph nodes/edges.
-3. Improve graph quality with better relation extraction and edge weighting.
+2. Improve graph quality with better relation extraction and edge weighting.
+3. Add graph migrations and stronger graph queries.
 4. Add the frontend login/register flow and send Bearer tokens from the API client.
 5. Replace local chat answers with GPT-backed answer generation when the OpenAI layer is ready.

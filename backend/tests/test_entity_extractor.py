@@ -303,9 +303,42 @@ def test_same_sentence_type_pairs_add_weak_relations():
 
     entities = extractor.extract_from_text(text)
     relations = extractor.extract_relations(entities, text)
-    triples = {(rel.source, rel.relation, rel.target, rel.confidence) for rel in relations}
+    relation = next(
+        rel
+        for rel in relations
+        if (rel.source, rel.relation, rel.target) == ("FastAPI", "WRITTEN_IN", "Python")
+    )
 
-    assert ("FastAPI", "WRITTEN_IN", "Python", 0.52) in triples
+    assert relation.confidence >= 0.52
+
+
+def test_known_stack_relations_add_stronger_project_edges():
+    extractor = EntityExtractor(model_name=None)
+    text = (
+        "The React frontend talks to the FastAPI API. "
+        "FastAPI uses PostgreSQL for metadata and Redis for jobs. "
+        "Celery uses Redis for background processing."
+    )
+
+    entities = extractor.extract_from_text(text)
+    relations = extractor.extract_relations(entities, text)
+    triples = {(rel.source, rel.relation, rel.target) for rel in relations}
+
+    assert ("React", "INTEGRATES_WITH", "FastAPI") in triples
+    assert ("FastAPI", "USES", "PostgreSQL") in triples
+    assert ("FastAPI", "USES", "Redis") in triples
+    assert ("Celery", "USES", "Redis") in triples
+
+
+def test_known_stack_relations_stay_local_to_a_sentence_or_paragraph():
+    extractor = EntityExtractor(model_name=None)
+    text = "FastAPI handles uploads.\n\nPostgreSQL appears in a separate note."
+
+    entities = extractor.extract_from_text(text)
+    relations = extractor.extract_relations(entities, text)
+    triples = {(rel.source, rel.relation, rel.target) for rel in relations}
+
+    assert ("FastAPI", "USES", "PostgreSQL") not in triples
 
 
 def test_non_geography_locations_are_blocked_but_domain_entities_remain():

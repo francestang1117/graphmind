@@ -329,6 +329,44 @@ class KnowledgeGraph:
             "edges": [edge.to_dict() for edge in self.edges.values()],
         }
 
+    @classmethod
+    def from_detailed(cls, data: dict[str, Any]) -> "KnowledgeGraph":
+        """Rehydrate a graph from persisted node/edge rows."""
+        graph = cls()
+        for item in data.get("nodes", []):
+            node_id = str(item.get("id") or "")
+            if not node_id:
+                continue
+            graph.nodes[node_id] = GraphNode(
+                id=node_id,
+                label=str(item.get("label") or ""),
+                type=str(item.get("type") or "ENTITY").upper(),
+                sources=list(item.get("sources") or []),
+                confidence=float(item.get("confidence", 1.0) or 0),
+                properties=dict(item.get("properties") or {}),
+                created_at=str(item.get("created_at") or _now()),
+                updated_at=str(item.get("updated_at") or _now()),
+            )
+            graph.node_index[_normalize(graph.nodes[node_id].label)] = node_id
+
+        for item in data.get("edges", []):
+            source = str(item.get("source") or "")
+            target = str(item.get("target") or "")
+            edge_type = str(item.get("type") or "RELATED_TO").upper()
+            if source not in graph.nodes or target not in graph.nodes:
+                continue
+            graph.edges[(source, target, edge_type)] = GraphEdge(
+                source=source,
+                target=target,
+                type=edge_type,
+                confidence=float(item.get("confidence", 1.0) or 0),
+                weight=int(item.get("weight", 1) or 1),
+                sources=list(item.get("sources") or []),
+                created_at=str(item.get("created_at") or _now()),
+                updated_at=str(item.get("updated_at") or _now()),
+            )
+        return graph
+
     def _resolve_relation_node(
         self,
         relation: Any,

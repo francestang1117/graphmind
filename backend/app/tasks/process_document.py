@@ -4,7 +4,9 @@ import logging
 from typing import Any, Dict
 
 from app.core.celery_app import celery_app
+from app.core.config import settings
 from app.services.document_service import document_service
+from app.services.job_repository import job_repository
 from app.services.pipeline import pipeline
 
 
@@ -17,14 +19,42 @@ def process_document(
     file_path: str,
     filename: str = "",
     original_filename: str = "",
+    user_id: str = "",
 ) -> Dict[str, Any]:
-    _progress(self, 5, "Queued document pipeline")
-    return pipeline.process(
-        file_path,
-        filename or file_path.rsplit("/", 1)[-1],
-        original_filename or filename or "",
-        on_progress=lambda step, pct: _progress(self, pct, step),
-    )
+    document_id = filename or file_path.rsplit("/", 1)[-1]
+    display_name = original_filename or filename or ""
+    # The upload route creates the first row, but the worker owns the live
+    # status from here on.
+    _progress(self, 5, "Queued document pipeline", user_id, document_id, display_name)
+    try:
+        result = pipeline.process(
+            file_path,
+            document_id,
+            display_name,
+            user_id=user_id or "local-dev",
+            on_progress=lambda step, pct: _progress(
+                self,
+                pct,
+                step,
+                user_id,
+                document_id,
+                display_name,
+            ),
+        )
+        _progress(self, 100, "Done", user_id, document_id, display_name, status="SUCCESS")
+        return result
+    except Exception as exc:
+        _progress(
+            self,
+            100,
+            "Failed",
+            user_id,
+            document_id,
+            display_name,
+            status="FAILURE",
+            error=str(exc),
+        )
+        raise
 
 
 @celery_app.task(bind=True, name="app.tasks.process_document.reindex_document")
@@ -41,13 +71,51 @@ def reindex_document(
         log.warning("Could not reindex missing document %s", filename)
         return {"filename": filename, "status": "not_found"}
 
-    _progress(self, 5, "Queued document reindex")
-    return pipeline.process(
-        metadata["file_path"],
-        metadata["filename"],
-        metadata.get("original_filename", metadata["filename"]),
-        on_progress=lambda step, pct: _progress(self, pct, step),
+    _progress(
+        self,
+        5,
+        "Queued document reindex",
+        user_id or metadata.get("user_id", ""),
+        filename,
+        metadata.get("original_filename", filename),
     )
+    try:
+        result = pipeline.process(
+            metadata["file_path"],
+            metadata["filename"],
+            metadata.get("original_filename", metadata["filename"]),
+            user_id=user_id or metadata.get("user_id", "local-dev"),
+            on_progress=lambda step, pct: _progress(
+                self,
+                pct,
+                step,
+                user_id or metadata.get("user_id", ""),
+                filename,
+                metadata.get("original_filename", filename),
+            ),
+        )
+        _progress(
+            self,
+            100,
+            "Done",
+            user_id or metadata.get("user_id", ""),
+            filename,
+            metadata.get("original_filename", filename),
+            status="SUCCESS",
+        )
+        return result
+    except Exception as exc:
+        _progress(
+            self,
+            100,
+            "Failed",
+            user_id or metadata.get("user_id", ""),
+            filename,
+            metadata.get("original_filename", filename),
+            status="FAILURE",
+            error=str(exc),
+        )
+        raise
 
 
 @celery_app.task(bind=True, name="app.tasks.process_document.reindex_all_documents")
@@ -56,7 +124,7 @@ def reindex_all_documents(
     user_id: str | None = None,
 ) -> Dict[str, Any]:
     """Reindex current documents without letting one bad file stop the batch."""
-    _progress(self, 5, "Listing documents for reindex")
+    _progress(self, 5, "Listing documents for reindex", user_id or "", "", "Reindex all")
     documents = document_service.list_documents(user_id)
     total = len(documents)
     results: list[dict[str, Any]] = []
@@ -65,16 +133,17 @@ def reindex_all_documents(
     for index, metadata in enumerate(documents, start=1):
         filename = metadata["filename"]
         original = metadata.get("original_filename", filename)
-        # Keep the batch progress simple. A tiny text file and a PDF will not
-        # take the same time, but this is enough for a maintenance task.
+        # Batch progress is file-count based. It is rough, but it keeps the
+        # maintenance task readable without pretending we know each file's cost.
         pct = 5 + int((index - 1) / max(total, 1) * 90)
-        _progress(self, pct, f"Reindexing {original}")
+        _progress(self, pct, f"Reindexing {original}", user_id or "", filename, original)
         try:
             results.append(
                 pipeline.process(
                     metadata["file_path"],
                     filename,
                     original,
+                    user_id=user_id or metadata.get("user_id", "local-dev"),
                 )
             )
         except Exception as exc:
@@ -83,7 +152,7 @@ def reindex_all_documents(
             log.warning("Could not reindex %s: %s", original, exc)
             failures.append({"filename": filename, "error": str(exc)})
 
-    _progress(self, 100, "Reindex complete")
+    _progress(self, 100, "Reindex complete", user_id or "", "", "Reindex all", status="SUCCESS")
     return {
         "status": "completed" if not failures else "completed_with_errors",
         "total": total,
@@ -94,11 +163,49 @@ def reindex_all_documents(
     }
 
 
-def _progress(task, pct: int, step: str) -> None:
+@celery_app.task(bind=True, name="app.tasks.process_document.cleanup_finished_jobs")
+def cleanup_finished_jobs(self) -> Dict[str, Any]:
+    """Delete old finished job rows from the lightweight job history."""
+    _progress(self, 10, "Cleaning old job history", "", "", "Job cleanup")
+    removed = job_repository.cleanup_finished(settings.JOB_HISTORY_RETENTION_DAYS)
+    _progress(self, 100, "Job cleanup complete", "", "", "Job cleanup", status="SUCCESS")
+    return {"status": "completed", "removed": removed}
+
+
+def _progress(
+    task,
+    pct: int,
+    step: str,
+    user_id: str = "",
+    document_id: str = "",
+    original_filename: str = "",
+    *,
+    status: str = "PROGRESS",
+    error: str = "",
+) -> None:
     """Best-effort progress update for Celery workers and the local fallback."""
     update_state = getattr(task, "update_state", None)
+    job_id = ""
+    request = getattr(task, "request", None)
+    if request is not None:
+        job_id = getattr(request, "id", "") or ""
+
+    if job_id:
+        # Keep our DB copy close to Celery's state. The WebSocket is live-only;
+        # this row is what survives refreshes and result-backend expiry.
+        job_repository.upsert(
+            job_id,
+            user_id=user_id,
+            document_id=document_id,
+            original_filename=original_filename,
+            status=status,
+            step=step,
+            progress=pct,
+            error=error,
+        )
+
     if update_state:
-        request = getattr(task, "request", None)
         if request is not None and getattr(request, "id", None) is None:
             return
-        update_state(state="PROGRESS", meta={"pct": pct, "step": step})
+        # Celery's result backend feeds the WebSocket path.
+        update_state(state=status, meta={"pct": pct, "step": step, "error": error})

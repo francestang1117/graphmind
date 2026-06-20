@@ -86,10 +86,20 @@ else:
     )
     # Beat is opt-in. Reindexing is useful, but local dev should not suddenly
     # wake up and reprocess uploads just because Celery is installed.
+    beat_schedule = {}
     if settings.CELERY_REINDEX_ENABLED:
-        celery_app.conf.beat_schedule = {
+        beat_schedule.update({
             "reindex-all-documents": {
                 "task": "app.tasks.process_document.reindex_all_documents",
                 "schedule": settings.CELERY_REINDEX_INTERVAL_SECONDS,
             }
-        }
+        })
+    if settings.CELERY_JOB_CLEANUP_ENABLED:
+        beat_schedule.update({
+            "cleanup-finished-jobs": {
+                "task": "app.tasks.process_document.cleanup_finished_jobs",
+                "schedule": settings.CELERY_JOB_CLEANUP_INTERVAL_SECONDS,
+            }
+        })
+    if beat_schedule:
+        celery_app.conf.beat_schedule = beat_schedule

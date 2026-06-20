@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     CELERY_REINDEX_ENABLED: bool = False
     CELERY_REINDEX_INTERVAL_SECONDS: int = 86400
     CELERY_TASK_DEFAULT_QUEUE: str = "documents"
+    CELERY_JOB_CLEANUP_ENABLED: bool = False
+    CELERY_JOB_CLEANUP_INTERVAL_SECONDS: int = 86400
+    JOB_HISTORY_RETENTION_DAYS: int = 30
 
     SPACY_MODEL: str = "en_core_web_sm"
     SPACY_EXTRA_MODELS: List[str] = ["zh_core_web_sm"]

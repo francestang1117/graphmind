@@ -15,6 +15,7 @@ from app.core.rate_limit import graph_read_limit
 from app.services.document_service import document_service
 from app.services.entity_extractor import entity_extractor
 from app.services.graph_builder_enhanced import KnowledgeGraph, knowledge_graph
+from app.services.graph_repository import graph_repository
 
 
 router = APIRouter()
@@ -120,6 +121,12 @@ async def export_graph(
 
 def rebuild_graph_from_documents(user_id: Optional[str] = None) -> KnowledgeGraph:
     """Build a fresh in-memory graph from stored files and cached parses."""
+    persisted = graph_repository.load_graph(user_id)
+    if persisted.get("nodes"):
+        return KnowledgeGraph.from_detailed(persisted)
+
+    # Older local uploads may not have graph rows yet. Keep the graph panel
+    # useful until those files are reprocessed into graph_nodes/graph_edges.
     graph = knowledge_graph
     graph.clear()
 

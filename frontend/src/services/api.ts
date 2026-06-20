@@ -21,6 +21,20 @@ export interface JobProgress {
   step: string;
   result?: Record<string, unknown>;
   error?: string;
+  job?: JobHistoryItem;
+}
+
+export interface JobHistoryItem {
+  job_id: string;
+  document_id: string;
+  original_filename: string;
+  status: string;
+  step: string;
+  progress: number;
+  error?: string;
+  created_at?: string;
+  updated_at?: string;
+  finished_at?: string | null;
 }
 
 export interface GraphNode {
@@ -139,6 +153,9 @@ export const getJob = (jobId: string): Promise<JobProgress> =>
 
 export const cancelJob = (jobId: string): Promise<JobProgress> =>
   http.post(`/jobs/${encodeURIComponent(jobId)}/cancel`).then((r) => r.data);
+
+export const listJobs = (limit = 50): Promise<JobHistoryItem[]> =>
+  http.get("/jobs/", { params: { limit } }).then((r) => r.data.jobs ?? []);
 
 export const listDocuments = (): Promise<FileInfo[]> =>
   http.get("/documents/").then((r) => r.data.files ?? []);

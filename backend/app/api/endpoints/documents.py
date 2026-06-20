@@ -24,6 +24,7 @@ from app.core.errors import (
 )
 from app.core.metrics import record_upload
 from app.core.rate_limit import upload_limit
+from app.services.job_repository import job_repository
 from app.services.pipeline import process_uploaded_document
 from app.tasks.process_document import process_document
 from app.utils.file_validator import UploadValidationError
@@ -131,7 +132,7 @@ async def upload_document(
         raise UploadRejectedError(str(exc)) from exc
 
     record_upload("accepted", metadata["original_filename"], metadata["file_size"])
-    job_id = _queue_processing(background_tasks, metadata)
+    job_id = _queue_processing(background_tasks, metadata, _user_id(user))
 
     return UploadResponse(
         filename=metadata["stored_filename"],
@@ -235,7 +236,7 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
 
 
-def _queue_processing(background_tasks: BackgroundTasks, metadata: dict) -> str | None:
+def _queue_processing(background_tasks: BackgroundTasks, metadata: dict, user_id: str) -> str | None:
     if settings.CELERY_ENABLED:
         # In Docker/prod the worker owns parsing, graph updates, and indexing.
         # The id is what the WebSocket endpoint watches.
@@ -243,14 +244,24 @@ def _queue_processing(background_tasks: BackgroundTasks, metadata: dict) -> str 
             metadata["file_path"],
             metadata["stored_filename"],
             metadata["original_filename"],
+            user_id,
         )
-        return getattr(result, "id", None)
+        job_id = getattr(result, "id", None)
+        if job_id:
+            job_repository.create(
+                job_id,
+                user_id=user_id,
+                document_id=metadata["stored_filename"],
+                original_filename=metadata["original_filename"],
+            )
+        return job_id
 
     background_tasks.add_task(
         process_uploaded_document,
         metadata["stored_filename"],
         metadata["file_path"],
         metadata["original_filename"],
+        user_id,
     )
     return None
 

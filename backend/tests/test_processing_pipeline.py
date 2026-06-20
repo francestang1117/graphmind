@@ -16,11 +16,13 @@ def test_processing_pipeline_updates_graph_and_search_index(tmp_path):
     graph = KnowledgeGraph()
     store = VectorStore()
     progress = []
+    persisted = []
 
     result = ProcessingPipeline(
         extractor=EntityExtractor(model_name=None),
         graph=graph,
         store=store,
+        graph_repo=FakeGraphRepository(persisted),
     ).process(
         str(file_path),
         "hash.md",
@@ -34,8 +36,18 @@ def test_processing_pipeline_updates_graph_and_search_index(tmp_path):
     assert result["indexed_chunks"] >= 1
     assert graph.get_stats()["total_nodes"] >= 4
     assert store.hybrid_search("semantic search", 3)
+    assert persisted[0]["document_id"] == "hash.md"
+    assert persisted[0]["graph"]["nodes"]
     assert progress[0] == ("Parsing document", 15)
     assert progress[-1] == ("Done", 100)
+
+
+class FakeGraphRepository:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def replace_document_graph(self, **kwargs):
+        self.calls.append(kwargs)
 
 
 class FakeTask:
@@ -62,7 +74,7 @@ class FakePipeline:
         self.calls = []
         self.fail_for = set(fail_for or [])
 
-    def process(self, file_path, filename, original_filename="", on_progress=None):
+    def process(self, file_path, filename, original_filename="", user_id="local-dev", on_progress=None):
         self.calls.append((file_path, filename, original_filename))
         if filename in self.fail_for:
             raise RuntimeError("parse failed")

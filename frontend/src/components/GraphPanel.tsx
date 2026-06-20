@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { House, Minus, Plus, RefreshCcw } from "lucide-react";
 import { useGraph } from "../hooks/useGraph";
 import { useAppStore } from "../stores/appStore";
@@ -34,6 +35,12 @@ const typeLabels: Record<string, string> = {
   CLASS: "Class",
 };
 
+// Keep these out of the main view for now; they make the graph noisy fast.
+const weakRelations = new Set(["RELATED_TO", "ASSOCIATED_WITH", "REFERENCES"]);
+
+// Labels are only worth showing when the relation says something specific.
+const labeledRelations = new Set(["USES", "USED_BY", "WRITTEN_IN", "HAS_FRAMEWORK", "HAS_LIBRARY", "INTEGRATES_WITH"]);
+
 interface SimNode extends GraphNode {
   x: number;
   y: number;
@@ -48,16 +55,25 @@ interface ViewState {
   y: number;
 }
 
+interface RelationRow {
+  label: string;
+  relation: string;
+  direction: "in" | "out";
+  type: string;
+  weak: boolean;
+}
+
 export default function GraphPanel() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef<number>(0);
   const simRef = useRef<SimNode[]>([]);
   const dragRef = useRef<{ node: SimNode; dx: number; dy: number } | null>(null);
   const panRef = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
-  const { nodes, edges, stats, loading, refreshing, refetch } = useGraph();
+  const { nodes, edges, stats, loading, refreshing, error, refetch } = useGraph();
   const setGraphStats = useAppStore((state) => state.setGraphStats);
   const [selected, setSelected] = useState<SimNode | null>(null);
   const [hovered, setHovered] = useState<SimNode | null>(null);
+  const [showSources, setShowSources] = useState(false);
   const [view, setView] = useState<ViewState>({ scale: 1, x: 0, y: 0 });
   const viewRef = useRef(view);
 
@@ -69,20 +85,43 @@ export default function GraphPanel() {
     setGraphStats(stats);
   }, [setGraphStats, stats]);
 
-  useEffect(() => {
-    resetLayout();
-  }, [nodes]);
+  const displayNodes = useMemo(() => {
+    if (showSources) return nodes;
 
-  const strongEdges = useMemo(() => edges.filter((edge) => !isWeakEdge(edge)), [edges]);
+    // Default to the actual knowledge nodes; files can come back in Sources.
+    const entityNodes = nodes.filter((node) => node.type !== "DOCUMENT");
+    const entityNodeIds = new Set(entityNodes.map((node) => node.id));
+    const strongEntityIds = new Set<string>();
+    edges.forEach((edge) => {
+      if (!entityNodeIds.has(edge.source) || !entityNodeIds.has(edge.target)) return;
+      if (isWeakEdge(edge)) return;
+      strongEntityIds.add(edge.source);
+      strongEntityIds.add(edge.target);
+    });
 
-  const resetLayout = () => {
+    // Keep a few big nodes even if their current edges are weak.
+    const focusedNodes = entityNodes.filter((node) => strongEntityIds.has(node.id) || (node.size ?? 0) >= 14);
+    return focusedNodes.length >= 6 ? focusedNodes : entityNodes;
+  }, [edges, nodes, showSources]);
+
+  const displayNodeIds = useMemo(() => new Set(displayNodes.map((node) => node.id)), [displayNodes]);
+
+  const displayEdges = useMemo(() => {
+    return edges.filter((edge) => {
+      if (!displayNodeIds.has(edge.source) || !displayNodeIds.has(edge.target)) return false;
+      if (!showSources && isSourceEdge(edge)) return false;
+      return true;
+    });
+  }, [displayNodeIds, edges, showSources]);
+
+  const resetLayout = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const width = canvas.clientWidth || 900;
     const height = canvas.clientHeight || 600;
-    const radiusX = width * (nodes.length <= 12 ? 0.27 : 0.32);
-    const radiusY = height * (nodes.length <= 12 ? 0.25 : 0.3);
-    simRef.current = nodes.map((node, index) => {
+    const radiusX = width * (displayNodes.length <= 12 ? 0.28 : 0.35);
+    const radiusY = height * (displayNodes.length <= 12 ? 0.26 : 0.32);
+    simRef.current = displayNodes.map((node, index) => {
       const angle = index * 2.399963229728653;
       const ring = 0.58 + (index % 4) * 0.12;
       return {
@@ -91,17 +130,71 @@ export default function GraphPanel() {
         y: height / 2 + Math.sin(angle) * radiusY * ring,
         vx: 0,
         vy: 0,
-        r: Math.max(7, Math.min(18, node.size || 8)),
+        r: node.type === "DOCUMENT" ? Math.max(6, Math.min(10, node.size || 8)) : Math.max(7, Math.min(18, node.size || 8)),
       };
     });
-  };
+  }, [displayNodes]);
+
+  useEffect(() => {
+    resetLayout();
+  }, [resetLayout]);
+
+  const activeSelected = selected && displayNodeIds.has(selected.id) ? selected : null;
+  const activeHovered = hovered && displayNodeIds.has(hovered.id) ? hovered : null;
+
+  const strongEdges = useMemo(() => displayEdges.filter((edge) => !isWeakEdge(edge)), [displayEdges]);
+  const sourceViewEdges = useMemo(
+    // In Sources mode, file links can shape the layout. Weak entity links cannot.
+    () => displayEdges.filter((edge) => isSourceEdge(edge) || !isWeakEdge(edge)),
+    [displayEdges],
+  );
 
   const typeCounts = useMemo(() => {
-    return nodes.reduce<Record<string, number>>((acc, node) => {
+    return displayNodes.reduce<Record<string, number>>((acc, node) => {
       acc[node.type] = (acc[node.type] ?? 0) + 1;
       return acc;
     }, {});
-  }, [nodes]);
+  }, [displayNodes]);
+
+  const nodeById = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
+  const selectedDetail = useMemo(() => {
+    if (!activeSelected) return null;
+
+    const relationRows: RelationRow[] = [];
+    const sourceNames = new Set<string>();
+
+    edges.forEach((edge) => {
+      const outgoing = edge.source === activeSelected.id;
+      const incoming = edge.target === activeSelected.id;
+      if (!outgoing && !incoming) return;
+
+      const other = nodeById.get(outgoing ? edge.target : edge.source);
+      if (!other) return;
+
+      if (other.type === "DOCUMENT" || isSourceEdge(edge)) {
+        sourceNames.add(other.label);
+        return;
+      }
+
+      relationRows.push({
+        label: other.label,
+        relation: formatRelation(edge.type ?? "RELATED_TO"),
+        direction: outgoing ? "out" : "in",
+        type: other.type,
+        weak: isWeakEdge(edge),
+      });
+    });
+
+    const strongRows = relationRows.filter((row) => !row.weak).slice(0, 8);
+    const weakCount = relationRows.length - strongRows.length;
+
+    return {
+      strongRows,
+      weakCount,
+      sources: [...sourceNames].sort().slice(0, 6),
+      totalConnections: relationRows.length + sourceNames.size,
+    };
+  }, [activeSelected, edges, nodeById]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -110,7 +203,7 @@ export default function GraphPanel() {
     if (!ctx) return;
 
     const render = () => {
-      // Small canvas layout for now; no graph library yet.
+      // The graph rules are still moving, so keep the renderer easy to tune.
       const dpr = window.devicePixelRatio || 1;
       const width = canvas.clientWidth || 900;
       const height = canvas.clientHeight || 600;
@@ -121,10 +214,12 @@ export default function GraphPanel() {
 
       const { scale, x: panX, y: panY } = viewRef.current;
       const idMap = new Map(simRef.current.map((node) => [node.id, node]));
-      const focus = hovered ?? selected;
+      const focus = activeHovered ?? activeSelected;
       const renderEdges = focus
-        ? edges.filter((edge) => !isWeakEdge(edge) || edge.source === focus.id || edge.target === focus.id)
-        : strongEdges;
+        ? displayEdges.filter((edge) => isSourceEdge(edge) || !isWeakEdge(edge) || edge.source === focus.id || edge.target === focus.id)
+        : showSources
+          ? sourceViewEdges
+          : strongEdges;
 
       simRef.current.forEach((node) => {
         simRef.current.forEach((other) => {
@@ -146,14 +241,16 @@ export default function GraphPanel() {
         node.vy += (height / 2 - node.y) * 0.0008;
       });
 
-      strongEdges.forEach((edge) => {
+      const layoutEdges = showSources ? sourceViewEdges : strongEdges;
+      layoutEdges.forEach((edge) => {
         const source = idMap.get(edge.source);
         const target = idMap.get(edge.target);
         if (!source || !target) return;
         const dx = target.x - source.x;
         const dy = target.y - source.y;
         const distance = Math.hypot(dx, dy) || 1;
-        const force = (distance - 175) * 0.034;
+        const ideal = isSourceEdge(edge) ? 230 : 170;
+        const force = (distance - ideal) * (isSourceEdge(edge) ? 0.012 : 0.034);
         source.vx += (dx / distance) * force;
         source.vy += (dy / distance) * force;
         target.vx -= (dx / distance) * force;
@@ -180,6 +277,9 @@ export default function GraphPanel() {
         y: (node.y + panY) * scale,
       });
 
+      // If labels collide, skip the later one. A missing label is better than a messy one.
+      const relationLabelBoxes: Array<{ x: number; y: number; width: number; height: number }> = [];
+
       renderEdges.forEach((edge) => {
         const source = idMap.get(edge.source);
         const target = idMap.get(edge.target);
@@ -193,16 +293,24 @@ export default function GraphPanel() {
         const weak = isWeakEdge(edge);
         ctx.strokeStyle = active
           ? weak
-            ? "rgba(167,139,250,.22)"
-            : "rgba(255,255,255,.2)"
+            ? "rgba(167,139,250,.16)"
+            : "rgba(255,255,255,.24)"
           : "rgba(255,255,255,.05)";
-        ctx.lineWidth = active ? (weak ? 0.9 : 1.5) : 0.8;
+        ctx.lineWidth = active ? (weak ? 0.7 : 1.55) : 0.8;
         ctx.stroke();
-        if (focus && active && edge.type && scale > 0.65 && !weak) {
+        if (focus && active && edge.type && scale > 0.65 && shouldDrawRelationLabel(edge)) {
           ctx.font = "600 10px Inter, system-ui";
-          ctx.fillStyle = focus ? "rgba(167,139,250,.9)" : "rgba(210,210,210,.42)";
+          const label = formatRelation(edge.type);
+          const labelX = (sourcePoint.x + targetPoint.x) / 2;
+          const labelY = (sourcePoint.y + targetPoint.y) / 2 - 5;
+          const labelWidth = ctx.measureText(label).width;
+          const labelBox = { x: labelX - labelWidth / 2, y: labelY - 10, width: labelWidth, height: 14 };
+          const overlaps = relationLabelBoxes.some((box) => boxesOverlap(box, labelBox));
+          if (overlaps) return;
+          relationLabelBoxes.push(labelBox);
+          ctx.fillStyle = "rgba(167,139,250,.88)";
           ctx.textAlign = "center";
-          ctx.fillText(formatRelation(edge.type), (sourcePoint.x + targetPoint.x) / 2, (sourcePoint.y + targetPoint.y) / 2 - 5);
+          ctx.fillText(label, labelX, labelY);
         }
       });
 
@@ -231,7 +339,7 @@ export default function GraphPanel() {
           !muted &&
           (isSelected ||
             isConnected ||
-            node.type === "DOCUMENT" ||
+            (node.type === "DOCUMENT" && showSources) ||
             node.size >= 12 ||
             simRef.current.length <= 28);
 
@@ -260,7 +368,7 @@ export default function GraphPanel() {
 
     frameRef.current = requestAnimationFrame(render);
     return () => cancelAnimationFrame(frameRef.current);
-  }, [edges, strongEdges, selected, hovered]);
+  }, [activeHovered, activeSelected, displayEdges, showSources, sourceViewEdges, strongEdges]);
 
   const screenToWorld = (x: number, y: number) => {
     const { scale, x: panX, y: panY } = viewRef.current;
@@ -352,6 +460,18 @@ export default function GraphPanel() {
     <div className="graph-panel">
       <div className="graph-canvas-wrap">
         {loading && <div className="graph-loading">Loading graph...</div>}
+        {!loading && !displayNodes.length && (
+          <div className="graph-empty">
+            <strong>No graph yet</strong>
+            <span>Upload and process a document to build nodes and relations.</span>
+          </div>
+        )}
+        {!loading && error && (
+          <div className="graph-empty graph-empty-error">
+            <strong>Graph unavailable</strong>
+            <span>Check that the backend is running, then refresh this view.</span>
+          </div>
+        )}
         <canvas
           ref={canvasRef}
           onPointerDown={handlePointerDown}
@@ -369,13 +489,29 @@ export default function GraphPanel() {
           </button>
         </div>
         <div className="graph-caption">
-          {stats.total_nodes} nodes · {strongEdges.length} shown edges
-          {edges.length !== strongEdges.length ? ` · ${edges.length - strongEdges.length} weak hidden` : ""}
-          {hovered ? ` · ${hovered.label}` : selected ? ` · ${selected.label}` : " · drag nodes, scroll to zoom"}
+          {displayNodes.length} shown nodes · {strongEdges.length} entity edges
+          {!showSources ? ` · ${nodes.length - displayNodes.length} sources hidden` : ""}
+          {activeHovered ? ` · ${activeHovered.label}` : activeSelected ? ` · ${activeSelected.label}` : " · drag nodes, scroll to zoom"}
         </div>
-        {hovered && <GraphTooltip node={hovered} edges={edges} />}
+        {activeHovered && <GraphTooltip node={activeHovered} edges={edges} />}
       </div>
       <aside className="graph-side">
+        <div className="graph-view-card">
+          <div className="section-heading">Graph view</div>
+          <div className="graph-mode-toggle" role="group" aria-label="Graph view mode">
+            <button className={!showSources ? "active" : ""} onClick={() => setShowSources(false)}>
+              Entities
+            </button>
+            <button className={showSources ? "active" : ""} onClick={() => setShowSources(true)}>
+              Sources
+            </button>
+          </div>
+          <p>
+            {showSources
+              ? "Show the files behind the graph, with document links kept quieter than entity links."
+              : "Hide file nodes for a cleaner look at concepts, tools, and stronger relations."}
+          </p>
+        </div>
         <div className="section-heading">Node types</div>
         <div className="legend-list">
           {Object.entries(typeCounts).map(([type, count]) => (
@@ -388,16 +524,79 @@ export default function GraphPanel() {
         </div>
         <div className="node-detail">
           <div className="section-heading">Selection</div>
-          {selected ? (
-            <>
-              <strong>{selected.label}</strong>
-              <span>{selected.type.replaceAll("_", " ")}</span>
-            </>
+          {activeSelected ? (
+            <NodeDetail node={activeSelected} detail={selectedDetail} />
           ) : (
             <p>Select a node to focus its neighborhood.</p>
           )}
         </div>
       </aside>
+    </div>
+  );
+}
+
+function NodeDetail({
+  node,
+  detail,
+}: {
+  node: SimNode;
+  detail: {
+    strongRows: RelationRow[];
+    weakCount: number;
+    sources: string[];
+    totalConnections: number;
+  } | null;
+}) {
+  return (
+    <div className="node-detail-body">
+      <div className="node-detail-title">
+        <span style={{ background: colors[node.type] ?? "#a1a1aa" }} />
+        <strong>{node.label}</strong>
+      </div>
+      <div className="node-detail-meta">
+        <span>{node.type.replaceAll("_", " ")}</span>
+        <span>{detail?.totalConnections ?? 0} connections</span>
+      </div>
+
+      <DetailSection title="Strong relations" empty="No strong relations yet.">
+        {detail?.strongRows.map((row) => (
+          <div className="relation-row" key={`${row.direction}-${row.relation}-${row.label}`}>
+            <span>{row.direction === "out" ? "→" : "←"}</span>
+            <div>
+              <strong>{row.label}</strong>
+              <em>{row.relation}</em>
+            </div>
+          </div>
+        ))}
+      </DetailSection>
+
+      <DetailSection title="Source files" empty="No source file edge visible.">
+        {detail?.sources.map((source) => (
+          <div className="source-row" key={source}>{truncateLabel(source, 30)}</div>
+        ))}
+      </DetailSection>
+
+      {Boolean(detail?.weakCount) && (
+        <p className="weak-note">{detail?.weakCount} weaker links hidden from the canvas.</p>
+      )}
+    </div>
+  );
+}
+
+function DetailSection({
+  title,
+  empty,
+  children,
+}: {
+  title: string;
+  empty: string;
+  children?: ReactNode;
+}) {
+  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
+  return (
+    <div className="detail-section">
+      <span>{title}</span>
+      {hasChildren ? children : <p>{empty}</p>}
     </div>
   );
 }
@@ -428,7 +627,21 @@ function formatRelation(type: string) {
 }
 
 function isWeakEdge(edge: GraphEdge) {
-  return edge.type === "RELATED_TO" && (edge.confidence ?? 1) < 0.7;
+  if (isSourceEdge(edge)) return true;
+  return weakRelations.has(edge.type ?? "") || (edge.confidence ?? 1) < 0.7;
+}
+
+function isSourceEdge(edge: GraphEdge) {
+  const relation = edge.type ?? "";
+  return (
+    edge.source.startsWith("doc:") ||
+    edge.target.startsWith("doc:") ||
+    ["CONTAINS", "DISCUSSES", "MENTIONS"].includes(relation)
+  );
+}
+
+function shouldDrawRelationLabel(edge: GraphEdge) {
+  return Boolean(edge.type && labeledRelations.has(edge.type));
 }
 
 function boxesOverlap(

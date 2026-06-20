@@ -97,8 +97,10 @@ class DocumentService:
             else:
                 mark_document_deleted(filename, user_id)
             from app.services.parsed_artifact_repository import parsed_artifact_repository
+            from app.services.graph_repository import graph_repository
 
             parsed_artifact_repository.delete_for_document(filename)
+            graph_repository.delete_for_document(filename, user_id)
         return deleted
 
     def _db_available(self) -> bool:

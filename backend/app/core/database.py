@@ -53,8 +53,11 @@ def init_db() -> None:
     # import cycle during module import.
     from app.models.persistence import (  # noqa: F401
         DocumentRecord,
+        GraphEdgeRecord,
+        GraphNodeRecord,
         ParsedChunkRecord,
         ParsedEntityRecord,
+        ProcessingJobRecord,
         UserRecord,
     )
 

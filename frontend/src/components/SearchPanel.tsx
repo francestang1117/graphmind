@@ -27,10 +27,12 @@ export default function SearchPanel() {
   useEffect(() => {
     const trimmed = query.trim();
     if (!trimmed) {
-      setResults([]);
-      setError("");
-      setLoading(false);
-      return;
+      const timeout = window.setTimeout(() => {
+        setResults([]);
+        setError("");
+        setLoading(false);
+      }, 0);
+      return () => window.clearTimeout(timeout);
     }
 
     const timeout = window.setTimeout(async () => {

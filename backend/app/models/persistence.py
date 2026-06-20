@@ -92,3 +92,84 @@ class ParsedEntityRecord(Base):
     context: Mapped[str] = mapped_column(Text, default="")
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class GraphNodeRecord(Base):
+    """One persisted graph node.
+
+    Nodes can be shared by several documents, so sources are kept as JSON text
+    for now. A join table can come later if graph history gets more serious.
+    """
+
+    __tablename__ = "graph_nodes"
+    __table_args__ = (
+        UniqueConstraint("user_id", "node_id", name="uq_graph_nodes_user_node"),
+    )
+
+    id: Mapped[str] = mapped_column(String(320), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    node_id: Mapped[str] = mapped_column(String(255), index=True)
+    label: Mapped[str] = mapped_column(String(255), index=True)
+    node_type: Mapped[str] = mapped_column(String(80), default="ENTITY", index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    sources_json: Mapped[str] = mapped_column(Text, default="[]")
+    source_document_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    properties_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class GraphEdgeRecord(Base):
+    """One persisted graph edge for a source document.
+
+    Storing source_document_id on the edge keeps reindex/delete scoped to one
+    file instead of forcing a full graph rebuild.
+    """
+
+    __tablename__ = "graph_edges"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "source_node_id",
+            "target_node_id",
+            "relation_type",
+            "source_document_id",
+            name="uq_graph_edges_user_relation_doc",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(320), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    source_node_id: Mapped[str] = mapped_column(String(255), index=True)
+    target_node_id: Mapped[str] = mapped_column(String(255), index=True)
+    relation_type: Mapped[str] = mapped_column(String(80), default="RELATED_TO", index=True)
+    source_document_id: Mapped[str] = mapped_column(String(255), index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    weight: Mapped[int] = mapped_column(Integer, default=1)
+    sources_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ProcessingJobRecord(Base):
+    """One background job as the app sees it.
+
+    Celery owns execution; this table gives the API and UI a stable place to
+    look after a refresh or after the WebSocket has gone away.
+    """
+
+    __tablename__ = "processing_jobs"
+
+    job_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    document_id: Mapped[str] = mapped_column(String(255), default="", index=True)
+    original_filename: Mapped[str] = mapped_column(String(255), default="")
+    status: Mapped[str] = mapped_column(String(32), default="PENDING", index=True)
+    step: Mapped[str] = mapped_column(String(255), default="Queued")
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    # Only filled once the job is no longer active. Cleanup uses this instead
+    # of updated_at so a long-running job is never removed by age alone.
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

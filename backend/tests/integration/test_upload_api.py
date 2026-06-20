@@ -49,14 +49,24 @@ def test_upload_can_queue_celery_job(temp_document_service, monkeypatch):
         id = "job-123"
 
     class FakeTask:
-        def delay(self, file_path, filename, original_filename):
+        def delay(self, file_path, filename, original_filename, user_id):
             queued["file_path"] = file_path
             queued["filename"] = filename
             queued["original_filename"] = original_filename
+            queued["user_id"] = user_id
             return FakeAsyncResult()
+
+    class FakeJobRepository:
+        def __init__(self):
+            self.created = []
+
+        def create(self, job_id, **kwargs):
+            self.created.append((job_id, kwargs))
 
     monkeypatch.setattr(documents.settings, "CELERY_ENABLED", True)
     monkeypatch.setattr(documents, "process_document", FakeTask())
+    fake_jobs = FakeJobRepository()
+    monkeypatch.setattr(documents, "job_repository", fake_jobs)
 
     response = run(
         documents.upload_document(
@@ -68,6 +78,8 @@ def test_upload_can_queue_celery_job(temp_document_service, monkeypatch):
     assert response.job_id == "job-123"
     assert queued["filename"] == response.filename
     assert queued["original_filename"] == "notes.md"
+    assert queued["user_id"] == "local-dev"
+    assert fake_jobs.created[0][0] == "job-123"
 
 
 def test_list_get_and_delete_document(temp_document_service):

@@ -10,6 +10,7 @@ from typing import Any, Callable, Optional
 
 from app.services.entity_extractor import EntityExtractor, entity_extractor
 from app.services.graph_builder_enhanced import KnowledgeGraph, knowledge_graph
+from app.services.graph_repository import GraphRepository, graph_repository
 from app.services.vector_store import VectorStore, vector_store
 from app.core.metrics import record_pipeline
 
@@ -49,16 +50,19 @@ class ProcessingPipeline:
         extractor: EntityExtractor = entity_extractor,
         graph: KnowledgeGraph = knowledge_graph,
         store: VectorStore = vector_store,
+        graph_repo: GraphRepository = graph_repository,
     ) -> None:
         self.extractor = extractor
         self.graph = graph
         self.store = store
+        self.graph_repo = graph_repo
 
     def process(
         self,
         file_path: str,
         filename: str,
         original_filename: str = "",
+        user_id: str = "local-dev",
         on_progress: Optional[ProgressCallback] = None,
     ) -> dict[str, Any]:
         """Process a stored file and return a compact summary.
@@ -80,9 +84,17 @@ class ProcessingPipeline:
             relations = self.extractor.extract_relations(entities, parsed.get("content", ""))
 
             self._progress(on_progress, "Updating graph", 75)
-            # The graph is still session-local, so upload/reindex needs to feed
-            # it right away instead of waiting for a future persistent graph DB.
             self.graph.add_document(display_name, entities, relations, document_id=f"doc:{filename}")
+            # The global graph keeps the current process feeling live. This
+            # smaller graph is just the current file's slice, which is what the
+            # DB needs for clean reindex/delete behavior.
+            document_graph = KnowledgeGraph()
+            document_graph.add_document(display_name, entities, relations, document_id=f"doc:{filename}")
+            self.graph_repo.replace_document_graph(
+                user_id=user_id,
+                document_id=filename,
+                graph=document_graph.export_detailed(),
+            )
             graph_stats = self.graph.get_stats()
 
             self._progress(on_progress, "Indexing chunks", 90)
@@ -145,9 +157,10 @@ def process_uploaded_document(
     filename: str,
     file_path: str,
     original_filename: str = "",
+    user_id: str = "local-dev",
 ) -> dict[str, Any]:
     """Background-task friendly wrapper used after upload."""
-    return pipeline.process(file_path, filename, original_filename)
+    return pipeline.process(file_path, filename, original_filename, user_id=user_id)
 
 
 pipeline = ProcessingPipeline()

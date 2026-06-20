@@ -201,6 +201,32 @@ TYPE_PAIR_RELATIONS: dict[tuple[str, str], str] = {
 }
 
 
+KNOWN_STACK_RELATIONS: tuple[tuple[str, str, str], ...] = (
+    ("FastAPI", "Python", "WRITTEN_IN"),
+    ("React", "JavaScript", "WRITTEN_IN"),
+    ("React", "TypeScript", "WRITTEN_IN"),
+    ("React", "API", "USES"),
+    ("React", "FastAPI", "INTEGRATES_WITH"),
+    ("FastAPI", "API", "EXPOSES"),
+    ("FastAPI", "PostgreSQL", "USES"),
+    ("FastAPI", "Redis", "USES"),
+    ("Celery", "Redis", "USES"),
+    ("Celery", "Python", "WRITTEN_IN"),
+    ("ChromaDB", "Vector Database", "IS_A"),
+    ("PostgreSQL", "Database", "IS_A"),
+    ("Redis", "Database", "IS_A"),
+    ("Docker", "Redis", "RUNS"),
+    ("Docker", "PostgreSQL", "RUNS"),
+    ("Docker", "FastAPI", "RUNS"),
+    ("spaCy", "Python", "WRITTEN_IN"),
+    ("spaCy", "Named Entity Recognition", "USED_FOR"),
+    ("Knowledge Graph", "Entity Extraction", "USES"),
+    ("Retrieval Augmented Generation", "Vector Database", "USES"),
+    ("Retrieval Augmented Generation", "Knowledge Graph", "USES"),
+    ("Semantic Search", "Vector Embedding", "USES"),
+)
+
+
 # Small hand-written glossary for the first graph pass.
 TECH_TERMS: dict[str, str] = {
     "python": "PROGRAMMING_LANGUAGE",
@@ -538,6 +564,7 @@ class EntityExtractor:
         """Infer early relation hints from simple patterns and sentence co-occurrence."""
         relations = []
         relations.extend(self._extract_pattern_relations(entities, text))
+        relations.extend(self._extract_known_stack_relations(entities, text))
         relations.extend(self._extract_cooccurrence_relations(entities, text))
         relations.extend(self._extract_with_relation_enhancer(entities, text))
         return self._deduplicate_relations(relations)
@@ -801,6 +828,24 @@ class EntityExtractor:
                     )
         return relations
 
+    def _extract_known_stack_relations(self, entities: list[Entity], text: str) -> list[EntityRelation]:
+        relations = []
+        by_name = {
+            (entity.normalized or entity.text).lower(): entity
+            for entity in entities
+        }
+        windows = self._relation_windows(text)
+
+        for source_name, target_name, relation in KNOWN_STACK_RELATIONS:
+            source = by_name.get(source_name.lower())
+            target = by_name.get(target_name.lower())
+            if not source or not target:
+                continue
+            if not self._names_share_window(source.text, target.text, windows):
+                continue
+            relations.append(EntityRelation(source.normalized, target.normalized, relation, 0.74))
+        return relations
+
     def _extract_cooccurrence_relations(
         self, entities: list[Entity], text: str
     ) -> list[EntityRelation]:
@@ -820,6 +865,22 @@ class EntityExtractor:
                             EntityRelation(source.normalized, target.normalized, relation_type, 0.52)
                         )
         return relations
+
+    def _relation_windows(self, text: str) -> list[str]:
+        return [
+            part.lower()
+            for part in re.split(r"(?<=[.!?])\s+|\n{2,}", text)
+            if part.strip()
+        ]
+
+    def _names_share_window(self, left: str, right: str, windows: list[str]) -> bool:
+        left_pattern = self._term_pattern(left)
+        right_pattern = self._term_pattern(right)
+        return any(
+            re.search(left_pattern, window, re.IGNORECASE)
+            and re.search(right_pattern, window, re.IGNORECASE)
+            for window in windows
+        )
 
     def _infer_type_pair_relation(self, source: Entity, target: Entity) -> str:
         """Infer a low-confidence relation from entity type pairs."""
