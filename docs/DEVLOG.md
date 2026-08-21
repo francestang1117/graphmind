@@ -941,6 +941,27 @@ Redis` when both entities appear in the same sentence or paragraph. It is still
 rule-based, but it gives the graph a few more useful strong edges without
 pulling in an LLM yet.
 
+## 2026-06 — Optional S3 / MinIO Storage
+
+The storage layer now has a second backend. Local disk is still the default
+because it is fast and simple for development, but Docker/production-style runs
+can set `STORAGE_BACKEND=s3` and point the app at S3 or MinIO.
+
+I kept a local cache on purpose. The parsers still expect a filesystem path, and
+rewriting every parser around streams would be a much larger change. With the
+new path, upload writes the content-addressed file locally, pushes the same
+bytes to the bucket, and stores the object key in metadata. If a worker needs to
+parse a file that is not present on its own disk, storage restores it from the
+bucket before parsing.
+
+Docker Compose includes MinIO behind the `storage` profile, so normal local
+runs do not get slower. When I want to test the shared-storage path, I can start
+it with:
+
+```bash
+STORAGE_BACKEND=s3 docker compose --profile storage up --build
+```
+
 ## Current State
 
 As of June 2026, GraphMind has a working foundation:
@@ -951,6 +972,7 @@ As of June 2026, GraphMind has a working foundation:
 - drag-and-drop upload UI
 - file validation
 - local file storage
+- optional S3/MinIO object storage with local parser cache
 - document list/detail/delete
 - duplicate detection by content hash
 - Markdown parser

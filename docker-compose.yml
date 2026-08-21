@@ -35,6 +35,14 @@ services:
       ENVIRONMENT: development
       API_V1_PREFIX: /api/v1
       UPLOAD_DIR: /app/uploads
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      S3_BUCKET: ${S3_BUCKET:-graphmind}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_REGION_NAME: ${S3_REGION_NAME:-us-east-1}
+      S3_PREFIX: ${S3_PREFIX:-uploads}
+      S3_FORCE_PATH_STYLE: "true"
       MAX_UPLOAD_SIZE_MB: "50"
       DATABASE_URL: postgresql+psycopg://graphmind:graphmind@postgres:5432/graphmind
       REDIS_URL: redis://redis:6379/0
@@ -66,6 +74,14 @@ services:
       GIT_SHA: ${GIT_SHA:-}
       ENVIRONMENT: development
       UPLOAD_DIR: /app/uploads
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      S3_BUCKET: ${S3_BUCKET:-graphmind}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_REGION_NAME: ${S3_REGION_NAME:-us-east-1}
+      S3_PREFIX: ${S3_PREFIX:-uploads}
+      S3_FORCE_PATH_STYLE: "true"
       DATABASE_URL: postgresql+psycopg://graphmind:graphmind@postgres:5432/graphmind
       REDIS_URL: redis://redis:6379/0
       CELERY_ENABLED: "true"
@@ -93,6 +109,14 @@ services:
       GIT_SHA: ${GIT_SHA:-}
       ENVIRONMENT: development
       UPLOAD_DIR: /app/uploads
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      S3_BUCKET: ${S3_BUCKET:-graphmind}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_REGION_NAME: ${S3_REGION_NAME:-us-east-1}
+      S3_PREFIX: ${S3_PREFIX:-uploads}
+      S3_FORCE_PATH_STYLE: "true"
       DATABASE_URL: postgresql+psycopg://graphmind:graphmind@postgres:5432/graphmind
       REDIS_URL: redis://redis:6379/0
       CELERY_ENABLED: "true"
@@ -123,6 +147,33 @@ services:
       retries: 5
     restart: unless-stopped
 
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    profiles:
+      - storage
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    profiles:
+      - storage
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/graphmind
+      "
+
   frontend:
     build:
       context: ./frontend
@@ -144,3 +195,4 @@ volumes:
   postgres_data:
   redis_data:
   clamav_data:
+  minio_data:

@@ -200,7 +200,13 @@ async def open_document(
     if not metadata:
         raise HTTPException(status_code=404, detail="File not found")
 
-    file_path = Path(metadata["file_path"])
+    try:
+        file_path = document_service.storage.ensure_local_file(metadata)
+    except FileNotFoundError:
+        raise StoredFileMissingError(details={"filename": filename})
+    except Exception as exc:
+        raise StorageAccessError(details={"filename": filename, "reason": str(exc)}) from exc
+
     allowed_roots = {
         Path(settings.UPLOAD_DIR).resolve(),
         Path(getattr(document_service.storage, "root", settings.UPLOAD_DIR)).resolve(),
@@ -210,9 +216,6 @@ async def open_document(
         # Metadata should never point outside upload storage. If it does, block
         # before FileResponse has a chance to touch the path.
         raise StorageAccessError(details={"filename": filename})
-
-    if not file_path.exists():
-        raise StoredFileMissingError(details={"filename": filename})
 
     extension = metadata.get("file_extension", "").lower()
     # Browser preview is convenient, but inline HTML/code can execute in the

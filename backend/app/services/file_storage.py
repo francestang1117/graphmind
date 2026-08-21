@@ -127,13 +127,20 @@ class FileStorage:
         info = self.get_file_info(filename, user_id)
         if not info:
             raise FileNotFoundError(filename)
-        path = Path(info["file_path"])
-        if not self._is_under_root(path):
-            raise FileStorageError(f"Refusing to read path outside upload root: {path}")
+        path = self.ensure_local_file(info)
         try:
             return path.read_bytes()
         except OSError as exc:
             raise FileStorageError(f"Could not read {path}: {exc}") from exc
+
+    def ensure_local_file(self, metadata: dict[str, Any]) -> Path:
+        """Return a safe local path for code that still needs a filesystem file."""
+        path = Path(metadata["file_path"])
+        if not self._is_under_root(path):
+            raise FileStorageError(f"Refusing to read path outside upload root: {path}")
+        if not path.exists():
+            raise FileNotFoundError(metadata.get("filename") or path.name)
+        return path
 
     def _dest_path(self, file_hash: str, extension: str) -> Path:
         ext = _normalise_ext(extension)
@@ -217,4 +224,24 @@ def _to_iso(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()
 
 
-file_storage = FileStorage(settings.UPLOAD_DIR)
+def build_file_storage() -> FileStorage:
+    backend = settings.STORAGE_BACKEND.strip().lower()
+    if backend in {"", "local"}:
+        return FileStorage(settings.UPLOAD_DIR)
+    if backend in {"s3", "minio"}:
+        from app.services.object_storage import S3ObjectStorage
+
+        return S3ObjectStorage(
+            root=settings.UPLOAD_DIR,
+            bucket=settings.S3_BUCKET,
+            endpoint_url=settings.S3_ENDPOINT_URL or None,
+            access_key=settings.S3_ACCESS_KEY or None,
+            secret_key=settings.S3_SECRET_KEY or None,
+            region_name=settings.S3_REGION_NAME,
+            prefix=settings.S3_PREFIX,
+            force_path_style=settings.S3_FORCE_PATH_STYLE,
+        )
+    raise FileStorageError(f"Unsupported storage backend: {settings.STORAGE_BACKEND}")
+
+
+file_storage = build_file_storage()

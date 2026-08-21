@@ -9,6 +9,11 @@ venv/
 
 backend/uploads/
 .DS_Store
+*.db
+*.sqlite
+*.sqlite3
+Jiaye_Tang_*
+tools/
 
 .pytest_cache/
 .mypy_cache/

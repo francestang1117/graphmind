@@ -162,6 +162,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
 ## Services
 
 - `file_storage.py` stores files by content hash and keeps file metadata.
+- `object_storage.py` adds the optional S3/MinIO backend. It still keeps a
+  local cache because the current parsers work with filesystem paths.
 - `document_service.py` coordinates validation, storage, persistence, parsing,
   duplicate detection, and document lifecycle actions.
 - `document_repository.py` stores document metadata in the database, with a

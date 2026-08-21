@@ -8,8 +8,7 @@ uploaded content.
 The project is intentionally honest about its current stage: the upload,
 parsing, entity extraction, graph, search, chat fallback, async jobs,
 observability, and safety layers are working MVPs. A production vector database,
-GPT/OpenAI answer generation, S3/MinIO storage, and deeper graph querying are
-planned upgrades.
+GPT/OpenAI answer generation, and deeper graph querying are planned upgrades.
 
 ## What Works Today
 
@@ -18,6 +17,8 @@ planned upgrades.
   JavaScript, and TypeScript files
 - Secure upload path with extension/MIME checks, SHA-256 deduplication, safe
   preview/download boundaries, and optional ClamAV scanning
+- Local content-addressed storage by default, with optional S3/MinIO object
+  storage for Docker/production-style runs
 - SQLAlchemy-backed document metadata, parsed chunks, extracted entities,
   graph nodes/edges, and background job history
 - Unified parser for Markdown, TXT, PDF, DOCX, code, JSON, CSV, and HTML
@@ -50,7 +51,7 @@ planned upgrades.
 | Async jobs | Working | Redis/Celery path, WebSocket progress, cancel/retry, job history |
 | Persistence | Partial | Documents, parsed chunks/entities, graph nodes/edges, users, and jobs |
 | Observability | Working MVP | Prometheus metrics and optional Sentry |
-| File storage backend | Local only | S3/MinIO is planned |
+| File storage backend | Working MVP | Local by default; optional S3/MinIO keeps a local parser cache |
 
 ## Quick Start
 
@@ -74,6 +75,14 @@ To include the current commit in Sentry release names:
 ```bash
 GIT_SHA=$(git rev-parse HEAD) docker compose up --build
 ```
+
+To test the optional MinIO path:
+
+```bash
+STORAGE_BACKEND=s3 docker compose --profile storage up --build
+```
+
+MinIO console: `http://localhost:9001` (`minioadmin` / `minioadmin`).
 
 ### Local Development
 
@@ -190,6 +199,6 @@ More testing notes are in [docs/TESTING.md](docs/TESTING.md).
 
 1. Replace the local vector-search MVP with a real embedding model and vector DB.
 2. Add OpenAI/GPT-backed answer generation behind the existing chat interface.
-3. Add S3/MinIO storage as an optional file backend.
-4. Add graph migrations and stronger persisted graph queries.
+3. Add graph migrations and stronger persisted graph queries.
+4. Add frontend login/register and protected-route handling.
 5. Expand the jobs panel with filters and a full task detail drawer.

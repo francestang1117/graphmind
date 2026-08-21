@@ -75,6 +75,7 @@ class ProcessingPipeline:
 
         try:
             self._progress(on_progress, "Parsing document", 15)
+            file_path = self._local_file_path(filename, file_path, user_id)
             parsed = self._parse_document(filename, file_path, original_filename)
 
             self._progress(on_progress, "Extracting entities", 40)
@@ -151,6 +152,20 @@ class ProcessingPipeline:
         from app.api.endpoints.documents_with_markdown import parse_document_file
 
         return parse_document_file(filename, file_path, original_filename)
+
+    def _local_file_path(self, filename: str, file_path: str, user_id: str) -> str:
+        try:
+            from app.services.document_service import document_service
+
+            metadata = document_service.get_document(filename, user_id)
+            if not metadata:
+                return file_path
+            return str(document_service.storage.ensure_local_file(metadata))
+        except Exception as exc:
+            # Keep the parser's normal error path in charge. This log tells us
+            # whether the failure happened while restoring an object-store cache.
+            log.warning("Could not prepare local file cache for %s: %s", filename, exc)
+            return file_path
 
 
 def process_uploaded_document(

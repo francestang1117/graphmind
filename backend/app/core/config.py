@@ -88,6 +88,14 @@ class Settings(BaseSettings):
         ".json", ".csv", ".html", ".htm",
     ]
     UPLOAD_DIR: str = str(Path(__file__).resolve().parents[2] / "uploads")
+    STORAGE_BACKEND: str = "local"
+    S3_BUCKET: str = "graphmind"
+    S3_ENDPOINT_URL: str = ""
+    S3_ACCESS_KEY: str = ""
+    S3_SECRET_KEY: str = ""
+    S3_REGION_NAME: str = "us-east-1"
+    S3_PREFIX: str = "uploads"
+    S3_FORCE_PATH_STYLE: bool = True
 
     @property
     def max_upload_bytes(self) -> int:

@@ -49,6 +49,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 | `backend/tests/test_graph_repository.py` | Database persistence for graph nodes/edges |
 | `backend/tests/test_rate_limit.py` | slowapi wrapper and no-op fallback |
 | `backend/tests/test_virus_scanner.py` | ClamAV response parsing and upload scan boundary |
+| `backend/tests/unit/test_object_storage.py` | S3/MinIO storage behavior with a fake client |
 | `backend/tests/test_websocket.py` | Celery-style job progress snapshots and WebSocket stream |
 | `backend/tests/test_job_repository.py` | DB-backed job history and cleanup |
 
