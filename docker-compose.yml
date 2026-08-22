@@ -14,7 +14,7 @@ services:
       POSTGRES_USER: graphmind
       POSTGRES_PASSWORD: graphmind
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     restart: unless-stopped
@@ -135,7 +135,7 @@ services:
     restart: unless-stopped
 
   clamav:
-    image: clamav/clamav:stable
+    image: clamav/clamav-debian:stable
     ports:
       - "3310:3310"
     volumes:

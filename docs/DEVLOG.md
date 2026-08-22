@@ -962,9 +962,37 @@ it with:
 STORAGE_BACKEND=s3 docker compose --profile storage up --build
 ```
 
+## 2026-08 — MinIO End-to-End Check
+
+I finally ran the storage profile against a real MinIO container instead of
+only relying on the fake-client tests. Upload, Celery parsing, safe open,
+local-cache restore, and remote delete all worked through the S3 backend.
+
+The run also found two integration bugs. The ARM Mac could not start the
+original ClamAV image, so Compose now uses the official Debian image. clamd
+also returned a NUL-terminated `stream: OK` response that the scanner treated
+as unexpected. SlowAPI had a separate issue: rate-limited routes did not expose
+a FastAPI `Response`, so a successful upload became a 500 while adding rate
+limit headers. Both paths now have regression coverage.
+
+My local PostgreSQL already used port 5432, so the Compose database now uses
+host port 5433 by default. Services inside Compose still connect to
+`postgres:5432`.
+
+This was a MinIO test, not an AWS deployment. MinIO received the same boto3
+requests that AWS S3 would receive, so the S3-compatible path itself was real:
+the app uploaded the object, the worker parsed it, `/open` restored a deleted
+local cache copy, and `/delete` removed both the document record and the remote
+object. The final cleanup left the document list and graph empty, and the full
+backend suite passed with 141 tests.
+
+What this does not prove yet is the AWS production setup. IAM roles, bucket
+policies, TLS, lifecycle rules, object versioning, cloud networking, and backup
+behavior still need their own deployment test.
+
 ## Current State
 
-As of June 2026, GraphMind has a working foundation:
+As of August 2026, GraphMind has a working foundation:
 
 - FastAPI backend
 - React + TypeScript frontend

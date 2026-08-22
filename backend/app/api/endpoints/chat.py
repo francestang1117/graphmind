@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 import json
 from pydantic import BaseModel, Field
@@ -25,6 +25,7 @@ async def chat(
     body: ChatRequest,
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ):
     """Answer a question using retrieved document and graph context."""
     conv_id = body.conversation_id or str(uuid.uuid4())

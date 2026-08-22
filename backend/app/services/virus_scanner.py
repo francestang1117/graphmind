@@ -80,6 +80,8 @@ class VirusScanner:
     @staticmethod
     def _parse_response(response: str) -> ScanResult:
         """Parse clamd's one-line scan response."""
+        # clamd terminates zINSTREAM replies with a NUL byte.
+        response = response.rstrip("\x00\r\n ")
         if response.endswith("OK"):
             return ScanResult(clean=True)
         if "FOUND" in response:

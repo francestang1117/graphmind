@@ -3,7 +3,7 @@
 import logging
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
@@ -31,6 +31,7 @@ async def search_documents(
     body: SearchRequest,
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ) -> dict:
     """Search all indexed chunks from current uploads.
 
@@ -61,6 +62,7 @@ async def search_context(
     limit: int = 5,
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ) -> dict:
     """Return stitched context for chat/RAG without letting one IP spam rebuilds."""
     store = rebuild_vector_index(user.id)

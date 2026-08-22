@@ -83,6 +83,8 @@ STORAGE_BACKEND=s3 docker compose --profile storage up --build
 ```
 
 MinIO console: `http://localhost:9001` (`minioadmin` / `minioadmin`).
+PostgreSQL is exposed on host port `5433` by default so it can run beside a
+local PostgreSQL installation. Set `POSTGRES_PORT` to override it.
 
 ### Local Development
 

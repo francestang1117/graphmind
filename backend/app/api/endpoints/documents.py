@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -116,6 +116,7 @@ async def upload_document(
     file: UploadFile = File(...),
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ) -> UploadResponse:
     """Validate, store, and queue a document for parsing.
 

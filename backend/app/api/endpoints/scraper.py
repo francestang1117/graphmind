@@ -1,6 +1,6 @@
 """Endpoint for adding a public web page to the knowledge base."""
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, HttpUrl
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
@@ -37,6 +37,7 @@ async def scrape_url(
     body: ScrapeRequest,
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ) -> ScrapeResponse:
     """Fetch a public page and store it as a normal Markdown document."""
     metadata = await web_scraper.scrape_and_store(str(body.url), user_id=_user_id(user))
@@ -57,6 +58,7 @@ async def scrape_url_alias(
     body: ScrapeRequest,
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ) -> ScrapeResponse:
     """Compatibility alias while the endpoint shape is still settling."""
-    return await scrape_url(body, user, request)
+    return await scrape_url(body, user, request, response)

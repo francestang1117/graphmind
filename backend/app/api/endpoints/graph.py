@@ -27,6 +27,7 @@ log = logging.getLogger(__name__)
 async def get_graph(
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ) -> dict:
     """Return a graph built from all currently uploaded documents."""
     graph = rebuild_graph_from_documents(user.id)
@@ -38,6 +39,7 @@ async def get_graph(
 async def get_graph_stats(
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ) -> dict:
     """Return graph counters under the same read limit as the graph canvas."""
     graph = rebuild_graph_from_documents(user.id)
@@ -50,6 +52,7 @@ async def get_node(
     node_id: str,
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ) -> dict:
     """Return one node plus its directly connected neighborhood."""
     graph = rebuild_graph_from_documents(user.id)
@@ -69,6 +72,7 @@ async def search_nodes(
     limit: int = Query(10, ge=1, le=50),
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ) -> dict:
     """Search graph nodes by label."""
     graph = rebuild_graph_from_documents(user.id)
@@ -80,6 +84,7 @@ async def search_nodes(
 async def graph_debug(
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ) -> dict:
     """Return full node and edge metadata for development checks."""
     graph = rebuild_graph_from_documents(user.id)
@@ -92,6 +97,7 @@ async def export_graph(
     format: str = Query("json", pattern="^(json|gexf|csv)$"),
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
+    response: Response = None,
 ) -> Response:
     """Export the full graph for external graph/table tools."""
     graph = rebuild_graph_from_documents(user.id)

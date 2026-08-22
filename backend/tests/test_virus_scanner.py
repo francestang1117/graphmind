@@ -30,6 +30,13 @@ def test_parse_clamav_clean_response():
     assert result.threat is None
 
 
+def test_parse_clamav_clean_response_with_null_terminator():
+    result = VirusScanner._parse_response("stream: OK\x00")
+
+    assert result.clean is True
+    assert result.threat is None
+
+
 def test_parse_clamav_threat_response():
     result = VirusScanner._parse_response("stream: Eicar-Test-Signature FOUND")
 

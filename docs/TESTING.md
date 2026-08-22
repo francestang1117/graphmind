@@ -15,7 +15,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 Expected current result:
 
 ```text
-134 passed
+141 passed
 ```
 
 If you are starting from a fresh environment:
@@ -96,6 +96,18 @@ Check database-backed parsed artifacts:
 sqlite3 graphmind.db "select count(*) from parsed_chunks;"
 sqlite3 graphmind.db "select label, text from parsed_entities limit 10;"
 ```
+
+Test the MinIO storage path:
+
+```bash
+STORAGE_BACKEND=s3 docker compose --profile storage up -d
+curl -X POST "http://localhost:8000/api/v1/documents/upload" \
+  -F "file=@README.md"
+```
+
+The upload response should include a stored filename and `job_id`. Check the
+file in the `graphmind` bucket at `http://localhost:9001`, then use the normal
+parsed, open, and delete endpoints with the stored filename.
 
 ## Notes
 
