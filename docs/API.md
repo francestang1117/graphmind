@@ -30,11 +30,14 @@ Create a new account.
 
 ```json
 // Request
-{ "email": "you@example.com", "password": "secret", "name": "Alice" }
+{ "email": "you@example.com", "password": "a-long-passphrase", "name": "Alice" }
 
 // Response 201
 { "access_token": "eyJ...", "refresh_token": "abc123...", "token_type": "bearer" }
 ```
+
+Passwords must contain at least 8 characters, fit within bcrypt's 72-byte
+input limit, and must not match the small built-in list of common passwords.
 
 ### `POST /auth/login`
 
@@ -47,7 +50,9 @@ username=you@example.com&password=secret
 
 ### `POST /auth/refresh`
 
-Exchange a refresh token for a new access token.
+Exchange a refresh token for a new access token. Browsers use the HttpOnly
+`graphmind_refresh` cookie set during registration or login. API clients can
+still send the token in JSON:
 
 ```json
 { "refresh_token": "abc123..." }
@@ -55,7 +60,8 @@ Exchange a refresh token for a new access token.
 
 ### `POST /auth/logout`
 
-Invalidate a refresh token immediately.
+Invalidate a refresh token immediately and clear the browser cookie. The JSON
+body remains available for non-browser clients:
 
 ```json
 { "refresh_token": "abc123..." }

@@ -29,8 +29,8 @@ def save_user_record(user: Any) -> None:
         if not existing:
             existing = db.scalars(select(UserRecord).where(UserRecord.email == user.email)).first()
         if existing:
-            # Local auth is still in-memory, but the DB may keep a user from a
-            # previous run. Reuse that id so fresh tokens point at the persisted row.
+            # Keep the same user id after an API restart; access tokens use it
+            # to find the persisted account again.
             user.id = existing.id
             existing.email = user.email
             existing.name = user.name
@@ -46,6 +46,35 @@ def save_user_record(user: Any) -> None:
                 )
             )
         db.commit()
+
+
+def load_user_record(*, user_id: str | None = None, email: str | None = None) -> dict[str, Any] | None:
+    """Read one account back into the local auth layer."""
+    if not db_enabled() or (not user_id and not email):
+        return None
+
+    from sqlalchemy import select
+    from app.models.persistence import UserRecord
+
+    try:
+        with SessionLocal() as db:  # type: ignore[misc]
+            if user_id:
+                record = db.get(UserRecord, user_id)
+            else:
+                record = db.scalars(select(UserRecord).where(UserRecord.email == email)).first()
+            if not record:
+                return None
+            return {
+                "id": record.id,
+                "email": record.email,
+                "name": record.name,
+                "hashed_password": record.hashed_password,
+                "created_at": record.created_at.isoformat(),
+            }
+    except Exception as exc:
+        # Local development can continue with the in-process account cache.
+        log.warning("Could not load user record: %s", exc)
+        return None
 
 
 def save_document_record(metadata: dict[str, Any]) -> None:

@@ -202,5 +202,5 @@ More testing notes are in [docs/TESTING.md](docs/TESTING.md).
 1. Replace the local vector-search MVP with a real embedding model and vector DB.
 2. Add OpenAI/GPT-backed answer generation behind the existing chat interface.
 3. Add graph migrations and stronger persisted graph queries.
-4. Add frontend login/register and protected-route handling.
+4. Turn on `AUTH_REQUIRED` after the frontend account flow has had a wider test pass.
 5. Expand the jobs panel with filters and a full task detail drawer.

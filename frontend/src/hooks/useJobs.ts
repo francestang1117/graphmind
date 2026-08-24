@@ -1,6 +1,11 @@
 import axios from "axios";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { cancelJob, listJobs, type JobHistoryItem } from "../services/api";
+import {
+  cancelJob,
+  isAuthenticationError,
+  listJobs,
+  type JobHistoryItem,
+} from "../services/api";
 
 const activeStates = new Set(["PENDING", "STARTED", "PROGRESS"]);
 
@@ -21,6 +26,10 @@ export function useJobs(refreshKey = "") {
     try {
       setJobs(await listJobs(8));
     } catch (err) {
+      if (isAuthenticationError(err)) {
+        setError("Sign in to view processing history.");
+        return;
+      }
       if (axios.isAxiosError(err)) {
         if (err.response?.status === 404) {
           setError("Job history endpoint is not available. Restart the backend with the latest code.");

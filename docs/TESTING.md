@@ -15,7 +15,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 Expected current result:
 
 ```text
-141 passed
+151 passed
 ```
 
 If you are starting from a fresh environment:
@@ -43,6 +43,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 | `backend/tests/test_vector_store.py` | Lightweight local vector search and hybrid scoring |
 | `backend/tests/test_qa_engine.py` | Retrieval-based local QA behavior |
 | `backend/tests/test_auth.py` | Register/login/refresh/logout/me flow |
+| `backend/tests/test_auth_boundaries.py` | Anonymous and signed-in access to private API groups |
 | `backend/tests/test_document_repository.py` | SQLAlchemy document metadata repository |
 | `backend/tests/test_persistence_service.py` | Lightweight persistence helpers |
 | `backend/tests/test_parsed_artifact_repository.py` | Database persistence for parsed chunks and entities |
@@ -70,6 +71,23 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests -s
 ```
 
 ## Useful Manual Checks
+
+Check the production-style auth boundary:
+
+```bash
+cd backend
+AUTH_REQUIRED=true ../.venv/bin/python -m uvicorn app.main:app --port 8001
+```
+
+In another terminal, an anonymous document request should return `401`:
+
+```bash
+curl -i "http://localhost:8001/api/v1/documents/"
+```
+
+Open the frontend with `VITE_API_URL=http://localhost:8001`. The first private
+request opens the sign-in dialog. Registering or signing in retries future
+requests with the new access token.
 
 Upload a Markdown file:
 

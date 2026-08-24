@@ -1,9 +1,74 @@
 import axios from "axios";
 import type { FileInfo } from "../stores/appStore";
+import type { TokenPair, User } from "../types";
+import {
+  clearTokens,
+  getAccessToken,
+  saveAccessToken,
+} from "./authSession";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+export const AUTH_REQUIRED_EVENT = "graphmind:auth-required";
 
-const http = axios.create({ baseURL: `${API_BASE}/api/v1`, timeout: 30_000 });
+const http = axios.create({
+  baseURL: `${API_BASE}/api/v1`,
+  timeout: 30_000,
+  withCredentials: true,
+});
+
+http.interceptors.request.use((config) => {
+  const token = getAccessToken();
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+let refreshRequest: Promise<string> | null = null;
+
+function notifyAuthRequired(url?: string) {
+  // A guest check on startup is normal; a private workspace request is not.
+  if (url?.includes("/auth/me")) return;
+  window.dispatchEvent(new Event(AUTH_REQUIRED_EVENT));
+}
+
+http.interceptors.response.use(undefined, async (error) => {
+  const request = error.config as (typeof error.config & { _retried?: boolean }) | undefined;
+  if (error.response?.status !== 401 || !request) {
+    return Promise.reject(error);
+  }
+  if (request._retried) {
+    notifyAuthRequired(request.url);
+    return Promise.reject(error);
+  }
+
+  request._retried = true;
+  refreshRequest ??= axios
+    .post<{ access_token: string }>(
+      `${API_BASE}/api/v1/auth/refresh`,
+      {},
+      { withCredentials: true },
+    )
+    .then(({ data }) => {
+      saveAccessToken(data.access_token);
+      return data.access_token;
+    })
+    .finally(() => {
+      refreshRequest = null;
+    });
+
+  try {
+    const token = await refreshRequest;
+    request.headers.Authorization = `Bearer ${token}`;
+    return http(request);
+  } catch (refreshError) {
+    clearTokens();
+    notifyAuthRequired(request.url);
+    return Promise.reject(refreshError);
+  }
+});
+
+export function isAuthenticationError(error: unknown) {
+  return axios.isAxiosError(error) && error.response?.status === 401;
+}
 
 export interface UploadResponse {
   filename: string;
@@ -103,6 +168,25 @@ export interface ParsedDocumentSummary {
 
 export const checkHealth = () =>
   axios.get(`${API_BASE}/health`, { timeout: 2000 }).then((r) => r.data);
+
+export const registerAccount = (email: string, password: string, name: string) =>
+  http
+    .post<TokenPair>("/auth/register", { email, password, name })
+    .then((r) => r.data);
+
+export const loginAccount = (email: string, password: string) => {
+  const form = new URLSearchParams({ username: email, password });
+  return http
+    .post<TokenPair>("/auth/login", form, {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    })
+    .then((r) => r.data);
+};
+
+export const getCurrentUser = (): Promise<User> =>
+  http.get("/auth/me").then((r) => r.data);
+
+export const logoutAccount = () => http.post("/auth/logout", {});
 
 export const uploadDocument = (
   file: File,

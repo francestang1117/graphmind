@@ -13,8 +13,11 @@ import UploadPanel from "./components/UploadPanel";
 import GraphPanel from "./components/GraphPanel";
 import SearchPanel from "./components/SearchPanel";
 import ChatPanel from "./components/ChatPanel";
-import { checkHealth } from "./services/api";
+import AuthControl from "./components/AuthControl";
+import AuthDialog from "./components/AuthDialog";
+import { AUTH_REQUIRED_EVENT, checkHealth } from "./services/api";
 import { useAppStore } from "./stores/appStore";
+import { useAuthStore } from "./stores/authStore";
 
 type Tab = "upload" | "graph" | "search" | "chat";
 
@@ -28,7 +31,9 @@ const tabs: Array<{ id: Tab; label: string; title: string; icon: typeof Upload }
 function App() {
   // Keep tab state local; cross-panel data lives in the small Zustand store.
   const [activeTab, setActiveTab] = useState<Tab>("upload");
-  const { files, backendOnline, setBackendOnline, graphStats } = useAppStore();
+  const [authOpen, setAuthOpen] = useState(false);
+  const { files, backendOnline, setBackendOnline, graphStats, setFiles, setGraphStats, setConversationId } = useAppStore();
+  const { user, restore } = useAuthStore();
   const active = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
 
   useEffect(() => {
@@ -36,6 +41,22 @@ function App() {
       .then(() => setBackendOnline(true))
       .catch(() => setBackendOnline(false));
   }, [setBackendOnline]);
+
+  useEffect(() => {
+    void restore();
+  }, [restore]);
+
+  useEffect(() => {
+    const showSignIn = () => setAuthOpen(true);
+    window.addEventListener(AUTH_REQUIRED_EVENT, showSignIn);
+    return () => window.removeEventListener(AUTH_REQUIRED_EVENT, showSignIn);
+  }, []);
+
+  useEffect(() => {
+    setFiles([]);
+    setGraphStats(null);
+    setConversationId(null);
+  }, [user?.id, setFiles, setGraphStats, setConversationId]);
 
   return (
     <div className="kw-shell">
@@ -93,6 +114,7 @@ function App() {
               <BookOpen size={18} />
               View docs
             </a>
+            <AuthControl onSignIn={() => setAuthOpen(true)} />
             <button className="kw-icon-button" aria-label="Help">
               <CircleHelp size={20} />
             </button>
@@ -103,12 +125,15 @@ function App() {
         </header>
 
         <section className="kw-content">
-          {activeTab === "upload" && <UploadPanel />}
-          {activeTab === "graph" && <GraphPanel />}
-          {activeTab === "search" && <SearchPanel />}
-          {activeTab === "chat" && <ChatPanel />}
+          <div className="kw-workspace" key={user?.id ?? "local-dev"}>
+            {activeTab === "upload" && <UploadPanel />}
+            {activeTab === "graph" && <GraphPanel />}
+            {activeTab === "search" && <SearchPanel />}
+            {activeTab === "chat" && <ChatPanel />}
+          </div>
         </section>
       </main>
+      <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
   );
 }

@@ -277,6 +277,222 @@ button {
   overflow: hidden;
 }
 
+.kw-workspace {
+  height: 100%;
+}
+
+.auth-sign-in,
+.auth-user-button {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.auth-sign-in:hover,
+.auth-user-button:hover {
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+.auth-user-button span {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 5px;
+  background: rgba(139, 92, 246, 0.24);
+  color: var(--violet-2);
+  font-size: 10px;
+}
+
+.auth-control {
+  position: relative;
+}
+
+.auth-control-placeholder {
+  width: 68px;
+  height: 34px;
+}
+
+.auth-menu {
+  position: absolute;
+  z-index: 40;
+  top: 42px;
+  right: 0;
+  width: 210px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #20211f;
+  box-shadow: var(--shadow);
+}
+
+.auth-menu strong,
+.auth-menu small {
+  display: block;
+}
+
+.auth-menu strong { font-size: 12px; }
+.auth-menu small { margin-top: 3px; color: var(--soft); font-size: 10px; }
+
+.auth-menu button {
+  width: 100%;
+  margin-top: 11px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.auth-menu button:hover { background: var(--surface-strong); color: var(--text); }
+
+.auth-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(10, 10, 10, 0.66);
+  backdrop-filter: blur(7px);
+}
+
+.auth-dialog {
+  position: relative;
+  width: min(410px, 100%);
+  padding: 25px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #242522;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.46);
+}
+
+.auth-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--soft);
+  cursor: pointer;
+}
+
+.auth-close:hover { background: var(--surface-strong); color: var(--text); }
+
+.auth-mark {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(139, 92, 246, 0.16);
+  color: var(--violet-2);
+}
+
+.auth-dialog h2 { margin: 16px 0 5px; font-size: 20px; letter-spacing: 0; }
+.auth-dialog > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+.auth-tabs {
+  margin: 20px 0 16px;
+  padding: 3px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.auth-tabs button {
+  padding: 8px;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--soft);
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.auth-tabs button.active { background: var(--surface-strong); color: var(--text); }
+
+.auth-dialog form { display: grid; gap: 13px; }
+.auth-dialog label { display: grid; gap: 6px; color: var(--muted); font-size: 11px; font-weight: 700; }
+
+.auth-dialog input {
+  width: 100%;
+  height: 39px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  outline: none;
+  background: rgba(0, 0, 0, 0.16);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.auth-dialog input:focus { border-color: var(--violet); }
+.auth-error { color: #ff8585; font-size: 11px; }
+
+.password-status {
+  margin-top: -5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--soft);
+  font-size: 10px;
+}
+
+.password-status > span {
+  width: 46px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.password-status i {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+}
+
+.password-status.weak i { width: 30%; background: #ef6a6a; }
+.password-status.fair i { width: 65%; background: var(--amber); }
+.password-status.strong i { width: 100%; background: var(--green); }
+
+.auth-submit {
+  height: 40px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 6px;
+  background: var(--violet);
+  color: white;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.auth-submit:hover { background: #7c4ff0; }
+.auth-submit:disabled { cursor: wait; opacity: 0.65; }
+
 .documents-panel,
 .search-panel,
 .chat-panel {

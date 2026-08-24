@@ -250,7 +250,7 @@ WebSocket progress. The main things that are still early are:
 
 - deeper graph persistence tooling beyond the current node/edge tables
 - production-grade user/workspace isolation across every artifact
-- frontend login/register flow and token storage
+- production auth rollout with `AUTH_REQUIRED=true` and cookie-backed refresh tokens
 - GPT-backed answer generation
 - richer relation extraction and graph quality tuning
 - a real Prometheus/Grafana deployment around the `/metrics` endpoint

@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    REFRESH_COOKIE_NAME: str = "graphmind_refresh"
+    REFRESH_COOKIE_SECURE: bool = False
+    REFRESH_COOKIE_SAMESITE: str = "lax"
     BCRYPT_ROUNDS: int = 12
     REDIS_URL: str = "redis://localhost:6379/0"
     AUTH_REQUIRED: bool = False

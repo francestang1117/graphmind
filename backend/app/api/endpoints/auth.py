@@ -14,12 +14,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.services.persistence_service import save_user_record
+from app.services.persistence_service import load_user_record, save_user_record
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -97,6 +97,18 @@ class RefreshRecord:
 
 _users: dict[str, UserRecord] = {}
 _refresh_tokens: dict[str, RefreshRecord] = {}
+
+_COMMON_PASSWORDS = {
+    "12345678",
+    "123456789",
+    "qwerty123",
+    "password",
+    "password1",
+    "password123",
+    "letmein123",
+    "admin123",
+    "welcome123",
+}
 
 
 # Password hashing
@@ -198,6 +210,24 @@ def _create_refresh_token() -> str:
     return secrets.token_urlsafe(48)
 
 
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=settings.REFRESH_COOKIE_NAME,
+        value=token,
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        httponly=True,
+        secure=settings.REFRESH_COOKIE_SECURE,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,  # type: ignore[arg-type]
+        path=f"{settings.API_V1_PREFIX}/auth",
+    )
+
+
+def _refresh_from(request: Request, body: RefreshRequest | None) -> str | None:
+    if body:
+        return body.refresh_token
+    return request.cookies.get(settings.REFRESH_COOKIE_NAME)
+
+
 # Refresh tokens
 
 async def _redis_client():
@@ -267,6 +297,15 @@ def _normalize_email(email: str) -> str:
     return clean
 
 
+def _validate_password(password: str) -> None:
+    if len(password) < 8:
+        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+    if len(password.encode("utf-8")) > 72:
+        raise HTTPException(status_code=422, detail="Password must not exceed 72 UTF-8 bytes")
+    if password.strip().lower() in _COMMON_PASSWORDS:
+        raise HTTPException(status_code=422, detail="This password is too common")
+
+
 def _public_user(user: UserRecord) -> UserPublic:
     return UserPublic(
         id=user.id,
@@ -276,13 +315,22 @@ def _public_user(user: UserRecord) -> UserPublic:
     )
 
 
+def _restore_user(*, user_id: str | None = None, email: str | None = None) -> UserRecord | None:
+    data = load_user_record(user_id=user_id, email=email)
+    if not data:
+        return None
+    user = UserRecord(**data)
+    _users[user.email] = user
+    return user
+
+
 async def current_user(token: str = Depends(oauth2_scheme)) -> UserRecord:
     """Resolve the authenticated user from the Bearer access token."""
     return _user_from_token(token)
 
 
 async def current_user_or_dev(token: Optional[str] = Depends(optional_oauth2_scheme)) -> UserRecord:
-    """Return authenticated user, or local-dev user while auth UI is not built yet."""
+    """Use the signed-in account, or the shared local workspace when auth is optional."""
     if token:
         return _user_from_token(token)
     if settings.AUTH_REQUIRED:
@@ -302,6 +350,8 @@ def _user_from_token(token: str) -> UserRecord:
     user_id = _decode_access_token(token)
     user = next((item for item in _users.values() if item.id == user_id), None)
     if not user:
+        user = _restore_user(user_id=user_id)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User no longer exists",
@@ -311,7 +361,7 @@ def _user_from_token(token: str) -> UserRecord:
 
 
 def _ensure_dev_user() -> UserRecord:
-    """Stable local user used only while AUTH_REQUIRED=false."""
+    """Keep account-free local runs in one predictable workspace."""
     email = "local@example.com"
     if email not in _users:
         _users[email] = UserRecord(
@@ -327,13 +377,12 @@ def _ensure_dev_user() -> UserRecord:
 # Auth routes
 
 @router.post("/register", response_model=TokenPair, status_code=status.HTTP_201_CREATED)
-async def register(body: UserCreate) -> TokenPair:
+async def register(body: UserCreate, response: Response) -> TokenPair:
     """Create a local account and return both access and refresh tokens."""
     email = _normalize_email(body.email)
-    if email in _users:
+    if email in _users or _restore_user(email=email):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
-    if len(body.password) < 8:
-        raise HTTPException(status_code=422, detail="Password must be at least 8 characters")
+    _validate_password(body.password)
 
     user = UserRecord(
         id=uuid.uuid4().hex,
@@ -348,14 +397,15 @@ async def register(body: UserCreate) -> TokenPair:
     access_token = _create_access_token(user.id)
     refresh_token = _create_refresh_token()
     await _store_refresh_token(refresh_token, user.id)
+    _set_refresh_cookie(response, refresh_token)
     return TokenPair(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/login", response_model=TokenPair)
-async def login(form: OAuth2PasswordRequestForm = Depends()) -> TokenPair:
+async def login(response: Response, form: OAuth2PasswordRequestForm = Depends()) -> TokenPair:
     """Authenticate with email + password. Swagger's Authorize form uses username=email."""
     email = _normalize_email(form.username)
-    user = _users.get(email)
+    user = _users.get(email) or _restore_user(email=email)
     if not user or not _verify_password(form.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -366,22 +416,43 @@ async def login(form: OAuth2PasswordRequestForm = Depends()) -> TokenPair:
     access_token = _create_access_token(user.id)
     refresh_token = _create_refresh_token()
     await _store_refresh_token(refresh_token, user.id)
+    _set_refresh_cookie(response, refresh_token)
     return TokenPair(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/refresh", response_model=AccessToken)
-async def refresh_token(body: RefreshRequest) -> AccessToken:
+async def refresh_token(
+    request: Request,
+    response: Response,
+    body: RefreshRequest | None = None,
+) -> AccessToken:
     """Exchange a valid refresh token for a new short-lived access token."""
-    user_id = await _get_refresh_user_id(body.refresh_token)
+    token = _refresh_from(request, body)
+    user_id = await _get_refresh_user_id(token) if token else None
     if not user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+    _set_refresh_cookie(response, token)
     return AccessToken(access_token=_create_access_token(user_id))
 
 
 @router.post("/logout")
-async def logout(body: RefreshRequest, _: UserRecord = Depends(current_user)) -> dict[str, str]:
+async def logout(
+    request: Request,
+    response: Response,
+    body: RefreshRequest | None = None,
+    _: UserRecord = Depends(current_user),
+) -> dict[str, str]:
     """Invalidate one refresh token."""
-    await _revoke_refresh_token(body.refresh_token)
+    token = _refresh_from(request, body)
+    if token:
+        await _revoke_refresh_token(token)
+    response.delete_cookie(
+        settings.REFRESH_COOKIE_NAME,
+        path=f"{settings.API_V1_PREFIX}/auth",
+        secure=settings.REFRESH_COOKIE_SECURE,
+        httponly=True,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,  # type: ignore[arg-type]
+    )
     return {"message": "Logged out"}
 
 

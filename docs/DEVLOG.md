@@ -990,6 +990,43 @@ What this does not prove yet is the AWS production setup. IAM roles, bucket
 policies, TLS, lifecycle rules, object versioning, cloud networking, and backup
 behavior still need their own deployment test.
 
+## 2026-08 — Frontend Accounts
+
+The backend had register, login, refresh, and logout routes, but the browser was
+still sending every request as `local-dev`. I added a compact account control to
+the existing top bar and a shared login/register dialog, keeping the document
+workspace as the first screen.
+
+The API client now attaches the access token to normal requests. If an access
+token expires, one refresh request renews it and retries the original call. A
+page reload restores the current account through `/auth/me`, while signing out
+clears the browser session and returns the panels to the local workspace.
+
+Registration now checks the password in both places. The form gives immediate
+feedback, while the API enforces the real boundary: at least 8 characters, no
+more than bcrypt's 72-byte input limit, and no common weak passwords.
+
+Local development still leaves `AUTH_REQUIRED=false`. This keeps the project
+easy to run without Redis or an account, while signed-in requests already use
+the user-scoped document, graph, search, and chat paths.
+
+I also closed the restart gap in local auth. Registration was already writing
+users to SQLAlchemy, but login and `/auth/me` only checked the process memory.
+They now restore accounts by email or user id, so restarting the API no longer
+makes a persisted account disappear.
+
+The browser no longer keeps the seven-day refresh token in `localStorage`.
+Register and login set a path-scoped HttpOnly cookie; Axios sends it only to the
+auth routes when it needs a new access token. Curl and Swagger clients can keep
+using the JSON token body, so this did not require breaking the existing API.
+
+I also tested the switch that turns the local workspace into a private one.
+With `AUTH_REQUIRED=true`, documents, jobs, graph, search, chat, and scraper
+routes now have regression coverage for anonymous `401` responses. The browser
+opens the existing account dialog when one of those routes rejects a request,
+and the job panel explains that sign-in is required instead of showing a vague
+loading error.
+
 ## Current State
 
 As of August 2026, GraphMind has a working foundation:
@@ -1015,6 +1052,7 @@ As of August 2026, GraphMind has a working foundation:
 - retrieval-based chat endpoint with local fallback answers and visible fallback reasons
 - web scraper MVP that stores public pages as searchable Markdown documents
 - JWT auth MVP with access/refresh token flow
+- frontend login/register dialog with session restore and automatic token refresh
 - user-scoped document, graph, search, and chat reads
 - Redis-backed rate-limit wrapper with local no-op fallback
 - SQLAlchemy persistence for users, document metadata, parsed artifacts, graph
@@ -1042,5 +1080,5 @@ The next realistic steps are:
 1. Expand the Markdown viewer to show full sections and chunks.
 2. Improve graph quality with better relation extraction and edge weighting.
 3. Add graph migrations and stronger graph queries.
-4. Add the frontend login/register flow and send Bearer tokens from the API client.
+4. Test the account flow with `AUTH_REQUIRED=true` behind HTTPS and secure cookies.
 5. Replace local chat answers with GPT-backed answer generation when the OpenAI layer is ready.

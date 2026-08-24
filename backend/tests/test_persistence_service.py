@@ -12,6 +12,7 @@ def test_persistence_helpers_noop_when_database_disabled(monkeypatch):
 
     persistence_service.save_document_record({"filename": "notes.md"})
     persistence_service.mark_document_deleted("notes.md", "local-dev")
+    assert persistence_service.load_user_record(email="user@example.com") is None
 
 
 def test_document_metadata_maps_to_record_values():
