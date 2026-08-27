@@ -31,12 +31,13 @@ GPT/OpenAI answer generation, and deeper graph querying are planned upgrades.
 - Redis-backed Celery worker and Celery Beat in Docker Compose
 - WebSocket job progress, upload cancel/retry controls, recent-job UI,
   persistent job history, and scheduled reindex/cleanup tasks
-- JWT auth MVP with refresh tokens
+- Email/password and optional GitHub OAuth login with JWT access tokens and
+  HttpOnly refresh cookies
 - Redis-backed rate limiting
 - Prometheus-compatible `/metrics`
 - Optional Sentry error tracking with release names based on `VERSION` and
   optional `GIT_SHA`
-- 130+ backend tests covering the current core modules
+- 150+ backend tests covering the current core modules
 
 ## Project Status
 
@@ -52,6 +53,7 @@ GPT/OpenAI answer generation, and deeper graph querying are planned upgrades.
 | Persistence | Partial | Documents, parsed chunks/entities, graph nodes/edges, users, and jobs |
 | Observability | Working MVP | Prometheus metrics and optional Sentry |
 | File storage backend | Working MVP | Local by default; optional S3/MinIO keeps a local parser cache |
+| Authentication | Working MVP | Email/password, optional GitHub OAuth, user-scoped workspaces |
 
 ## Quick Start
 
@@ -202,5 +204,5 @@ More testing notes are in [docs/TESTING.md](docs/TESTING.md).
 1. Replace the local vector-search MVP with a real embedding model and vector DB.
 2. Add OpenAI/GPT-backed answer generation behind the existing chat interface.
 3. Add graph migrations and stronger persisted graph queries.
-4. Turn on `AUTH_REQUIRED` after the frontend account flow has had a wider test pass.
+4. Run the GitHub OAuth and `AUTH_REQUIRED=true` flow behind staging HTTPS.
 5. Expand the jobs panel with filters and a full task detail drawer.

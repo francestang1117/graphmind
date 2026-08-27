@@ -15,7 +15,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 Expected current result:
 
 ```text
-151 passed
+156 passed
 ```
 
 If you are starting from a fresh environment:
@@ -42,7 +42,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 | `backend/tests/test_full_pipeline.py` | Markdown parse -> entities -> graph construction |
 | `backend/tests/test_vector_store.py` | Lightweight local vector search and hybrid scoring |
 | `backend/tests/test_qa_engine.py` | Retrieval-based local QA behavior |
-| `backend/tests/test_auth.py` | Register/login/refresh/logout/me flow |
+| `backend/tests/test_auth.py` | Email/password auth, refresh cookies, GitHub OAuth state/PKCE/handoff flow |
 | `backend/tests/test_auth_boundaries.py` | Anonymous and signed-in access to private API groups |
 | `backend/tests/test_document_repository.py` | SQLAlchemy document metadata repository |
 | `backend/tests/test_persistence_service.py` | Lightweight persistence helpers |
@@ -88,6 +88,20 @@ curl -i "http://localhost:8001/api/v1/documents/"
 Open the frontend with `VITE_API_URL=http://localhost:8001`. The first private
 request opens the sign-in dialog. Registering or signing in retries future
 requests with the new access token.
+
+Test GitHub login manually:
+
+1. Create a GitHub OAuth App in **Settings → Developer settings → OAuth Apps**.
+2. Set the homepage to `http://localhost:5173`.
+3. Set the callback to `http://localhost:8000/api/v1/auth/github/callback`.
+4. Copy its Client ID and Client Secret into `backend/.env` using the names in
+   `.env.example`.
+5. Restart the backend and frontend. The account dialog will show
+   **Continue with GitHub**.
+
+The automated tests mock GitHub's token/profile endpoints. A real manual test
+is still required after creating the OAuth App because repository secrets are
+not stored in this project.
 
 Upload a Markdown file:
 

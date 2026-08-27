@@ -1,6 +1,6 @@
 import axios from "axios";
 import type { FileInfo } from "../stores/appStore";
-import type { TokenPair, User } from "../types";
+import type { AuthProviders, TokenPair, User } from "../types";
 import {
   clearTokens,
   getAccessToken,
@@ -187,6 +187,17 @@ export const getCurrentUser = (): Promise<User> =>
   http.get("/auth/me").then((r) => r.data);
 
 export const logoutAccount = () => http.post("/auth/logout", {});
+
+export const getAuthProviders = (): Promise<AuthProviders> =>
+  http.get("/auth/providers").then((r) => r.data);
+
+export const getGithubLoginUrl = (returnOrigin: string) =>
+  `${API_BASE}/api/v1/auth/github/start?return_origin=${encodeURIComponent(returnOrigin)}`;
+
+export const exchangeOAuthCode = (code: string) =>
+  http.post<{ access_token: string }>("/auth/oauth/exchange", { code }).then((r) => r.data);
+
+export const isApiOrigin = (origin: string) => origin === new URL(API_BASE).origin;
 
 export const uploadDocument = (
   file: File,

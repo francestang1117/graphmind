@@ -135,8 +135,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `documents_with_markdown.py` is still a helper module for cached parsing and
   parsed-structure responses. It is used by document/search/graph/chat code, but
   it is not registered as its own router.
-- `auth.py` is the JWT auth MVP: register/login/me plus dev-friendly user
-  resolution for local work.
+- `auth.py` handles email/password login, GitHub OAuth, JWT access tokens,
+  HttpOnly refresh cookies, and the optional local-dev workspace.
 - `graph.py`, `search.py`, and `chat.py` are connected to real uploaded content.
   They are MVP implementations, not demo-only screens anymore.
 - `jobs.py` exposes small HTTP controls for worker jobs: check status and cancel.
@@ -250,7 +250,7 @@ WebSocket progress. The main things that are still early are:
 
 - deeper graph persistence tooling beyond the current node/edge tables
 - production-grade user/workspace isolation across every artifact
-- production auth rollout with `AUTH_REQUIRED=true` and cookie-backed refresh tokens
+- staging OAuth and `AUTH_REQUIRED=true` checks behind HTTPS
 - GPT-backed answer generation
 - richer relation extraction and graph quality tuning
 - a real Prometheus/Grafana deployment around the `/metrics` endpoint

@@ -9,11 +9,20 @@ from app.api.endpoints import auth
 def isolate_auth_storage(monkeypatch):
     monkeypatch.setattr(auth, "load_user_record", lambda **_: None)
     monkeypatch.setattr(auth, "save_user_record", lambda _: None)
+    monkeypatch.setattr(auth, "load_user_by_oauth", lambda *_: None)
+    monkeypatch.setattr(auth, "save_oauth_identity", lambda *_: None)
+
+    async def no_redis():
+        return None
+
+    monkeypatch.setattr(auth, "_redis_client", no_redis)
 
 
 def _client() -> TestClient:
     auth._users.clear()
     auth._refresh_tokens.clear()
+    auth._oauth_users.clear()
+    auth._oauth_values.clear()
     app = FastAPI()
     app.include_router(auth.router, prefix="/auth")
     return TestClient(app)
@@ -166,3 +175,91 @@ def test_auth_required_accepts_registered_user(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["user_id"]
+
+
+def test_github_provider_and_start_redirect(monkeypatch):
+    client = _client()
+    monkeypatch.setattr(auth.settings, "GITHUB_OAUTH_CLIENT_ID", "client-123")
+    monkeypatch.setattr(auth.settings, "GITHUB_OAUTH_CLIENT_SECRET", "secret-123")
+
+    providers = client.get("/auth/providers")
+    start = client.get(
+        "/auth/github/start",
+        params={"return_origin": "http://localhost:5173"},
+        follow_redirects=False,
+    )
+
+    assert providers.json() == {"github": True}
+    assert start.status_code == 307
+    location = start.headers["location"]
+    assert location.startswith("https://github.com/login/oauth/authorize?")
+    assert "client_id=client-123" in location
+    assert "code_challenge_method=S256" in location
+    assert any(key.startswith("oauth:github:state:") for key in auth._oauth_values)
+
+
+def test_github_start_rejects_unconfigured_or_unknown_origin(monkeypatch):
+    client = _client()
+    monkeypatch.setattr(auth.settings, "GITHUB_OAUTH_CLIENT_ID", "")
+    monkeypatch.setattr(auth.settings, "GITHUB_OAUTH_CLIENT_SECRET", "")
+
+    missing = client.get(
+        "/auth/github/start",
+        params={"return_origin": "http://localhost:5173"},
+        follow_redirects=False,
+    )
+    assert missing.status_code == 503
+
+    monkeypatch.setattr(auth.settings, "GITHUB_OAUTH_CLIENT_ID", "client-123")
+    monkeypatch.setattr(auth.settings, "GITHUB_OAUTH_CLIENT_SECRET", "secret-123")
+    unknown = client.get(
+        "/auth/github/start",
+        params={"return_origin": "https://untrusted.example"},
+        follow_redirects=False,
+    )
+    assert unknown.status_code == 400
+
+
+def test_github_callback_uses_one_time_handoff(monkeypatch):
+    client = _client()
+    auth._oauth_values["oauth:github:state:valid-state"] = (
+        '{"origin":"http://localhost:5173","verifier":"pkce-verifier"}',
+        auth.datetime.now(auth.timezone.utc) + auth.timedelta(minutes=10),
+    )
+
+    async def github_identity(code, verifier):
+        assert code == "github-code"
+        assert verifier == "pkce-verifier"
+        return {
+            "provider_user_id": "991122",
+            "email": "octo@example.com",
+            "name": "Octo Cat",
+        }
+
+    monkeypatch.setattr(auth, "_fetch_github_identity", github_identity)
+    callback = client.get(
+        "/auth/github/callback",
+        params={"state": "valid-state", "code": "github-code"},
+    )
+
+    assert callback.status_code == 200
+    assert "graphmind:oauth" in callback.text
+    assert client.cookies.get(auth.settings.REFRESH_COOKIE_NAME)
+    handoff_key = next(key for key in auth._oauth_values if key.startswith("oauth:handoff:"))
+    handoff = handoff_key.removeprefix("oauth:handoff:")
+
+    exchange = client.post("/auth/oauth/exchange", json={"code": handoff})
+    repeated = client.post("/auth/oauth/exchange", json={"code": handoff})
+
+    assert exchange.status_code == 200
+    assert exchange.json()["access_token"]
+    assert repeated.status_code == 401
+    assert auth._users["octo@example.com"].name == "Octo Cat"
+
+
+def test_github_identity_reuses_the_same_local_user():
+    first = auth._oauth_user("github", "991122", "octo@example.com", "Octo Cat")
+    second = auth._oauth_user("github", "991122", "changed@example.com", "Renamed Cat")
+
+    assert second.id == first.id
+    assert second.email == first.email

@@ -24,6 +24,21 @@ class UserRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class OAuthIdentityRecord(Base):
+    """External account id mapped to the local user that owns the workspace."""
+
+    __tablename__ = "oauth_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_user_id", name="uq_oauth_provider_user"),
+    )
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    provider_user_id: Mapped[str] = mapped_column(String(255), index=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class DocumentRecord(Base):
     __tablename__ = "documents"
     __table_args__ = (

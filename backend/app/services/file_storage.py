@@ -43,7 +43,7 @@ class FileStorage:
         """Persist bytes atomically and return API-ready metadata."""
         extension = Path(original_filename).suffix.lower()
         file_hash = _sha256(data)
-        dest = self._dest_path(file_hash, extension)
+        dest = self._dest_path(file_hash, extension, user_id)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
         # Same bytes should map to one stored file, even under a new filename.
@@ -78,7 +78,7 @@ class FileStorage:
     def list_files(self, user_id: Optional[str] = None) -> list[dict[str, Any]]:
         """Return all stored file metadata, newest first."""
         files = []
-        for metadata_path in self.root.glob("*/*.json"):
+        for metadata_path in self.root.rglob("*.json"):
             try:
                 metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
             except OSError as exc:
@@ -142,10 +142,16 @@ class FileStorage:
             raise FileNotFoundError(metadata.get("filename") or path.name)
         return path
 
-    def _dest_path(self, file_hash: str, extension: str) -> Path:
+    def _dest_path(self, file_hash: str, extension: str, user_id: str = "local-dev") -> Path:
         ext = _normalise_ext(extension)
         prefix = file_hash[:2]
-        return self.root / prefix / f"{file_hash}{ext}"
+        if user_id == "local-dev":
+            return self.root / prefix / f"{file_hash}{ext}"
+
+        # Signed-in workspaces need separate parser caches even when two users
+        # upload the same bytes. Hash the id so it never becomes a path segment.
+        owner = hashlib.sha256(user_id.encode("utf-8")).hexdigest()[:24]
+        return self.root / "users" / owner / prefix / f"{file_hash}{ext}"
 
     def _metadata_path(self, path: Path) -> Path:
         return path.with_suffix(path.suffix + ".json")

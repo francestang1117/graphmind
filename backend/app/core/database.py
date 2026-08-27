@@ -55,6 +55,7 @@ def init_db() -> None:
         DocumentRecord,
         GraphEdgeRecord,
         GraphNodeRecord,
+        OAuthIdentityRecord,
         ParsedChunkRecord,
         ParsedEntityRecord,
         ProcessingJobRecord,

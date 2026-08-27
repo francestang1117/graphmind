@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     BCRYPT_ROUNDS: int = 12
     REDIS_URL: str = "redis://localhost:6379/0"
     AUTH_REQUIRED: bool = False
+    GITHUB_OAUTH_CLIENT_ID: str = ""
+    GITHUB_OAUTH_CLIENT_SECRET: str = ""
+    GITHUB_OAUTH_CALLBACK_URL: str = "http://localhost:8000/api/v1/auth/github/callback"
     DATABASE_URL: str = "sqlite:///./graphmind.db"
     CELERY_BROKER_URL: str = "memory://"
     CELERY_RESULT_BACKEND: str = "cache+memory://"

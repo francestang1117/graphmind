@@ -77,6 +77,71 @@ def load_user_record(*, user_id: str | None = None, email: str | None = None) ->
         return None
 
 
+def save_oauth_identity(provider: str, provider_user_id: str, user_id: str) -> None:
+    """Link an external account to the local user that owns its workspace."""
+    if not db_enabled():
+        return
+
+    from sqlalchemy import select
+    from app.models.persistence import OAuthIdentityRecord
+
+    identity_id = f"{provider}:{provider_user_id}"
+    with SessionLocal() as db:  # type: ignore[misc]
+        record = db.get(OAuthIdentityRecord, identity_id)
+        if not record:
+            record = db.scalars(
+                select(OAuthIdentityRecord).where(
+                    OAuthIdentityRecord.provider == provider,
+                    OAuthIdentityRecord.provider_user_id == provider_user_id,
+                )
+            ).first()
+        if record:
+            record.user_id = user_id
+        else:
+            db.add(
+                OAuthIdentityRecord(
+                    id=identity_id,
+                    provider=provider,
+                    provider_user_id=provider_user_id,
+                    user_id=user_id,
+                )
+            )
+        db.commit()
+
+
+def load_user_by_oauth(provider: str, provider_user_id: str) -> dict[str, Any] | None:
+    """Load the local account already linked to an external identity."""
+    if not db_enabled():
+        return None
+
+    from sqlalchemy import select
+    from app.models.persistence import OAuthIdentityRecord, UserRecord
+
+    try:
+        with SessionLocal() as db:  # type: ignore[misc]
+            identity = db.scalars(
+                select(OAuthIdentityRecord).where(
+                    OAuthIdentityRecord.provider == provider,
+                    OAuthIdentityRecord.provider_user_id == provider_user_id,
+                )
+            ).first()
+            if not identity:
+                return None
+            record = db.get(UserRecord, identity.user_id)
+            if not record:
+                return None
+            return {
+                "id": record.id,
+                "email": record.email,
+                "name": record.name,
+                "hashed_password": record.hashed_password,
+                "created_at": record.created_at.isoformat(),
+            }
+    except Exception as exc:
+        log.warning("Could not load OAuth identity: %s", exc)
+        return None
+
+
 def save_document_record(metadata: dict[str, Any]) -> None:
     """Mirror uploaded document metadata into the documents table."""
     if not db_enabled():

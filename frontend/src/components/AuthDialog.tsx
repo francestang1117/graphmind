@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, LockKeyhole, X } from "lucide-react";
+import { ArrowRight, GitBranch, LockKeyhole, X } from "lucide-react";
+import {
+  getAuthProviders,
+  getGithubLoginUrl,
+  isApiOrigin,
+} from "../services/api";
 import { useAuthStore } from "../stores/authStore";
 
 interface AuthDialogProps {
@@ -35,18 +40,56 @@ export default function AuthDialog({ open, onClose }: AuthDialogProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const { user, busy, error, login, register, clearError } = useAuthStore();
+  const [githubEnabled, setGithubEnabled] = useState(false);
+  const [oauthError, setOauthError] = useState("");
+  const { user, busy, error, login, register, finishOAuth, clearError } = useAuthStore();
   const passwordStatus = passwordState(password);
 
   useEffect(() => {
     if (user && open) onClose();
   }, [user, open, onClose]);
 
+  useEffect(() => {
+    if (!open) return;
+    void getAuthProviders()
+      .then((providers) => setGithubEnabled(providers.github))
+      .catch(() => setGithubEnabled(false));
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const receiveOAuth = (event: MessageEvent) => {
+      // Ignore messages from other tabs or extensions using the same event name.
+      if (!isApiOrigin(event.origin) || event.data?.type !== "graphmind:oauth") return;
+      if (event.data.error) {
+        setOauthError(event.data.error);
+        return;
+      }
+      if (event.data.code) {
+        setOauthError("");
+        void finishOAuth(event.data.code).catch(() => undefined);
+      }
+    };
+    window.addEventListener("message", receiveOAuth);
+    return () => window.removeEventListener("message", receiveOAuth);
+  }, [finishOAuth, open]);
+
   if (!open) return null;
 
   const switchMode = (next: "login" | "register") => {
     setMode(next);
+    setOauthError("");
     clearError();
+  };
+
+  const startGithub = () => {
+    setOauthError("");
+    const popup = window.open(
+      getGithubLoginUrl(window.location.origin),
+      "graphmind-github-login",
+      "popup,width=560,height=720",
+    );
+    if (!popup) setOauthError("Allow pop-ups to continue with GitHub.");
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -81,6 +124,16 @@ export default function AuthDialog({ open, onClose }: AuthDialogProps) {
           <button className={mode === "register" ? "active" : ""} onClick={() => switchMode("register")}>Register</button>
         </div>
 
+        {githubEnabled && (
+          <>
+            <button className="auth-github" type="button" onClick={startGithub} disabled={busy}>
+              <GitBranch size={16} />
+              Continue with GitHub
+            </button>
+            <div className="auth-divider"><span>or use email</span></div>
+          </>
+        )}
+
         <form onSubmit={submit}>
           {mode === "register" && (
             <label>
@@ -104,7 +157,7 @@ export default function AuthDialog({ open, onClose }: AuthDialogProps) {
             </div>
           )}
 
-          {error && <div className="auth-error">{error}</div>}
+          {(oauthError || error) && <div className="auth-error">{oauthError || error}</div>}
 
           <button className="auth-submit" disabled={busy || (mode === "register" && !passwordStatus.valid)}>
             {busy ? "Please wait" : mode === "login" ? "Sign in" : "Create account"}

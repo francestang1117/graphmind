@@ -1027,6 +1027,33 @@ opens the existing account dialog when one of those routes rejects a request,
 and the job panel explains that sign-in is required instead of showing a vague
 loading error.
 
+GitHub login now uses the same local account and token flow rather than adding
+a second kind of session. The backend starts an authorization-code flow with
+state and PKCE, reads a verified GitHub email, and links GitHub's stable numeric
+user ID through a separate `oauth_identities` table. The callback sends the
+browser a one-time handoff code; the access token is never placed in the URL,
+and the refresh token remains an HttpOnly cookie.
+
+The GitHub button only appears when the backend has a Client ID and Client
+Secret. This keeps a fresh local checkout usable without OAuth credentials and
+avoids suggesting that a provider is available when it is not configured.
+
+I ran the S3 storage path against the MinIO Compose profile instead of relying
+only on mocked storage tests. A Markdown file made it through upload, parsing,
+safe inline opening, and deletion; the object appeared under the user's prefix
+and disappeared from the bucket after deletion.
+
+That run also caught a startup race in `minio-init`. Compose could start the
+initializer before MinIO accepted connections, leaving the bucket uncreated.
+The initializer now retries the connection before creating the bucket. Local
+S3 mode also needs `boto3` installed from `backend/requirements.txt`.
+
+The account-isolation check found one more edge case: MinIO object keys were
+user-scoped, but the local parser cache still used only the content hash. Two
+users uploading the same bytes could therefore collide before the remote write.
+Signed-in workspaces now get separate cache directories, while old `local-dev`
+paths remain readable.
+
 ## Current State
 
 As of August 2026, GraphMind has a working foundation:
@@ -1051,7 +1078,7 @@ As of August 2026, GraphMind has a working foundation:
 - vector search MVP over parsed document chunks
 - retrieval-based chat endpoint with local fallback answers and visible fallback reasons
 - web scraper MVP that stores public pages as searchable Markdown documents
-- JWT auth MVP with access/refresh token flow
+- email/password and optional GitHub OAuth login with access/refresh token flow
 - frontend login/register dialog with session restore and automatic token refresh
 - user-scoped document, graph, search, and chat reads
 - Redis-backed rate-limit wrapper with local no-op fallback

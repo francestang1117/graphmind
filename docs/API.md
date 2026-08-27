@@ -24,6 +24,34 @@ runs where you do not want the endpoint.
 
 ## Auth
 
+### `GET /auth/providers`
+
+Returns the external login methods configured on the backend:
+
+```json
+{ "github": true }
+```
+
+### GitHub OAuth
+
+`GET /auth/github/start?return_origin=http://localhost:5173` starts the GitHub
+authorization-code flow with `state` and PKCE. GitHub returns to
+`GET /auth/github/callback`; the callback creates or finds the local user, sets
+the normal refresh cookie, and sends a one-time handoff code to the opener.
+
+The frontend exchanges that code once:
+
+```http
+POST /auth/oauth/exchange
+Content-Type: application/json
+
+{ "code": "one-time-code" }
+```
+
+GitHub's numeric user ID is stored in `oauth_identities` and linked to the
+existing local user. This keeps the same workspace if the GitHub username or
+email changes.
+
 ### `POST /auth/register`
 
 Create a new account.

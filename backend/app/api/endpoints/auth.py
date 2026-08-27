@@ -13,13 +13,21 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlencode
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
 from app.core.config import settings
-from app.services.persistence_service import load_user_record, save_user_record
+from app.services.persistence_service import (
+    load_user_by_oauth,
+    load_user_record,
+    save_oauth_identity,
+    save_user_record,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -78,6 +86,10 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class OAuthExchangeRequest(BaseModel):
+    code: str
+
+
 # Local auth state
 
 @dataclass
@@ -97,6 +109,8 @@ class RefreshRecord:
 
 _users: dict[str, UserRecord] = {}
 _refresh_tokens: dict[str, RefreshRecord] = {}
+_oauth_users: dict[tuple[str, str], str] = {}
+_oauth_values: dict[str, tuple[str, datetime]] = {}
 
 _COMMON_PASSWORDS = {
     "12345678",
@@ -288,6 +302,35 @@ async def _revoke_refresh_token(token: str) -> None:
     _refresh_tokens.pop(token, None)
 
 
+async def _store_oauth_value(key: str, value: str, ttl: int) -> None:
+    client = await _redis_client()
+    if client:
+        try:
+            await client.setex(key, ttl, value)
+            await client.aclose()
+            return
+        except Exception as exc:
+            log.warning("Redis OAuth state storage failed, using local fallback: %s", exc)
+    _oauth_values[key] = (value, datetime.now(timezone.utc) + timedelta(seconds=ttl))
+
+
+async def _consume_oauth_value(key: str) -> str | None:
+    client = await _redis_client()
+    if client:
+        try:
+            value = await client.getdel(key)
+            await client.aclose()
+            if value:
+                return value
+        except Exception as exc:
+            log.warning("Redis OAuth state lookup failed, using local fallback: %s", exc)
+
+    record = _oauth_values.pop(key, None)
+    if not record or record[1] < datetime.now(timezone.utc):
+        return None
+    return record[0]
+
+
 # Auth helpers
 
 def _normalize_email(email: str) -> str:
@@ -322,6 +365,110 @@ def _restore_user(*, user_id: str | None = None, email: str | None = None) -> Us
     user = UserRecord(**data)
     _users[user.email] = user
     return user
+
+
+def _allowed_frontend_origin(origin: str) -> str:
+    clean = origin.rstrip("/")
+    allowed = {item.rstrip("/") for item in settings.CORS_ORIGINS}
+    if clean not in allowed:
+        raise HTTPException(status_code=400, detail="OAuth return origin is not allowed")
+    return clean
+
+
+def _oauth_user(provider: str, provider_user_id: str, email: str, name: str) -> UserRecord:
+    # Provider ids do not change when a GitHub username or email changes.
+    persisted = load_user_by_oauth(provider, provider_user_id)
+    if persisted:
+        user = UserRecord(**persisted)
+        _users[user.email] = user
+        _oauth_users[(provider, provider_user_id)] = user.id
+        return user
+
+    linked_id = _oauth_users.get((provider, provider_user_id))
+    user = next((item for item in _users.values() if item.id == linked_id), None)
+    if not user:
+        user = _users.get(email) or _restore_user(email=email)
+    if not user:
+        user = UserRecord(
+            id=uuid.uuid4().hex,
+            email=email,
+            name=name,
+            hashed_password="",
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        _users[email] = user
+        save_user_record(user)
+
+    _oauth_users[(provider, provider_user_id)] = user.id
+    save_oauth_identity(provider, provider_user_id, user.id)
+    return user
+
+
+async def _fetch_github_identity(code: str, verifier: str) -> dict[str, str]:
+    async with httpx.AsyncClient(timeout=10) as client:
+        token_response = await client.post(
+            "https://github.com/login/oauth/access_token",
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": settings.GITHUB_OAUTH_CLIENT_ID,
+                "client_secret": settings.GITHUB_OAUTH_CLIENT_SECRET,
+                "code": code,
+                "redirect_uri": settings.GITHUB_OAUTH_CALLBACK_URL,
+                "code_verifier": verifier,
+            },
+        )
+        token_response.raise_for_status()
+        token_data = token_response.json()
+        github_token = token_data.get("access_token")
+        if not github_token:
+            raise ValueError(token_data.get("error_description") or "GitHub did not return an access token")
+
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {github_token}",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": settings.PROJECT_NAME,
+        }
+        user_response = await client.get("https://api.github.com/user", headers=headers)
+        user_response.raise_for_status()
+        profile = user_response.json()
+
+        # Only a verified GitHub email is allowed to match an existing local account.
+        email_response = await client.get("https://api.github.com/user/emails", headers=headers)
+        email_response.raise_for_status()
+        emails = email_response.json()
+        preferred = next(
+            (item for item in emails if item.get("primary") and item.get("verified")),
+            next((item for item in emails if item.get("verified")), None),
+        )
+        email = preferred.get("email") if preferred else None
+
+        provider_id = str(profile.get("id") or "")
+        login = str(profile.get("login") or "")
+        if not provider_id or not login:
+            raise ValueError("GitHub profile is missing its stable account id")
+        if not email:
+            email = f"{provider_id}+{login}@users.noreply.github.com"
+        return {
+            "provider_user_id": provider_id,
+            "email": _normalize_email(email),
+            "name": str(profile.get("name") or login),
+        }
+
+
+def _oauth_popup(origin: str, payload: dict[str, str], status_code: int = 200) -> HTMLResponse:
+    target = json.dumps(origin)
+    message = json.dumps({"type": "graphmind:oauth", **payload}).replace("</", "<\\/")
+    html = (
+        "<!doctype html><meta charset='utf-8'><title>GraphMind sign in</title>"
+        f"<script>window.opener?.postMessage({message},{target});window.close();</script>"
+        "<p>You can close this window.</p>"
+    )
+    return HTMLResponse(
+        html,
+        status_code=status_code,
+        headers={"Content-Security-Policy": "default-src 'none'; script-src 'unsafe-inline'"},
+    )
 
 
 async def current_user(token: str = Depends(oauth2_scheme)) -> UserRecord:
@@ -375,6 +522,79 @@ def _ensure_dev_user() -> UserRecord:
 
 
 # Auth routes
+
+@router.get("/providers")
+async def auth_providers() -> dict[str, bool]:
+    return {"github": bool(settings.GITHUB_OAUTH_CLIENT_ID and settings.GITHUB_OAUTH_CLIENT_SECRET)}
+
+
+@router.get("/github/start")
+async def github_start(return_origin: str) -> RedirectResponse:
+    if not settings.GITHUB_OAUTH_CLIENT_ID or not settings.GITHUB_OAUTH_CLIENT_SECRET:
+        raise HTTPException(status_code=503, detail="GitHub login is not configured")
+
+    origin = _allowed_frontend_origin(return_origin)
+    state = secrets.token_urlsafe(32)
+    verifier = secrets.token_urlsafe(64)
+    challenge = _b64url(hashlib.sha256(verifier.encode()).digest())
+    await _store_oauth_value(
+        f"oauth:github:state:{state}",
+        json.dumps({"origin": origin, "verifier": verifier}),
+        600,
+    )
+    query = urlencode(
+        {
+            "client_id": settings.GITHUB_OAUTH_CLIENT_ID,
+            "redirect_uri": settings.GITHUB_OAUTH_CALLBACK_URL,
+            "scope": "read:user user:email",
+            "state": state,
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        }
+    )
+    return RedirectResponse(f"https://github.com/login/oauth/authorize?{query}")
+
+
+@router.get("/github/callback", response_class=HTMLResponse)
+async def github_callback(
+    state: str = "",
+    code: str = "",
+    error: str = "",
+) -> HTMLResponse:
+    # Consuming state once rejects replayed callbacks as well as forged ones.
+    raw_state = await _consume_oauth_value(f"oauth:github:state:{state}") if state else None
+    if not raw_state:
+        raise HTTPException(status_code=400, detail="OAuth state is invalid or expired")
+
+    state_data = json.loads(raw_state)
+    origin = _allowed_frontend_origin(state_data["origin"])
+    if error or not code:
+        return _oauth_popup(origin, {"error": "GitHub sign-in was cancelled"}, 400)
+
+    try:
+        identity = await _fetch_github_identity(code, state_data["verifier"])
+        user = _oauth_user("github", identity["provider_user_id"], identity["email"], identity["name"])
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("GitHub OAuth callback failed: %s", exc)
+        return _oauth_popup(origin, {"error": "GitHub sign-in could not be completed"}, 400)
+
+    refresh = _create_refresh_token()
+    await _store_refresh_token(refresh, user.id)
+    handoff = secrets.token_urlsafe(32)
+    # The opener receives this short-lived code; the JWT stays out of browser history.
+    await _store_oauth_value(f"oauth:handoff:{handoff}", _create_access_token(user.id), 60)
+
+    popup = _oauth_popup(origin, {"code": handoff})
+    _set_refresh_cookie(popup, refresh)
+    return popup
+
+
+@router.post("/oauth/exchange", response_model=AccessToken)
+async def oauth_exchange(body: OAuthExchangeRequest) -> AccessToken:
+    access_token = await _consume_oauth_value(f"oauth:handoff:{body.code}")
+    if not access_token:
+        raise HTTPException(status_code=401, detail="OAuth handoff is invalid or expired")
+    return AccessToken(access_token=access_token)
 
 @router.post("/register", response_model=TokenPair, status_code=status.HTTP_201_CREATED)
 async def register(body: UserCreate, response: Response) -> TokenPair:

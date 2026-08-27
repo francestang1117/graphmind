@@ -3,6 +3,7 @@ import { create } from "zustand";
 import type { User } from "../types";
 import {
   getCurrentUser,
+  exchangeOAuthCode,
   loginAccount,
   logoutAccount,
   registerAccount,
@@ -20,6 +21,7 @@ interface AuthState {
   restore: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
+  finishOAuth: (code: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -66,6 +68,20 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ busy: true, error: "" });
     try {
       const tokens = await registerAccount(email, password, name);
+      saveAccessToken(tokens.access_token);
+      const user = await getCurrentUser();
+      set({ user, busy: false });
+    } catch (error) {
+      clearTokens();
+      set({ busy: false, error: messageFor(error) });
+      throw error;
+    }
+  },
+
+  finishOAuth: async (code) => {
+    set({ busy: true, error: "" });
+    try {
+      const tokens = await exchangeOAuthCode(code);
       saveAccessToken(tokens.access_token);
       const user = await getCurrentUser();
       set({ user, busy: false });

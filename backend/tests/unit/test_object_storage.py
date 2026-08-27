@@ -71,3 +71,21 @@ def test_s3_storage_can_sign_download_url(tmp_path):
 
     assert info["object_key"] in url
     assert "exp=60" in url
+
+
+def test_s3_storage_keeps_same_content_separate_for_each_user(tmp_path):
+    client = FakeS3Client()
+    storage = S3ObjectStorage(tmp_path, bucket="graphmind", client=client)
+
+    first = storage.save_file(b"shared bytes", "notes.md", "text/markdown", user_id="u1")
+    second = storage.save_file(b"shared bytes", "notes.md", "text/markdown", user_id="u2")
+
+    assert first["stored_filename"] == second["stored_filename"]
+    assert first["file_path"] != second["file_path"]
+    assert first["object_key"] != second["object_key"]
+    assert storage.get_file_info(first["stored_filename"], user_id="u1")["user_id"] == "u1"
+    assert storage.get_file_info(second["stored_filename"], user_id="u2")["user_id"] == "u2"
+
+    assert storage.delete_file(first["stored_filename"], user_id="u1") is True
+    assert storage.get_file_info(second["stored_filename"], user_id="u2") is not None
+    assert ("graphmind", second["object_key"]) in client.objects

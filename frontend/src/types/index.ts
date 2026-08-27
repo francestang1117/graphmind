@@ -95,3 +95,7 @@ export interface User {
   name: string;
   created_at: string;
 }
+
+export interface AuthProviders {
+  github: boolean;
+}
