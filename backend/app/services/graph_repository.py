@@ -102,7 +102,9 @@ class GraphRepository:
                     edge_stmt = edge_stmt.where(GraphEdgeRecord.user_id == user_id)
 
                 nodes = [_node_to_dict(row) for row in db.scalars(node_stmt).all()]
-                edges = [_edge_to_dict(row) for row in db.scalars(edge_stmt).all()]
+                edges = _aggregate_edges(
+                    [_edge_to_dict(row) for row in db.scalars(edge_stmt).all()]
+                )
                 return {"nodes": nodes, "edges": edges}
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
             log.warning("Could not load persisted graph: %s", exc)
@@ -232,6 +234,27 @@ def _edge_to_dict(row: "GraphEdgeRecord") -> dict[str, Any]:
         "created_at": row.created_at.isoformat() if row.created_at else "",
         "updated_at": row.updated_at.isoformat() if row.updated_at else "",
     }
+
+
+def _aggregate_edges(edges: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Combine relation evidence stored by separate document slices."""
+    grouped: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for edge in edges:
+        key = (edge["source"], edge["target"], edge["type"])
+        current = grouped.get(key)
+        if not current:
+            grouped[key] = {**edge, "sources": list(edge.get("sources") or [])}
+            continue
+
+        current["weight"] = int(current.get("weight", 1)) + int(edge.get("weight", 1))
+        current["confidence"] = max(
+            float(current.get("confidence", 0)),
+            float(edge.get("confidence", 0)),
+        )
+        current["sources"] = _merge_unique(current.get("sources", []), edge.get("sources", []))
+        if edge.get("updated_at", "") > current.get("updated_at", ""):
+            current["updated_at"] = edge["updated_at"]
+    return list(grouped.values())
 
 
 def _merge_unique(left: list[Any], right: Any) -> list[str]:

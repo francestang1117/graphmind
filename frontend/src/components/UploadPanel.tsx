@@ -70,6 +70,7 @@ function parsedHighlights(parsed: ParsedDocumentSummary) {
 
 export default function UploadPanel() {
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState("");
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [parsed, setParsed] = useState<ParsedDocumentSummary | null>(null);
   const [parsedError, setParsedError] = useState("");
@@ -90,6 +91,7 @@ export default function UploadPanel() {
 
   const handleDelete = async (filename: string) => {
     setDeleting(filename);
+    setDeleteError("");
     try {
       await deleteDocument(filename);
       removeFile(filename);
@@ -99,6 +101,8 @@ export default function UploadPanel() {
         setParsedLabel("");
         setParsedFilename("");
       }
+    } catch {
+      setDeleteError("Could not delete this document. Refresh the list and try again.");
     } finally {
       setDeleting(null);
     }
@@ -137,6 +141,7 @@ export default function UploadPanel() {
       <UploadDropzone onFiles={uploadMany} />
       <DocumentOverview files={files} uploads={uploads} />
       <JobHistory refreshKey={jobRefreshKey} />
+      {deleteError && <div className="parsed-state error">{deleteError}</div>}
       <DocumentList
         files={files}
         uploads={uploads}

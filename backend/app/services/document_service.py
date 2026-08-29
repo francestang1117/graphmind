@@ -13,7 +13,6 @@ from app.core.errors import (
 )
 from app.services.document_repository import DocumentRepository, document_repository
 from app.services.file_storage import DuplicateFileError, FileStorage, FileStorageError, file_storage
-from app.services.persistence_service import mark_document_deleted, save_document_record
 from app.services.virus_scanner import VirusScanner, virus_scanner
 from app.utils.file_validator import FileValidator
 
@@ -62,10 +61,6 @@ class DocumentService:
 
         if self._db_available():
             self.repository.save_metadata(metadata)
-        else:
-            # During early local work the sidecar path keeps uploads usable even
-            # when the database layer is not installed or intentionally off.
-            save_document_record(metadata)
         return metadata
 
     def list_documents(self, user_id: Optional[str] = None) -> list[dict[str, Any]]:
@@ -85,17 +80,19 @@ class DocumentService:
         return self.storage.get_file_info(filename, user_id)
 
     def delete_document(self, filename: str, user_id: Optional[str] = None) -> bool:
+        # A DB row can outlive its bytes after a storage reset or an old test
+        # run. It should still be possible to remove that stale row from the UI.
+        database_record = self.repository.get(filename, user_id) if self._db_available() else None
         try:
-            deleted = self.storage.delete_file(filename, user_id)
+            storage_deleted = self.storage.delete_file(filename, user_id)
         except FileStorageError as exc:
             log.warning("Could not delete stored file %s: %s", filename, exc)
             raise StorageOperationError(details={"filename": filename}) from exc
 
+        deleted = bool(storage_deleted or database_record)
         if deleted and user_id:
-            if self._db_available():
+            if database_record:
                 self.repository.mark_deleted(filename, user_id)
-            else:
-                mark_document_deleted(filename, user_id)
             from app.services.parsed_artifact_repository import parsed_artifact_repository
             from app.services.graph_repository import graph_repository
 

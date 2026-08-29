@@ -55,18 +55,25 @@ interface ViewState {
   y: number;
 }
 
+interface SimulationState {
+  alpha: number;
+  stableFrames: number;
+}
+
 interface RelationRow {
   label: string;
   relation: string;
   direction: "in" | "out";
   type: string;
   weak: boolean;
+  weight: number;
 }
 
 export default function GraphPanel() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const frameRef = useRef<number>(0);
   const simRef = useRef<SimNode[]>([]);
+  const simulationRef = useRef<SimulationState>({ alpha: 1, stableFrames: 0 });
   const dragRef = useRef<{ node: SimNode; dx: number; dy: number } | null>(null);
   const panRef = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
   const { nodes, edges, stats, loading, refreshing, error, refetch } = useGraph();
@@ -105,6 +112,10 @@ export default function GraphPanel() {
   }, [edges, nodes, showSources]);
 
   const displayNodeIds = useMemo(() => new Set(displayNodes.map((node) => node.id)), [displayNodes]);
+  const sourceNodeCount = useMemo(
+    () => nodes.filter((node) => node.type === "DOCUMENT").length,
+    [nodes],
+  );
 
   const displayEdges = useMemo(() => {
     return edges.filter((edge) => {
@@ -133,6 +144,7 @@ export default function GraphPanel() {
         r: node.type === "DOCUMENT" ? Math.max(6, Math.min(10, node.size || 8)) : Math.max(7, Math.min(18, node.size || 8)),
       };
     });
+    simulationRef.current = { alpha: 1, stableFrames: 0 };
   }, [displayNodes]);
 
   useEffect(() => {
@@ -182,10 +194,14 @@ export default function GraphPanel() {
         direction: outgoing ? "out" : "in",
         type: other.type,
         weak: isWeakEdge(edge),
+        weight: edge.weight ?? 1,
       });
     });
 
-    const strongRows = relationRows.filter((row) => !row.weak).slice(0, 8);
+    const strongRows = relationRows
+      .filter((row) => !row.weak)
+      .sort((left, right) => right.weight - left.weight)
+      .slice(0, 8);
     const weakCount = relationRows.length - strongRows.length;
 
     return {
@@ -221,49 +237,65 @@ export default function GraphPanel() {
           ? sourceViewEdges
           : strongEdges;
 
-      simRef.current.forEach((node) => {
-        simRef.current.forEach((other) => {
-          if (node.id === other.id) return;
-          const dx = node.x - other.x;
-          const dy = node.y - other.y;
-          const distance = Math.hypot(dx, dy) || 1;
-          const minDistance = node.r + other.r + 68;
-          const force = 3600 / (distance * distance);
-          node.vx += (dx / distance) * force * 0.42;
-          node.vy += (dy / distance) * force * 0.42;
-          if (distance < minDistance) {
-            const push = (minDistance - distance) * 0.028;
-            node.vx += (dx / distance) * push;
-            node.vy += (dy / distance) * push;
-          }
+      const simulation = simulationRef.current;
+      if (simulation.alpha > 0) {
+        const alpha = simulation.alpha;
+        simRef.current.forEach((node) => {
+          simRef.current.forEach((other) => {
+            if (node.id === other.id) return;
+            const dx = node.x - other.x;
+            const dy = node.y - other.y;
+            const distance = Math.hypot(dx, dy) || 1;
+            const minDistance = node.r + other.r + 68;
+            const force = (3600 / (distance * distance)) * alpha;
+            node.vx += (dx / distance) * force * 0.42;
+            node.vy += (dy / distance) * force * 0.42;
+            if (distance < minDistance) {
+              const push = (minDistance - distance) * 0.028 * alpha;
+              node.vx += (dx / distance) * push;
+              node.vy += (dy / distance) * push;
+            }
+          });
+          node.vx += (width / 2 - node.x) * 0.0008 * alpha;
+          node.vy += (height / 2 - node.y) * 0.0008 * alpha;
         });
-        node.vx += (width / 2 - node.x) * 0.0008;
-        node.vy += (height / 2 - node.y) * 0.0008;
-      });
 
-      const layoutEdges = showSources ? sourceViewEdges : strongEdges;
-      layoutEdges.forEach((edge) => {
-        const source = idMap.get(edge.source);
-        const target = idMap.get(edge.target);
-        if (!source || !target) return;
-        const dx = target.x - source.x;
-        const dy = target.y - source.y;
-        const distance = Math.hypot(dx, dy) || 1;
-        const ideal = isSourceEdge(edge) ? 230 : 170;
-        const force = (distance - ideal) * (isSourceEdge(edge) ? 0.012 : 0.034);
-        source.vx += (dx / distance) * force;
-        source.vy += (dy / distance) * force;
-        target.vx -= (dx / distance) * force;
-        target.vy -= (dy / distance) * force;
-      });
+        const layoutEdges = showSources ? sourceViewEdges : strongEdges;
+        layoutEdges.forEach((edge) => {
+          const source = idMap.get(edge.source);
+          const target = idMap.get(edge.target);
+          if (!source || !target) return;
+          const dx = target.x - source.x;
+          const dy = target.y - source.y;
+          const distance = Math.hypot(dx, dy) || 1;
+          const ideal = isSourceEdge(edge) ? 230 : 170;
+          const force = (distance - ideal) * (isSourceEdge(edge) ? 0.012 : 0.034) * alpha;
+          source.vx += (dx / distance) * force;
+          source.vy += (dy / distance) * force;
+          target.vx -= (dx / distance) * force;
+          target.vy -= (dy / distance) * force;
+        });
 
-      simRef.current.forEach((node) => {
-        if (dragRef.current?.node === node) return;
-        node.vx *= 0.84;
-        node.vy *= 0.84;
-        node.x = Math.max(node.r + 20, Math.min(width - node.r - 20, node.x + node.vx));
-        node.y = Math.max(node.r + 20, Math.min(height - node.r - 20, node.y + node.vy));
-      });
+        let maxSpeed = 0;
+        simRef.current.forEach((node) => {
+          if (dragRef.current?.node === node) return;
+          node.vx *= 0.84;
+          node.vy *= 0.84;
+          maxSpeed = Math.max(maxSpeed, Math.hypot(node.vx, node.vy));
+          node.x = Math.max(node.r + 20, Math.min(width - node.r - 20, node.x + node.vx));
+          node.y = Math.max(node.r + 20, Math.min(height - node.r - 20, node.y + node.vy));
+        });
+
+        simulation.stableFrames = maxSpeed < 0.04 ? simulation.stableFrames + 1 : 0;
+        simulation.alpha *= 0.965;
+        if (simulation.alpha < 0.015 || simulation.stableFrames >= 18) {
+          simulation.alpha = 0;
+          simRef.current.forEach((node) => {
+            node.vx = 0;
+            node.vy = 0;
+          });
+        }
+      }
 
       const connected = focus
         ? new Set(
@@ -291,16 +323,17 @@ export default function GraphPanel() {
         ctx.moveTo(sourcePoint.x, sourcePoint.y);
         ctx.lineTo(targetPoint.x, targetPoint.y);
         const weak = isWeakEdge(edge);
+        const edgeWidth = relationStrokeWidth(edge, weak);
         ctx.strokeStyle = active
           ? weak
-            ? "rgba(167,139,250,.16)"
-            : "rgba(255,255,255,.24)"
+            ? "rgba(167,139,250,.18)"
+            : `rgba(255,255,255,${Math.min(0.5, 0.2 + edgeWidth * 0.07)})`
           : "rgba(255,255,255,.05)";
-        ctx.lineWidth = active ? (weak ? 0.7 : 1.55) : 0.8;
+        ctx.lineWidth = active ? edgeWidth : 0.7;
         ctx.stroke();
         if (focus && active && edge.type && scale > 0.65 && shouldDrawRelationLabel(edge)) {
           ctx.font = "600 10px Inter, system-ui";
-          const label = formatRelation(edge.type);
+          const label = `${formatRelation(edge.type)}${(edge.weight ?? 1) > 1 ? ` ×${edge.weight}` : ""}`;
           const labelX = (sourcePoint.x + targetPoint.x) / 2;
           const labelY = (sourcePoint.y + targetPoint.y) / 2 - 5;
           const labelWidth = ctx.measureText(label).width;
@@ -423,6 +456,9 @@ export default function GraphPanel() {
   };
 
   const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (dragRef.current) {
+      simulationRef.current = { alpha: 0.28, stableFrames: 0 };
+    }
     dragRef.current = null;
     panRef.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
@@ -454,6 +490,12 @@ export default function GraphPanel() {
     setView({ scale: 1, x: 0, y: 0 });
     setSelected(null);
     setHovered(null);
+  };
+
+  const changeGraphMode = (sourcesVisible: boolean) => {
+    setSelected(null);
+    setHovered(null);
+    setShowSources(sourcesVisible);
   };
 
   return (
@@ -490,7 +532,7 @@ export default function GraphPanel() {
         </div>
         <div className="graph-caption">
           {displayNodes.length} shown nodes · {strongEdges.length} entity edges
-          {!showSources ? ` · ${nodes.length - displayNodes.length} sources hidden` : ""}
+          {!showSources ? ` · ${sourceNodeCount} sources hidden` : ""}
           {activeHovered ? ` · ${activeHovered.label}` : activeSelected ? ` · ${activeSelected.label}` : " · drag nodes, scroll to zoom"}
         </div>
         {activeHovered && <GraphTooltip node={activeHovered} edges={edges} />}
@@ -499,10 +541,10 @@ export default function GraphPanel() {
         <div className="graph-view-card">
           <div className="section-heading">Graph view</div>
           <div className="graph-mode-toggle" role="group" aria-label="Graph view mode">
-            <button className={!showSources ? "active" : ""} onClick={() => setShowSources(false)}>
+            <button className={!showSources ? "active" : ""} onClick={() => changeGraphMode(false)}>
               Entities
             </button>
-            <button className={showSources ? "active" : ""} onClick={() => setShowSources(true)}>
+            <button className={showSources ? "active" : ""} onClick={() => changeGraphMode(true)}>
               Sources
             </button>
           </div>
@@ -555,7 +597,8 @@ function NodeDetail({
       </div>
       <div className="node-detail-meta">
         <span>{node.type.replaceAll("_", " ")}</span>
-        <span>{detail?.totalConnections ?? 0} connections</span>
+        <span>{node.connections ?? detail?.totalConnections ?? 0} connections</span>
+        <span>{Math.round((node.importance ?? 0) * 100)}% importance</span>
       </div>
 
       <DetailSection title="Strong relations" empty="No strong relations yet.">
@@ -564,7 +607,7 @@ function NodeDetail({
             <span>{row.direction === "out" ? "→" : "←"}</span>
             <div>
               <strong>{row.label}</strong>
-              <em>{row.relation}</em>
+              <em>{row.relation} · strength {row.weight}</em>
             </div>
           </div>
         ))}
@@ -607,7 +650,7 @@ function GraphTooltip({ node, edges }: { node: SimNode; edges: GraphEdge[] }) {
     <div className="graph-tooltip">
       <strong>{node.label}</strong>
       <span>{typeLabels[node.type] ?? node.type.replaceAll("_", " ")}</span>
-      <em>{connections.length} connections</em>
+      <em>{node.connections ?? connections.length} connections · {Math.round((node.importance ?? 0) * 100)}% importance</em>
     </div>
   );
 }
@@ -628,16 +671,23 @@ function formatRelation(type: string) {
 
 function isWeakEdge(edge: GraphEdge) {
   if (isSourceEdge(edge)) return true;
-  return weakRelations.has(edge.type ?? "") || (edge.confidence ?? 1) < 0.7;
+  const repeated = (edge.weight ?? 1) >= 2;
+  return (!repeated && weakRelations.has(edge.type ?? "")) || (!repeated && (edge.confidence ?? 1) < 0.7);
 }
 
 function isSourceEdge(edge: GraphEdge) {
   const relation = edge.type ?? "";
   return (
-    edge.source.startsWith("doc:") ||
-    edge.target.startsWith("doc:") ||
+    edge.source.startsWith("doc_") ||
+    edge.target.startsWith("doc_") ||
     ["CONTAINS", "DISCUSSES", "MENTIONS"].includes(relation)
   );
+}
+
+function relationStrokeWidth(edge: GraphEdge, weak: boolean) {
+  const strength = Math.max(1, edge.weight ?? 1);
+  const growth = Math.log2(strength + 1);
+  return weak ? Math.min(1.2, 0.55 + growth * 0.2) : Math.min(3.2, 0.85 + growth * 0.75);
 }
 
 function shouldDrawRelationLabel(edge: GraphEdge) {

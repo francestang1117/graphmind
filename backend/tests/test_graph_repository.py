@@ -92,3 +92,32 @@ def test_graph_repository_keeps_shared_nodes_until_all_sources_are_deleted():
 
     repo.delete_for_document("b.md", "u1")
     assert repo.load_graph("u1")["nodes"] == []
+
+
+def test_graph_repository_combines_relation_evidence_from_multiple_documents():
+    repo = _repo()
+    nodes = [
+        {"id": "python", "label": "Python", "type": "PROGRAMMING_LANGUAGE"},
+        {"id": "fastapi", "label": "FastAPI", "type": "FRAMEWORK"},
+    ]
+
+    for document_id in ("a.md", "b.md"):
+        repo.replace_document_graph(
+            user_id="u1",
+            document_id=document_id,
+            graph={
+                "nodes": nodes,
+                "edges": [{
+                    "source": "fastapi",
+                    "target": "python",
+                    "type": "WRITTEN_IN",
+                    "weight": 1,
+                    "confidence": 0.8,
+                    "sources": [document_id],
+                }],
+            },
+        )
+
+    edge = repo.load_graph("u1")["edges"][0]
+    assert edge["weight"] == 2
+    assert edge["sources"] == ["a.md", "b.md"]

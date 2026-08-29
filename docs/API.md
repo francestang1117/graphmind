@@ -203,10 +203,28 @@ Full graph for visualisation:
 
 ```json
 {
-  "nodes": [{ "id": "abc", "label": "TensorFlow", "type": "FRAMEWORK" }],
-  "edges": [["node1", "node2"]]
+  "nodes": [{
+    "id": "abc",
+    "label": "TensorFlow",
+    "type": "FRAMEWORK",
+    "size": 15.4,
+    "importance": 0.67,
+    "connections": 4
+  }],
+  "edges": [["node1", "node2"]],
+  "edge_details": [{
+    "source": "node1",
+    "target": "node2",
+    "type": "USES",
+    "weight": 3,
+    "confidence": 0.9
+  }]
 }
 ```
+
+`weight` counts supporting relation evidence across document slices. The visual
+response maps weighted connectivity to a normalized `importance` score, which
+the frontend uses for node size.
 
 ### `GET /graph/stats`
 

@@ -271,7 +271,8 @@ class KnowledgeGraph:
         weak co-mentions. The visual graph filters those out so the UI explains
         the knowledge base instead of turning dependency metadata into static.
         """
-        degree = Counter()
+        weighted_degree: Counter[str] = Counter()
+        connections: Counter[str] = Counter()
         entity_keys = {
             _visual_identity(node.label)
             for node in self.nodes.values()
@@ -293,8 +294,17 @@ class KnowledgeGraph:
         ]
 
         for edge in visible_edges:
-            degree[edge.source] += edge.weight
-            degree[edge.target] += edge.weight
+            strength = max(1, edge.weight) * max(0.25, edge.confidence)
+            weighted_degree[edge.source] += strength
+            weighted_degree[edge.target] += strength
+            connections[edge.source] += 1
+            connections[edge.target] += 1
+
+        max_degree = max(weighted_degree.values(), default=0)
+        importance = {
+            node_id: _importance_score(weighted_degree[node_id], max_degree)
+            for node_id in visible_nodes
+        }
 
         return {
             "nodes": [
@@ -302,7 +312,9 @@ class KnowledgeGraph:
                     "id": node.id,
                     "label": node.label,
                     "type": node.type,
-                    "size": self._visual_size(node, degree[node.id]),
+                    "size": self._visual_size(node, importance[node.id]),
+                    "importance": importance[node.id],
+                    "connections": connections[node.id],
                 }
                 for node in visible_nodes.values()
             ],
@@ -392,10 +404,10 @@ class KnowledgeGraph:
             return False
         return True
 
-    def _visual_size(self, node: GraphNode, degree: int) -> float:
+    def _visual_size(self, node: GraphNode, importance: float) -> float:
         if node.type == "DOCUMENT":
-            return min(10.5, 6 + degree * 0.65)
-        return min(19, 8 + degree * 1.15 + node.confidence * 1.5)
+            return round(6 + importance * 4.5, 2)
+        return round(8 + importance * 11, 2)
 
 
 def _get(item: Any, key: str, default: Any = None) -> Any:
@@ -416,6 +428,14 @@ def _looks_like_internal_path(value: str) -> bool:
 def _visual_identity(value: str) -> str:
     stem = Path(value).stem if "." in Path(value).name else value
     return re.sub(r"[^a-z0-9]+", "", stem.lower().lstrip("_"))
+
+
+def _importance_score(weighted_degree: float, maximum: float) -> float:
+    if maximum <= 0:
+        return 0.0
+    # Square root keeps medium-sized concepts visible without letting one hub
+    # swallow the rest of the graph.
+    return round((weighted_degree / maximum) ** 0.5, 4)
 
 
 def _now() -> str:

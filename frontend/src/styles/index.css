@@ -1735,10 +1735,21 @@ button {
 }
 
 .graph-side {
+  height: 100%;
+  min-height: 0;
   min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
   border-left: 1px solid var(--line);
   padding: 22px;
   background: rgba(0, 0, 0, 0.14);
+}
+
+.graph-side::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .graph-side .section-heading {
@@ -2437,10 +2448,11 @@ button {
 
   .graph-panel {
     grid-template-columns: 1fr;
-    grid-template-rows: 560px auto;
+    grid-template-rows: minmax(320px, 56%) minmax(0, 44%);
   }
 
   .graph-side {
+    height: auto;
     border-left: 0;
     border-top: 1px solid var(--line);
   }

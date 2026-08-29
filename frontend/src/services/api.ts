@@ -107,6 +107,8 @@ export interface GraphNode {
   label: string;
   type: string;
   size: number;
+  importance?: number;
+  connections?: number;
 }
 
 export interface GraphEdge {

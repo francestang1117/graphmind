@@ -272,6 +272,35 @@ def test_parser_symbols_keep_function_but_do_not_create_generic_word_nodes():
     assert "Size" not in found
 
 
+def test_section_title_wins_over_spacy_person_guess():
+    extractor = EntityExtractor(model_name=None)
+    entities = extractor._deduplicate(
+        [
+            extractor._entity(
+                "Backend Architecture",
+                "PERSON",
+                0,
+                20,
+                0.78,
+                "spacy",
+                "Backend Architecture describes FastAPI.",
+            ),
+            *extractor._extract_from_parser_symbols(
+                {
+                    "sections": [
+                        {"title": "Backend Architecture"},
+                    ]
+                }
+            ),
+        ]
+    )
+
+    matching = [entity for entity in entities if entity.normalized == "Backend Architecture"]
+    assert len(matching) == 1
+    assert matching[0].label == "CONCEPT"
+    assert matching[0].source == "structure"
+
+
 def test_deduplicates_entities_across_sources():
     extractor = EntityExtractor()
 
@@ -328,6 +357,20 @@ def test_known_stack_relations_add_stronger_project_edges():
     assert ("FastAPI", "USES", "PostgreSQL") in triples
     assert ("FastAPI", "USES", "Redis") in triples
     assert ("Celery", "USES", "Redis") in triples
+
+
+def test_strong_relation_replaces_weak_pair_inference():
+    extractor = EntityExtractor(model_name=None)
+    text = "React integrates with FastAPI. FastAPI is written in Python."
+
+    entities = extractor.extract_from_text(text)
+    relations = extractor.extract_relations(entities, text)
+    triples = {(rel.source, rel.relation, rel.target) for rel in relations}
+
+    assert ("React", "INTEGRATES_WITH", "FastAPI") in triples
+    assert ("FastAPI", "WRITTEN_IN", "Python") in triples
+    assert ("Python", "HAS_FRAMEWORK", "FastAPI") not in triples
+    assert ("React", "RELATED_TO", "FastAPI") not in triples
 
 
 def test_known_stack_relations_stay_local_to_a_sentence_or_paragraph():

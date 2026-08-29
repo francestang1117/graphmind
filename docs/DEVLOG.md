@@ -1054,6 +1054,20 @@ users uploading the same bytes could therefore collide before the remote write.
 Signed-in workspaces now get separate cache directories, while old `local-dev`
 paths remain readable.
 
+## 2026-08 — Relation Strength and Node Importance
+
+Persisted graph edges are stored once per source document so one file can be
+reindexed or deleted cleanly. The read path was returning those rows separately,
+which meant the canvas could lose evidence when the same relation appeared in
+more than one document. It now combines matching source, target, and relation
+rows, adds their weights, and keeps the strongest confidence.
+
+The visual graph now gives each node an importance score based on weighted
+connectivity. More central nodes render larger, repeated relationships render
+with thicker lines, and the selection panel shows both relation strength and
+node importance. A repeated weak relation can become visible; a one-off weak
+guess still stays out of the default entity view.
+
 ## Current State
 
 As of August 2026, GraphMind has a working foundation:

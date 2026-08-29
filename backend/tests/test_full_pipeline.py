@@ -77,10 +77,28 @@ def test_visualization_export_matches_frontend_shape():
     visual = graph.export_for_visualization()
 
     assert {"nodes", "edges"} <= set(visual)
-    assert all({"id", "label", "type", "size"} <= set(node) for node in visual["nodes"])
+    assert all(
+        {"id", "label", "type", "size", "importance", "connections"} <= set(node)
+        for node in visual["nodes"]
+    )
     assert all(isinstance(edge, tuple) and len(edge) == 2 for edge in visual["edges"])
     assert all({"source", "target", "type"} <= set(edge) for edge in visual["edge_details"])
     assert graph.get_stats()["edge_types"]["USES"] >= 2
+
+
+def test_visualization_scores_more_connected_nodes_higher():
+    graph = KnowledgeGraph()
+    center = graph.add_node("Python", "PROGRAMMING_LANGUAGE", "stack.md")
+    first = graph.add_node("FastAPI", "FRAMEWORK", "stack.md")
+    second = graph.add_node("Pandas", "LIBRARY", "stack.md")
+    graph.add_edge(first, center, "WRITTEN_IN", source_document="stack.md")
+    graph.add_edge(second, center, "WRITTEN_IN", source_document="stack.md")
+
+    nodes = {node["label"]: node for node in graph.export_for_visualization()["nodes"]}
+
+    assert nodes["Python"]["importance"] > nodes["FastAPI"]["importance"]
+    assert nodes["Python"]["size"] > nodes["FastAPI"]["size"]
+    assert nodes["Python"]["connections"] == 2
 
 
 def test_document_edges_use_semantic_relation_names():

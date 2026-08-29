@@ -558,7 +558,9 @@ class EntityExtractor:
         clean = self._display_symbol_name(text)
         if not clean or clean.lower() in STOP_CONCEPTS:
             return []
-        return [self._entity(clean, "CONCEPT", 0, len(clean), 0.64, "parser")]
+        # A section title was chosen by the document author, so it carries more
+        # type information than a generic NER guess over the same words.
+        return [self._entity(clean, "CONCEPT", 0, len(clean), 0.86, "structure")]
 
     def extract_relations(self, entities: list[Entity], text: str) -> list[EntityRelation]:
         """Infer early relation hints from simple patterns and sentence co-occurrence."""
@@ -1033,7 +1035,24 @@ class EntityExtractor:
             current = best.get(key)
             if current is None or relation.confidence > current.confidence:
                 best[key] = relation
-        return sorted(best.values(), key=lambda item: (-item.confidence, item.relation))
+
+        # Co-occurrence adds useful hints when it is all we have. Once a pair
+        # has a stronger relation, those hints only repeat or muddy that edge.
+        strongest_by_pair: dict[frozenset[str], float] = {}
+        for relation in best.values():
+            pair = frozenset((relation.source, relation.target))
+            strongest_by_pair[pair] = max(
+                strongest_by_pair.get(pair, 0),
+                relation.confidence,
+            )
+
+        cleaned = [
+            relation
+            for relation in best.values()
+            if strongest_by_pair[frozenset((relation.source, relation.target))] < 0.7
+            or relation.confidence >= 0.7
+        ]
+        return sorted(cleaned, key=lambda item: (-item.confidence, item.relation))
 
     def _find_entity_in_text(self, text: str, entities: list[Entity]) -> Optional[Entity]:
         haystack = text.lower()
