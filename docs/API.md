@@ -457,9 +457,9 @@ Markdown document so search, graph, and chat can reuse the same pipeline.
 }
 ```
 
-The scraper only accepts `http` and `https` URLs, blocks local/private network
-addresses, follows redirects with the same checks, limits response size, and
-only ingests readable text/HTML responses.
+The scraper only accepts `http` and `https` URLs, allows only globally routable
+destination addresses, follows redirects with the same checks, limits response
+size, and only ingests readable text/HTML responses.
 
 ---
 

@@ -409,17 +409,14 @@ def _resolve_host(hostname: str) -> set[str]:
 
 
 def _is_blocked_address(address: str) -> bool:
-    ip = ipaddress.ip_address(address)
-    # The scraper is for public knowledge sources. Anything local/private is
-    # blocked even in development so the behavior matches production.
-    return any([
-        ip.is_private,
-        ip.is_loopback,
-        ip.is_link_local,
-        ip.is_multicast,
-        ip.is_reserved,
-        ip.is_unspecified,
-    ])
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return True
+
+    # Only globally routable unicast addresses belong in a public web fetch.
+    # ipaddress treats multicast as global in some ranges, so keep it out too.
+    return not ip.is_global or ip.is_multicast
 
 
 def _filename_for_url(url: str, title: str) -> str:

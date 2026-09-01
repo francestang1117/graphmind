@@ -1129,6 +1129,17 @@ I added coverage for ticket binding, one-time use, unknown jobs, and rejection
 of the old access-token query parameter. The API reference now documents the
 two-step handshake.
 
+## 2026-09 — Scraper Address Boundary
+
+The scraper already checked private, loopback, and link-local addresses, but
+that list missed the shared `100.64.0.0/10` range used by CGNAT and overlay
+networks. The check now allows only addresses that Python marks as globally
+routable. That keeps the rule short and also covers special-use IPv4 and IPv6
+ranges without maintaining a growing blocklist.
+
+I added parameterized coverage for CGNAT, metadata/link-local addresses,
+documentation ranges, IPv6 local ranges, and known public resolver addresses.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:
