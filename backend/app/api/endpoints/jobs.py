@@ -1,12 +1,13 @@
 """HTTP access to background job state."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.websocket import task_snapshot
 from app.core.celery_app import celery_app
 from app.services.job_repository import job_repository
+from app.services.websocket_ticket import JOB_WS_TICKET_TTL_SECONDS, issue_job_ws_ticket
 
 router = APIRouter()
 
@@ -33,6 +34,11 @@ class JobListResponse(BaseModel):
     total: int
 
 
+class WebSocketTicketResponse(BaseModel):
+    ticket: str
+    expires_in: int
+
+
 @router.get("/", response_model=JobListResponse)
 async def list_jobs(
     limit: int = Query(default=50, ge=1, le=200),
@@ -41,6 +47,25 @@ async def list_jobs(
     """Return recent background jobs for the current user."""
     jobs = [JobInfo(**item) for item in job_repository.list(_user_id(user), limit=limit)]
     return JobListResponse(jobs=jobs, total=len(jobs))
+
+
+@router.post("/{job_id}/ws-ticket", response_model=WebSocketTicketResponse)
+async def create_ws_ticket(
+    job_id: str,
+    response: Response,
+    user: UserRecord = Depends(current_user_or_dev),
+) -> WebSocketTicketResponse:
+    """Create the short-lived credential used by the job progress socket."""
+    user_id = _user_id(user)
+    if not job_repository.get(job_id, user_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    response.headers["Cache-Control"] = "no-store"
+    ticket = await issue_job_ws_ticket(job_id, user_id)
+    return WebSocketTicketResponse(
+        ticket=ticket,
+        expires_in=JOB_WS_TICKET_TTL_SECONDS,
+    )
 
 
 @router.get("/{job_id}")

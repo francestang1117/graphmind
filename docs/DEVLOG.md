@@ -1108,6 +1108,27 @@ rows, repeatable startup migration, nullable job links, and `ON DELETE SET
 NULL`. It runs when `GRAPHMIND_TEST_POSTGRES_URL` is set, so the normal local
 test suite does not touch a developer's database.
 
+## 2026-09 — WebSocket Ticket Authentication
+
+The browser originally put the full access token in the WebSocket query string.
+That works with the browser WebSocket API, but request targets are commonly
+recorded by Uvicorn and reverse proxies. A reusable token should not end up in
+those logs.
+
+The upload flow now asks the authenticated jobs endpoint for a short-lived
+ticket before opening the socket. The ticket is random, expires after 60
+seconds, is tied to one `job_id`, and is consumed atomically on the first
+connection. The socket checks the job owner again after consuming it.
+
+The ticket store uses Redis when available and a small in-memory fallback for
+local development. The fallback keeps the normal no-Redis setup usable, while
+production deployments can share tickets across API instances. The WebSocket
+handler no longer accepts `access_token` from the query string.
+
+I added coverage for ticket binding, one-time use, unknown jobs, and rejection
+of the old access-token query parameter. The API reference now documents the
+two-step handshake.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:
@@ -1142,6 +1163,7 @@ As of September 2026, GraphMind has a working foundation:
 - optional ClamAV virus scan before file storage
 - WebSocket job progress stream for Celery-backed processing
 - frontend upload rows can follow returned Celery `job_id` progress
+- one-use, job-bound WebSocket tickets instead of access tokens in URLs
 - frontend Recent jobs panel shows persisted worker job history
 - Redis-backed Celery worker and beat services in Docker Compose
 - Prometheus-compatible `/metrics` endpoint for API and pipeline counters

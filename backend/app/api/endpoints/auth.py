@@ -495,9 +495,7 @@ get_current_user = current_user
 
 def _user_from_token(token: str) -> UserRecord:
     user_id = _decode_access_token(token)
-    user = next((item for item in _users.values() if item.id == user_id), None)
-    if not user:
-        user = _restore_user(user_id=user_id)
+    user = _user_from_id(user_id)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -505,6 +503,11 @@ def _user_from_token(token: str) -> UserRecord:
             headers={"WWW-Authenticate": "Bearer"},
         )
     return user
+
+
+def _user_from_id(user_id: str) -> UserRecord | None:
+    user = next((item for item in _users.values() if item.id == user_id), None)
+    return user or _restore_user(user_id=user_id)
 
 
 def _ensure_dev_user() -> UserRecord:

@@ -3,7 +3,9 @@
 import asyncio
 import json
 
+from app.api.endpoints import auth
 from app.api.endpoints.websocket import _task_snapshot, job_progress_ws
+from app.services.websocket_ticket import consume_job_ws_ticket, issue_job_ws_ticket
 
 
 class FakeTask:
@@ -72,7 +74,15 @@ def test_job_progress_websocket_streams_until_success(monkeypatch):
         "app.api.endpoints.websocket.job_repository",
         _FakeJobRepository("local-dev"),
     )
+    async def no_redis():
+        return None
+
+    monkeypatch.setattr("app.services.websocket_ticket._redis_client", no_redis)
+    auth._ensure_dev_user()
     websocket = FakeWebSocket()
+    websocket.query_params = {
+        "ticket": asyncio.run(issue_job_ws_ticket("job-123", "local-dev")),
+    }
 
     asyncio.run(job_progress_ws(websocket, "job-123"))
 
@@ -97,6 +107,30 @@ def test_job_progress_websocket_rejects_unknown_job(monkeypatch):
     assert websocket.accepted is False
     assert websocket.closed is True
     assert websocket.messages == []
+
+
+def test_job_ticket_is_bound_to_job_and_consumed_once(monkeypatch):
+    async def no_redis():
+        return None
+
+    monkeypatch.setattr("app.services.websocket_ticket._redis_client", no_redis)
+
+    ticket = asyncio.run(issue_job_ws_ticket("job-123", "user-1"))
+
+    assert asyncio.run(consume_job_ws_ticket(ticket, "other-job")) is None
+    assert asyncio.run(consume_job_ws_ticket(ticket, "job-123")) == "user-1"
+    assert asyncio.run(consume_job_ws_ticket(ticket, "job-123")) is None
+
+
+def test_websocket_does_not_accept_access_token_query(monkeypatch):
+    monkeypatch.setattr("app.api.endpoints.websocket.settings.AUTH_REQUIRED", True)
+    websocket = FakeWebSocket()
+    websocket.query_params = {"access_token": "reusable-jwt"}
+
+    asyncio.run(job_progress_ws(websocket, "job-123"))
+
+    assert websocket.accepted is False
+    assert websocket.closed is True
 
 
 class _FakeJobRepository:

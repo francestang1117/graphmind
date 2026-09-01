@@ -7,9 +7,10 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.api.endpoints.auth import _ensure_dev_user, _user_from_token
+from app.api.endpoints.auth import _ensure_dev_user, _user_from_id
 from app.core.config import settings
 from app.services.job_repository import job_repository
+from app.services.websocket_ticket import consume_job_ws_ticket
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -18,7 +19,7 @@ router = APIRouter()
 @router.websocket("/ws/jobs/{job_id}")
 async def job_progress_ws(websocket: WebSocket, job_id: str):
     """Stream a job only after authenticating and checking its owner."""
-    user = _websocket_user(websocket)
+    user = await _websocket_user(websocket, job_id)
     if user is None:
         await websocket.close(code=1008, reason="Authentication required")
         return
@@ -66,14 +67,15 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
             pass
 
 
-def _websocket_user(websocket: WebSocket):
-    """Read the short-lived access token from the WebSocket handshake."""
-    token = websocket.query_params.get("access_token")
-    if token:
-        try:
-            return _user_from_token(token)
-        except Exception:
-            return None
+async def _websocket_user(websocket: WebSocket, job_id: str):
+    """Resolve the user from a one-use job ticket, not a reusable JWT."""
+    ticket = websocket.query_params.get("ticket")
+    if ticket:
+        user_id = await consume_job_ws_ticket(ticket, job_id)
+        return _user_from_id(user_id) if user_id else None
+    if websocket.query_params.get("access_token"):
+        # The old URL token is deliberately not supported anymore.
+        return None
     if settings.AUTH_REQUIRED:
         return None
     return _ensure_dev_user()
