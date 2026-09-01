@@ -1108,6 +1108,18 @@ rows, repeatable startup migration, nullable job links, and `ON DELETE SET
 NULL`. It runs when `GRAPHMIND_TEST_POSTGRES_URL` is set, so the normal local
 test suite does not touch a developer's database.
 
+## 2026-09 — SQLite Foreign-Key Enforcement
+
+SQLite accepts foreign-key definitions but does not enforce them unless the
+pragma is enabled on every connection. The database engine now registers a
+SQLAlchemy connect listener for SQLite and turns `PRAGMA foreign_keys` on
+before the connection is used.
+
+The persistence tests now cover the behavior, not just the table metadata: an
+orphaned parsed artifact is rejected, parsed rows and graph edges are removed
+with their document, and a finished job keeps its history while its document
+link becomes `NULL`.
+
 ## 2026-09 — WebSocket Ticket Authentication
 
 The browser originally put the full access token in the WebSocket query string.
