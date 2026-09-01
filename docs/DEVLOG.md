@@ -1080,8 +1080,33 @@ standard web ports, and opens the socket to the IP address that was checked.
 
 Document rows now get their own UUID. Parsed chunks and entities keep both the
 document ID and user ID, and their database constraints point back to the
-owning document. Existing SQLite databases are upgraded at startup so old hash
-IDs and their graph, job, and parse references move together.
+owning document. Existing SQLite and PostgreSQL databases are upgraded at
+startup so old hash IDs and their graph, job, and parse references move
+together.
+
+## 2026-09 — PostgreSQL Migration Hardening
+
+The first server-side migration assumed that every old `document_id` still
+pointed to a document. That is not safe for a database that has been running
+for a while: maintenance jobs used empty strings, failed jobs could keep
+deleted IDs, and old tables could still have a `NOT NULL` job link.
+
+I changed the PostgreSQL upgrade order so it now:
+
+1. Allows `processing_jobs.document_id` to be null.
+2. Clears empty and missing job references.
+3. Removes orphaned parse artifacts and graph edges.
+4. Adds each document foreign key as `NOT VALID`, then validates it after the
+   cleanup has completed.
+
+The migration also checks the delete action on an existing foreign key. If an
+older constraint uses the wrong action, it is replaced so deleting a document
+can really set its job history link to `NULL`.
+
+I added an opt-in PostgreSQL regression test covering the old schema, orphaned
+rows, repeatable startup migration, nullable job links, and `ON DELETE SET
+NULL`. It runs when `GRAPHMIND_TEST_POSTGRES_URL` is set, so the normal local
+test suite does not touch a developer's database.
 
 ## Current State
 

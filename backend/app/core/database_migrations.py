@@ -364,7 +364,12 @@ def _drop_sqlite_indexes(connection, table: str) -> None:
 
 
 def _ensure_server_constraints(connection) -> None:
-    """Add constraints on PostgreSQL without using SQLite's table-copy path."""
+    """Bring an existing PostgreSQL schema in line with the current models."""
+    # Old job rows may contain an empty or stale document id. The cleanup below
+    # needs to write NULL, so change the column before adding its foreign key.
+    _ensure_processing_job_document_nullable(connection)
+    _clean_orphan_document_references(connection)
+
     _ensure_unique_constraint(
         connection,
         "documents",
@@ -398,6 +403,66 @@ def _ensure_server_constraints(connection) -> None:
     )
 
 
+def _ensure_processing_job_document_nullable(connection) -> None:
+    """Make the job link nullable before PostgreSQL can apply SET NULL."""
+    if not _has_table(connection, "processing_jobs"):
+        return
+
+    column = next(
+        (
+            item
+            for item in inspect(connection).get_columns("processing_jobs")
+            if item.get("name") == "document_id"
+        ),
+        None,
+    )
+    if column and not column.get("nullable", True):
+        connection.execute(
+            text(
+                "ALTER TABLE processing_jobs "
+                "ALTER COLUMN document_id DROP NOT NULL"
+            )
+        )
+        log.info("Made processing_jobs.document_id nullable")
+
+
+def _clean_orphan_document_references(connection) -> None:
+    """Remove stale artifact links before PostgreSQL validates new FKs."""
+    if not _has_table(connection, "documents"):
+        return
+
+    # Parse artifacts and graph edges cannot exist without their source file.
+    # A finished job can survive the file deletion, but its document link must
+    # be cleared so the job history remains readable.
+    references = (
+        ("parsed_chunks", "document_id", "delete"),
+        ("parsed_entities", "document_id", "delete"),
+        ("graph_edges", "source_document_id", "delete"),
+        ("processing_jobs", "document_id", "null"),
+    )
+    for table, column, action in references:
+        if not _has_table(connection, table) or not _has_column(connection, table, column):
+            continue
+
+        predicate = (
+            f"NULLIF(BTRIM(CAST(child.{column} AS TEXT)), '') IS NULL "
+            f"OR NOT EXISTS (SELECT 1 FROM documents AS doc WHERE doc.id = child.{column})"
+        )
+        if action == "null":
+            statement = (
+                f"UPDATE {table} AS child SET {column} = NULL "
+                f"WHERE {predicate}"
+            )
+        else:
+            statement = f"DELETE FROM {table} AS child WHERE {predicate}"
+
+        result = connection.execute(text(statement))
+        changed = result.rowcount or 0
+        if changed:
+            outcome = "cleared" if action == "null" else "removed"
+            log.warning("%s %d stale %s.%s references", outcome, changed, table, column)
+
+
 def _ensure_unique_constraint(
     connection,
     table: str,
@@ -429,26 +494,67 @@ def _ensure_document_fk(
     column: str = "document_id",
     ondelete: str = "CASCADE",
 ) -> None:
-    if not _has_table(connection, table):
+    if not _has_table(connection, table) or not _has_column(connection, table, column):
         return
+
+    expected_ondelete = ondelete.upper()
     inspector = inspect(connection)
-    if any(
-        item.get("referred_table") == "documents"
-        and item.get("constrained_columns") == [column]
-        for item in inspector.get_foreign_keys(table)
-    ):
-        return
+    foreign_keys = inspector.get_foreign_keys(table)
+
+    matching = []
+    for foreign_key in foreign_keys:
+        if (
+            foreign_key.get("referred_table") != "documents"
+            or foreign_key.get("constrained_columns") != [column]
+        ):
+            continue
+
+        matching.append(foreign_key)
+        options = foreign_key.get("options") or {}
+        actual_ondelete = str(options.get("ondelete") or "NO ACTION").upper()
+        if actual_ondelete != expected_ondelete and foreign_key.get("name"):
+            connection.execute(
+                text(
+                    f"ALTER TABLE {table} "
+                    f"DROP CONSTRAINT IF EXISTS {foreign_key['name']}"
+                )
+            )
+
+    # An old constraint may have been added as NOT VALID. Validating it here is
+    # cheap when it is already valid and catches a bad manual schema change.
+    for foreign_key in matching:
+        options = foreign_key.get("options") or {}
+        actual_ondelete = str(options.get("ondelete") or "NO ACTION").upper()
+        if actual_ondelete == expected_ondelete and foreign_key.get("name"):
+            connection.execute(
+                text(
+                    f"ALTER TABLE {table} "
+                    f"VALIDATE CONSTRAINT {foreign_key['name']}"
+                )
+            )
+            return
 
     connection.execute(
         text(
             f"ALTER TABLE {table} ADD CONSTRAINT {name} "
-            f"FOREIGN KEY ({column}) REFERENCES documents(id) ON DELETE {ondelete}"
+            f"FOREIGN KEY ({column}) REFERENCES documents(id) "
+            f"ON DELETE {ondelete} NOT VALID"
         )
+    )
+    connection.execute(
+        text(f"ALTER TABLE {table} VALIDATE CONSTRAINT {name}")
     )
 
 
 def _has_table(connection, table: str) -> bool:
     return inspect(connection).has_table(table)
+
+
+def _has_column(connection, table: str, column: str) -> bool:
+    return any(
+        item.get("name") == column
+        for item in inspect(connection).get_columns(table)
+    )
 
 
 def _is_uuid(value: str) -> bool:
