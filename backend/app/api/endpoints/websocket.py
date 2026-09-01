@@ -7,13 +7,28 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.api.endpoints.auth import _ensure_dev_user, _user_from_token
+from app.core.config import settings
+from app.services.job_repository import job_repository
+
 log = logging.getLogger(__name__)
 router = APIRouter()
 
 
 @router.websocket("/ws/jobs/{job_id}")
 async def job_progress_ws(websocket: WebSocket, job_id: str):
-    """Stream Celery task progress to the browser."""
+    """Stream a job only after authenticating and checking its owner."""
+    user = _websocket_user(websocket)
+    if user is None:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+
+    stored = job_repository.get(job_id, user.id)
+    if not stored:
+        # A Celery id alone is not proof that the caller may see the task.
+        await websocket.close(code=1008, reason="Job not found")
+        return
+
     await websocket.accept()
     log.debug("WS connected for job %s", job_id)
 
@@ -49,6 +64,19 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
             await websocket.close()
         except Exception:
             pass
+
+
+def _websocket_user(websocket: WebSocket):
+    """Read the short-lived access token from the WebSocket handshake."""
+    token = websocket.query_params.get("access_token")
+    if token:
+        try:
+            return _user_from_token(token)
+        except Exception:
+            return None
+    if settings.AUTH_REQUIRED:
+        return None
+    return _ensure_dev_user()
 
 
 def task_snapshot(task) -> dict[str, Any]:

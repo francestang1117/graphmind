@@ -74,7 +74,15 @@ class FakePipeline:
         self.calls = []
         self.fail_for = set(fail_for or [])
 
-    def process(self, file_path, filename, original_filename="", user_id="local-dev", on_progress=None):
+    def process(
+        self,
+        file_path,
+        filename,
+        original_filename="",
+        user_id="local-dev",
+        on_progress=None,
+        document_id=None,
+    ):
         self.calls.append((file_path, filename, original_filename))
         if filename in self.fail_for:
             raise RuntimeError("parse failed")

@@ -64,6 +64,7 @@ class ProcessingPipeline:
         original_filename: str = "",
         user_id: str = "local-dev",
         on_progress: Optional[ProgressCallback] = None,
+        document_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Process a stored file and return a compact summary.
 
@@ -72,11 +73,18 @@ class ProcessingPipeline:
         """
         started_at = time.time()
         display_name = original_filename or filename
+        stable_document_id = document_id or filename
 
         try:
             self._progress(on_progress, "Parsing document", 15)
             file_path = self._local_file_path(filename, file_path, user_id)
-            parsed = self._parse_document(filename, file_path, original_filename)
+            parsed = self._parse_document(
+                filename,
+                file_path,
+                original_filename,
+                user_id,
+                stable_document_id,
+            )
 
             self._progress(on_progress, "Extracting entities", 40)
             entities = self.extractor.extract_from_parsed_document(parsed)
@@ -85,15 +93,25 @@ class ProcessingPipeline:
             relations = self.extractor.extract_relations(entities, parsed.get("content", ""))
 
             self._progress(on_progress, "Updating graph", 75)
-            self.graph.add_document(display_name, entities, relations, document_id=f"doc:{filename}")
+            self.graph.add_document(
+                display_name,
+                entities,
+                relations,
+                document_id=f"doc:{stable_document_id}",
+            )
             # The global graph keeps the current process feeling live. This
             # smaller graph is just the current file's slice, which is what the
             # DB needs for clean reindex/delete behavior.
             document_graph = KnowledgeGraph()
-            document_graph.add_document(display_name, entities, relations, document_id=f"doc:{filename}")
+            document_graph.add_document(
+                display_name,
+                entities,
+                relations,
+                document_id=f"doc:{stable_document_id}",
+            )
             self.graph_repo.replace_document_graph(
                 user_id=user_id,
-                document_id=filename,
+                document_id=stable_document_id,
                 graph=document_graph.export_detailed(),
             )
             graph_stats = self.graph.get_stats()
@@ -146,12 +164,20 @@ class ProcessingPipeline:
         filename: str,
         file_path: str,
         original_filename: str,
+        user_id: str,
+        document_id: str,
     ) -> dict[str, Any]:
         # This helper still lives next to the document routes. Lazy import keeps
         # the service callable from the routes without tying the files in a knot.
         from app.api.endpoints.documents_with_markdown import parse_document_file
 
-        return parse_document_file(filename, file_path, original_filename)
+        return parse_document_file(
+            filename,
+            file_path,
+            original_filename,
+            user_id=user_id,
+            document_id=document_id,
+        )
 
     def _local_file_path(self, filename: str, file_path: str, user_id: str) -> str:
         try:
@@ -173,9 +199,16 @@ def process_uploaded_document(
     file_path: str,
     original_filename: str = "",
     user_id: str = "local-dev",
+    document_id: str = "",
 ) -> dict[str, Any]:
     """Background-task friendly wrapper used after upload."""
-    return pipeline.process(file_path, filename, original_filename, user_id=user_id)
+    return pipeline.process(
+        file_path,
+        filename,
+        original_filename,
+        user_id=user_id,
+        document_id=document_id or filename,
+    )
 
 
 pipeline = ProcessingPipeline()

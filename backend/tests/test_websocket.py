@@ -34,6 +34,7 @@ class FakeWebSocket:
         self.accepted = False
         self.closed = False
         self.messages: list[dict] = []
+        self.query_params = {}
 
     async def accept(self) -> None:
         self.accepted = True
@@ -41,7 +42,7 @@ class FakeWebSocket:
     async def send_text(self, message: str) -> None:
         self.messages.append(json.loads(message))
 
-    async def close(self) -> None:
+    async def close(self, *args, **kwargs) -> None:
         self.closed = True
 
 
@@ -67,6 +68,10 @@ def test_job_progress_websocket_streams_until_success(monkeypatch):
         ]
     )
     monkeypatch.setattr("app.core.celery_app.celery_app", FakeCelery(task))
+    monkeypatch.setattr(
+        "app.api.endpoints.websocket.job_repository",
+        _FakeJobRepository("local-dev"),
+    )
     websocket = FakeWebSocket()
 
     asyncio.run(job_progress_ws(websocket, "job-123"))
@@ -78,3 +83,27 @@ def test_job_progress_websocket_streams_until_success(monkeypatch):
         {"state": "PROGRESS", "pct": 35, "step": "Parsing document"},
         {"state": "SUCCESS", "pct": 100, "step": "Done", "result": {"chunks": 2}},
     ]
+
+
+def test_job_progress_websocket_rejects_unknown_job(monkeypatch):
+    monkeypatch.setattr(
+        "app.api.endpoints.websocket.job_repository",
+        _FakeJobRepository(None),
+    )
+    websocket = FakeWebSocket()
+
+    asyncio.run(job_progress_ws(websocket, "missing-job"))
+
+    assert websocket.accepted is False
+    assert websocket.closed is True
+    assert websocket.messages == []
+
+
+class _FakeJobRepository:
+    def __init__(self, owner):
+        self.owner = owner
+
+    def get(self, _job_id, user_id):
+        if self.owner == user_id:
+            return {"job_id": "job-123", "user_id": user_id}
+        return None

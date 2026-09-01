@@ -79,6 +79,21 @@ def test_repository_updates_existing_record():
     assert fetched["file_size"] == 99
 
 
+def test_same_content_gets_a_different_document_id_per_user():
+    repo = _repo()
+    first = _metadata(user_id="u1")
+    second = _metadata(user_id="u2")
+
+    repo.save_metadata(first)
+    repo.save_metadata(second)
+
+    assert first["document_id"] != second["document_id"]
+    assert repo.get_by_id(first["document_id"], "u1")["user_id"] == "u1"
+    assert repo.get_by_id(first["document_id"], "u2") is None
+    assert repo.list("u1")[0]["document_id"] == first["document_id"]
+    assert repo.list("u2")[0]["document_id"] == second["document_id"]
+
+
 def test_repository_has_any_is_user_scoped():
     repo = _repo()
     repo.save_metadata(_metadata(user_id="u1"))

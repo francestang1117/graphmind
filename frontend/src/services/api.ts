@@ -222,7 +222,11 @@ export function watchJobProgress(
   onProgress: (progress: JobProgress) => void,
 ) {
   return new Promise<JobProgress>((resolve, reject) => {
-    const ws = new WebSocket(`${toWsBase(API_BASE)}/ws/jobs/${encodeURIComponent(jobId)}`);
+    const token = getAccessToken();
+    const query = token ? `?access_token=${encodeURIComponent(token)}` : "";
+    const ws = new WebSocket(
+      `${toWsBase(API_BASE)}/ws/jobs/${encodeURIComponent(jobId)}${query}`,
+    );
 
     ws.onmessage = (event) => {
       const progress = JSON.parse(event.data) as JobProgress;

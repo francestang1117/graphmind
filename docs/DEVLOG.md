@@ -1068,9 +1068,24 @@ with thicker lines, and the selection panel shows both relation strength and
 node importance. A repeated weak relation can become visible; a one-off weak
 guess still stays out of the default entity view.
 
+## 2026-09 — Security Review Follow-up
+
+A review found three places where an identifier was being trusted too early:
+job IDs, scraped redirect targets, and content-hash filenames used as database
+IDs.
+
+Job reads, cancellation, and WebSocket connections now check the current user
+before touching Celery. The scraper validates every redirect, only allows the
+standard web ports, and opens the socket to the IP address that was checked.
+
+Document rows now get their own UUID. Parsed chunks and entities keep both the
+document ID and user ID, and their database constraints point back to the
+owning document. Existing SQLite databases are upgraded at startup so old hash
+IDs and their graph, job, and parse references move together.
+
 ## Current State
 
-As of August 2026, GraphMind has a working foundation:
+As of September 2026, GraphMind has a working foundation:
 
 - FastAPI backend
 - React + TypeScript frontend

@@ -32,7 +32,7 @@ def test_delete_soft_deletes_stale_database_record(monkeypatch):
     )
     monkeypatch.setattr(
         "app.services.parsed_artifact_repository.parsed_artifact_repository.delete_for_document",
-        lambda filename: None,
+        lambda filename, *, user_id="local-dev": None,
     )
     monkeypatch.setattr(
         "app.services.graph_repository.graph_repository.delete_for_document",

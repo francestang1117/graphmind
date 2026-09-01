@@ -30,6 +30,21 @@ def test_same_content_is_reported_as_duplicate(tmp_path):
     assert exc.value.metadata["file_hash"] == first["file_hash"]
 
 
+def test_same_content_is_separate_between_users(tmp_path):
+    storage = FileStorage(tmp_path)
+
+    first = storage.save_file(b"shared", "first.txt", "text/plain", user_id="u1")
+    second = storage.save_file(b"shared", "second.txt", "text/plain", user_id="u2")
+
+    assert first["file_hash"] == second["file_hash"]
+    assert first["file_path"] != second["file_path"]
+    assert storage.get_file_info(first["stored_filename"], user_id="u1")["user_id"] == "u1"
+    assert storage.get_file_info(second["stored_filename"], user_id="u2")["user_id"] == "u2"
+
+    assert storage.delete_file(first["stored_filename"], user_id="u1") is True
+    assert storage.get_file_info(second["stored_filename"], user_id="u2") is not None
+
+
 def test_list_files_returns_saved_metadata(tmp_path):
     storage = FileStorage(tmp_path)
 

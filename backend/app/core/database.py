@@ -64,6 +64,13 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
 
+    # create_all does not change constraints on tables that already exist.
+    # Run the small compatibility upgrade after the models are registered so
+    # old local databases follow the same ownership rules as new ones.
+    from app.core.database_migrations import upgrade_persistence_schema
+
+    upgrade_persistence_schema(engine)
+
 
 def get_db() -> Iterator[Session]:
     """FastAPI dependency for DB-backed endpoints."""

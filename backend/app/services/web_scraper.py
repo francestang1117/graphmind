@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import http.client
 import ipaddress
 import logging
 import re
 import socket
 from dataclasses import dataclass
+from typing import Mapping
 from urllib.parse import urljoin, urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 
 from app.core.config import settings
@@ -109,6 +110,9 @@ class WebScraper:
         "toggle navigation",
     }
     ALLOWED_SCHEMES = {"http", "https"}
+    ALLOWED_PORTS = {80, 443}
+    REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+    MAX_REDIRECTS = 5
     MAX_RESPONSE_BYTES = 2 * 1024 * 1024
     TIMEOUT_SECONDS = 12
 
@@ -126,12 +130,7 @@ class WebScraper:
         return metadata
 
     async def scrape(self, url: str) -> ScrapedPage:
-        # Check before and after redirects. A public-looking URL can redirect
-        # to localhost or cloud metadata endpoints, which is the classic SSRF
-        # footgun for scraper features.
-        await self._assert_public_url(url)
         html, final_url = await self._fetch(url)
-        await self._assert_public_url(final_url)
 
         title = self._extract_title(html) or urlparse(final_url).netloc
         text = self._extract_text(html, final_url)
@@ -146,43 +145,124 @@ class WebScraper:
         headers = {
             "User-Agent": f"{settings.PROJECT_NAME}/0.1 (+local development scraper)",
             "Accept": "text/html,application/xhtml+xml,text/plain;q=0.8,*/*;q=0.1",
+            "Accept-Encoding": "identity",
         }
+
+        current_url = url
+        for redirect_count in range(self.MAX_REDIRECTS + 1):
+            # The returned address is the one used for the socket connection.
+            # The original hostname is still sent as Host/SNI in _request_once.
+            address = await self._assert_public_url(current_url)
+            try:
+                status_code, response_headers, body = await asyncio.to_thread(
+                    self._request_once,
+                    current_url,
+                    address,
+                    headers,
+                )
+            except WebScrapeError:
+                raise
+            except (OSError, TimeoutError, http.client.HTTPException) as exc:
+                raise WebScrapeError(
+                    "The page could not be fetched.",
+                    details={"url": current_url, "reason": str(exc)},
+                ) from exc
+
+            if status_code in self.REDIRECT_STATUSES:
+                location = response_headers.get("location", "").strip()
+                if not location:
+                    raise WebScrapeError(
+                        "The page returned a redirect without a destination.",
+                        details={"url": current_url, "status_code": status_code},
+                    )
+                if redirect_count >= self.MAX_REDIRECTS:
+                    raise WebScrapeError(
+                        "The page redirected too many times.",
+                        details={"max_redirects": self.MAX_REDIRECTS},
+                    )
+                # The next loop checks this URL before making the next request.
+                current_url = urljoin(current_url, location)
+                continue
+
+            if status_code >= 400:
+                raise WebScrapeError(
+                    f"The page returned HTTP {status_code}.",
+                    details={"url": current_url, "status_code": status_code},
+                )
+
+            self._assert_supported_headers(response_headers)
+            encoding = _response_charset(response_headers)
+            return body.decode(encoding, errors="replace"), current_url
+
+        raise WebScrapeError("The page redirected too many times.")
+
+    def _request_once(
+        self,
+        url: str,
+        address: str,
+        headers: Mapping[str, str],
+    ) -> tuple[int, dict[str, str], bytes]:
+        """Fetch one URL while pinning the socket to a checked IP address."""
+        parsed = urlparse(url)
+        hostname = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+        path = parsed.path or "/"
+        if parsed.query:
+            path += f"?{parsed.query}"
+
+        class PinnedHTTPConnection(http.client.HTTPConnection):
+            def connect(connection_self):
+                connection_self.sock = socket.create_connection(
+                    (address, port), timeout=self.TIMEOUT_SECONDS
+                )
+
+        class PinnedHTTPSConnection(http.client.HTTPSConnection):
+            def connect(connection_self):
+                raw_socket = socket.create_connection(
+                    (address, port), timeout=self.TIMEOUT_SECONDS
+                )
+                try:
+                    connection_self.sock = connection_self._context.wrap_socket(
+                        raw_socket,
+                        server_hostname=hostname,
+                    )
+                except Exception:
+                    raw_socket.close()
+                    raise
+
+        connection_type = (
+            PinnedHTTPSConnection if parsed.scheme.lower() == "https" else PinnedHTTPConnection
+        )
+        connection = connection_type(hostname, port, timeout=self.TIMEOUT_SECONDS)
+        response = None
+        status_code = 0
         try:
-            async with httpx.AsyncClient(
-                follow_redirects=True,
-                timeout=httpx.Timeout(self.TIMEOUT_SECONDS),
-            ) as client:
-                async with client.stream("GET", url, headers=headers) as response:
-                    response.raise_for_status()
-                    self._assert_supported_response(response)
-                    body = bytearray()
-                    # Stream instead of response.text so a huge page cannot sit
-                    # in memory before we notice it crossed the limit.
-                    async for chunk in response.aiter_bytes():
-                        body.extend(chunk)
-                        if len(body) > self.MAX_RESPONSE_BYTES:
-                            raise WebScrapeError(
-                                "This page is too large to ingest.",
-                                details={"max_bytes": self.MAX_RESPONSE_BYTES},
-                            )
-        except WebScrapeError:
-            raise
-        except httpx.HTTPStatusError as exc:
-            raise WebScrapeError(
-                f"The page returned HTTP {exc.response.status_code}.",
-                details={"url": str(exc.request.url), "status_code": exc.response.status_code},
-            ) from exc
-        except httpx.HTTPError as exc:
-            raise WebScrapeError(
-                "The page could not be fetched.",
-                details={"url": url, "reason": str(exc)},
-            ) from exc
+            connection.request("GET", path, headers=dict(headers))
+            response = connection.getresponse()
+            status_code = response.status
+            response_headers = {
+                key.lower(): value for key, value in response.getheaders()
+            }
+            if status_code in self.REDIRECT_STATUSES:
+                # There is no reason to read a redirect body. Closing it also
+                # avoids carrying untrusted response data into the next hop.
+                body = b""
+            else:
+                body = response.read(self.MAX_RESPONSE_BYTES + 1)
+        finally:
+            if response is not None:
+                response.close()
+            connection.close()
 
-        encoding = response.encoding or "utf-8"
-        return bytes(body).decode(encoding, errors="replace"), str(response.url)
+        if len(body) > self.MAX_RESPONSE_BYTES:
+            raise WebScrapeError(
+                "This page is too large to ingest.",
+                details={"max_bytes": self.MAX_RESPONSE_BYTES},
+            )
+        return status_code, response_headers, body
 
-    def _assert_supported_response(self, response: httpx.Response) -> None:
-        content_type = response.headers.get("content-type", "").split(";")[0].lower()
+    def _assert_supported_headers(self, headers: Mapping[str, str]) -> None:
+        content_type = headers.get("content-type", "").split(";")[0].lower()
         # The scraper stores text for the parser. PDFs/images/downloads should
         # still go through the upload path where file validation already exists.
         if content_type and content_type not in {"text/html", "application/xhtml+xml", "text/plain"}:
@@ -191,17 +271,32 @@ class WebScraper:
                 details={"content_type": content_type},
             )
 
-        content_length = response.headers.get("content-length")
+        content_length = headers.get("content-length")
         if content_length and content_length.isdigit() and int(content_length) > self.MAX_RESPONSE_BYTES:
             raise WebScrapeError(
                 "This page is too large to ingest.",
                 details={"max_bytes": self.MAX_RESPONSE_BYTES},
             )
 
-    async def _assert_public_url(self, url: str) -> None:
+    async def _assert_public_url(self, url: str) -> str:
         parsed = urlparse(url)
         if parsed.scheme.lower() not in self.ALLOWED_SCHEMES or not parsed.hostname:
             raise WebScrapeError("Only http and https URLs are supported.", details={"url": url})
+        if parsed.username or parsed.password:
+            raise WebScrapeError(
+                "URLs with embedded credentials are not supported.",
+                details={"url": url},
+            )
+
+        try:
+            port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+        except ValueError as exc:
+            raise WebScrapeError("The URL contains an invalid port.", details={"url": url}) from exc
+        if port not in self.ALLOWED_PORTS:
+            raise WebScrapeError(
+                "Only standard HTTP and HTTPS ports are supported.",
+                details={"host": parsed.hostname, "port": port},
+            )
 
         # Validate the resolved IP, not just the hostname string. Names like
         # "safe-looking.example" can still resolve to a private address.
@@ -215,6 +310,11 @@ class WebScraper:
                 "This URL points to a private or local network address.",
                 details={"host": parsed.hostname},
             )
+
+        # _request_once connects to this exact address and keeps the hostname
+        # for the HTTP Host header and TLS SNI. That closes the check/connect
+        # gap that exists when the HTTP client resolves the hostname again.
+        return sorted(addresses)[0]
 
     def _extract_text(self, html: str, base_url: str = "") -> str:
         # Reader-mode first, local cleanup if it gives up.
@@ -336,6 +436,12 @@ def _document_text(page: ScrapedPage) -> str:
 
 def _word_count(text: str) -> int:
     return len(text.split())
+
+
+def _response_charset(headers: Mapping[str, str]) -> str:
+    content_type = headers.get("content-type", "")
+    match = re.search(r"charset\s*=\s*['\"]?([^;\s'\"]+)", content_type, re.I)
+    return match.group(1) if match else "utf-8"
 
 
 def _clean_inline_text(text: str) -> str:

@@ -17,39 +17,43 @@ log = logging.getLogger(__name__)
 def process_document(
     self,
     file_path: str,
-    filename: str = "",
+    document_id: str = "",
     original_filename: str = "",
     user_id: str = "",
+    stored_filename: str = "",
 ) -> Dict[str, Any]:
-    document_id = filename or file_path.rsplit("/", 1)[-1]
-    display_name = original_filename or filename or ""
+    stable_document_id = document_id or file_path.rsplit("/", 1)[-1]
+    stored_name = stored_filename or document_id or file_path.rsplit("/", 1)[-1]
+    display_name = original_filename or stored_name or ""
+    owner_id = user_id or "local-dev"
     # The upload route creates the first row, but the worker owns the live
     # status from here on.
-    _progress(self, 5, "Queued document pipeline", user_id, document_id, display_name)
+    _progress(self, 5, "Queued document pipeline", owner_id, stable_document_id, display_name)
     try:
         result = pipeline.process(
             file_path,
-            document_id,
+            stored_name,
             display_name,
-            user_id=user_id or "local-dev",
+            user_id=owner_id,
+            document_id=stable_document_id,
             on_progress=lambda step, pct: _progress(
                 self,
                 pct,
                 step,
-                user_id,
-                document_id,
+                owner_id,
+                stable_document_id,
                 display_name,
             ),
         )
-        _progress(self, 100, "Done", user_id, document_id, display_name, status="SUCCESS")
+        _progress(self, 100, "Done", owner_id, stable_document_id, display_name, status="SUCCESS")
         return result
     except Exception as exc:
         _progress(
             self,
             100,
             "Failed",
-            user_id,
-            document_id,
+            owner_id,
+            stable_document_id,
             display_name,
             status="FAILURE",
             error=str(exc),
@@ -71,36 +75,40 @@ def reindex_document(
         log.warning("Could not reindex missing document %s", filename)
         return {"filename": filename, "status": "not_found"}
 
+    owner_id = user_id or metadata.get("user_id", "local-dev")
+    stable_document_id = metadata.get("document_id") or metadata["filename"]
+    stored_filename = metadata.get("stored_filename") or metadata["filename"]
     _progress(
         self,
         5,
         "Queued document reindex",
-        user_id or metadata.get("user_id", ""),
-        filename,
-        metadata.get("original_filename", filename),
+        owner_id,
+        stable_document_id,
+        metadata.get("original_filename", stored_filename),
     )
     try:
         result = pipeline.process(
             metadata["file_path"],
-            metadata["filename"],
+            stored_filename,
             metadata.get("original_filename", metadata["filename"]),
-            user_id=user_id or metadata.get("user_id", "local-dev"),
+            user_id=owner_id,
+            document_id=stable_document_id,
             on_progress=lambda step, pct: _progress(
                 self,
                 pct,
                 step,
-                user_id or metadata.get("user_id", ""),
-                filename,
-                metadata.get("original_filename", filename),
+                owner_id,
+                stable_document_id,
+                metadata.get("original_filename", stored_filename),
             ),
         )
         _progress(
             self,
             100,
             "Done",
-            user_id or metadata.get("user_id", ""),
-            filename,
-            metadata.get("original_filename", filename),
+            owner_id,
+            stable_document_id,
+            metadata.get("original_filename", stored_filename),
             status="SUCCESS",
         )
         return result
@@ -109,9 +117,9 @@ def reindex_document(
             self,
             100,
             "Failed",
-            user_id or metadata.get("user_id", ""),
-            filename,
-            metadata.get("original_filename", filename),
+            owner_id,
+            stable_document_id,
+            metadata.get("original_filename", stored_filename),
             status="FAILURE",
             error=str(exc),
         )
@@ -133,17 +141,21 @@ def reindex_all_documents(
     for index, metadata in enumerate(documents, start=1):
         filename = metadata["filename"]
         original = metadata.get("original_filename", filename)
+        owner_id = user_id or metadata.get("user_id", "local-dev")
+        stable_document_id = metadata.get("document_id") or filename
+        stored_filename = metadata.get("stored_filename") or filename
         # Batch progress is file-count based. It is rough, but it keeps the
         # maintenance task readable without pretending we know each file's cost.
         pct = 5 + int((index - 1) / max(total, 1) * 90)
-        _progress(self, pct, f"Reindexing {original}", user_id or "", filename, original)
+        _progress(self, pct, f"Reindexing {original}", owner_id, stable_document_id, original)
         try:
             results.append(
                 pipeline.process(
                     metadata["file_path"],
-                    filename,
+                    stored_filename,
                     original,
-                    user_id=user_id or metadata.get("user_id", "local-dev"),
+                    user_id=owner_id,
+                    document_id=stable_document_id,
                 )
             )
         except Exception as exc:

@@ -25,7 +25,7 @@ def _repos():
     )
 
 
-def _metadata(filename="hash.md") -> dict:
+def _metadata(filename="hash.md", user_id="u1") -> dict:
     return {
         "filename": filename,
         "stored_filename": filename,
@@ -36,7 +36,7 @@ def _metadata(filename="hash.md") -> dict:
         "file_hash": "abc123",
         "mime_type": "text/markdown",
         "file_path": f"/tmp/{filename}",
-        "user_id": "u1",
+        "user_id": user_id,
         "created_at": "2026-05-02T00:00:00+00:00",
         "modified_at": "2026-05-02T00:00:01+00:00",
     }
@@ -59,10 +59,11 @@ def test_artifacts_replace_chunks_and_entities_for_document():
             {"text": "Python", "label": "PROGRAMMING_LANGUAGE", "confidence": 0.8},
             {"text": "FastAPI", "label": "FRAMEWORK", "source": "domain"},
         ],
+        user_id="u1",
     )
 
-    chunks = artifacts.list_chunks("hash.md")
-    entities = artifacts.list_entities("hash.md")
+    chunks = artifacts.list_chunks("hash.md", user_id="u1")
+    entities = artifacts.list_entities("hash.md", user_id="u1")
 
     assert [chunk["text"] for chunk in chunks] == ["First chunk", "Second chunk"]
     assert chunks[0]["metadata"]["section"] == "Intro"
@@ -77,9 +78,41 @@ def test_artifacts_delete_for_document():
         "hash.md",
         {"chunks": [{"text": "First chunk"}]},
         [{"text": "Python", "label": "PROGRAMMING_LANGUAGE"}],
+        user_id="u1",
     )
 
-    artifacts.delete_for_document("hash.md")
+    artifacts.delete_for_document("hash.md", user_id="u1")
 
-    assert artifacts.list_chunks("hash.md") == []
-    assert artifacts.list_entities("hash.md") == []
+    assert artifacts.list_chunks("hash.md", user_id="u1") == []
+    assert artifacts.list_entities("hash.md", user_id="u1") == []
+
+
+def test_artifacts_are_isolated_when_users_upload_the_same_file():
+    docs, artifacts = _repos()
+    first = _metadata("same.md", user_id="u1")
+    second = _metadata("same.md", user_id="u2")
+    docs.save_metadata(first)
+    docs.save_metadata(second)
+
+    artifacts.replace_for_document(
+        "same.md",
+        {"chunks": [{"text": "User one"}]},
+        [{"text": "Python", "label": "PROGRAMMING_LANGUAGE"}],
+        user_id="u1",
+    )
+    artifacts.replace_for_document(
+        "same.md",
+        {"chunks": [{"text": "User two"}]},
+        [{"text": "FastAPI", "label": "FRAMEWORK"}],
+        user_id="u2",
+    )
+
+    assert first["document_id"] != second["document_id"]
+    assert [item["text"] for item in artifacts.list_chunks("same.md", user_id="u1")] == ["User one"]
+    assert [item["text"] for item in artifacts.list_chunks("same.md", user_id="u2")] == ["User two"]
+    assert artifacts.list_entities("same.md", user_id="u1")[0]["text"] == "Python"
+    assert artifacts.list_entities("same.md", user_id="u2")[0]["text"] == "FastAPI"
+
+    artifacts.delete_for_document("same.md", user_id="u1")
+    assert artifacts.list_chunks("same.md", user_id="u1") == []
+    assert artifacts.list_chunks("same.md", user_id="u2")[0]["text"] == "User two"

@@ -135,14 +135,22 @@ def rebuild_graph_from_documents(user_id: Optional[str] = None) -> KnowledgeGrap
     # useful until those files are reprocessed into graph_nodes/graph_edges.
     graph = knowledge_graph
     graph.clear()
+    owner_id = user_id or "local-dev"
 
     for metadata in document_service.list_documents(user_id):
         filename = metadata["filename"]
         original_name = metadata.get("original_filename", filename)
-        parsed = get_cached_parse(filename)
+        document_id = metadata.get("document_id") or filename
+        parsed = get_cached_parse(filename, owner_id)
         if not parsed:
             try:
-                parsed = parse_document_file(filename, metadata["file_path"], original_name)
+                parsed = parse_document_file(
+                    filename,
+                    metadata["file_path"],
+                    original_name,
+                    user_id=owner_id,
+                    document_id=document_id,
+                )
             except (OSError, ValueError, RuntimeError) as exc:
                 # One bad upload should not blank the whole graph. Log it so
                 # the skipped file is visible during local debugging.
@@ -152,7 +160,12 @@ def rebuild_graph_from_documents(user_id: Optional[str] = None) -> KnowledgeGrap
         try:
             entities = entity_extractor.extract_from_parsed_document(parsed)
             relations = entity_extractor.extract_relations(entities, parsed.get("content", ""))
-            graph.add_document(original_name, entities, relations, document_id=f"doc:{filename}")
+            graph.add_document(
+                original_name,
+                entities,
+                relations,
+                document_id=f"doc:{document_id}",
+            )
         except (KeyError, TypeError, ValueError) as exc:
             # Entity extraction is still evolving, so keep the graph panel
             # resilient while making malformed parser output visible.

@@ -49,11 +49,12 @@ def test_upload_can_queue_celery_job(temp_document_service, monkeypatch):
         id = "job-123"
 
     class FakeTask:
-        def delay(self, file_path, filename, original_filename, user_id):
+        def delay(self, file_path, document_id, original_filename, user_id, stored_filename):
             queued["file_path"] = file_path
-            queued["filename"] = filename
+            queued["document_id"] = document_id
             queued["original_filename"] = original_filename
             queued["user_id"] = user_id
+            queued["stored_filename"] = stored_filename
             return FakeAsyncResult()
 
     class FakeJobRepository:
@@ -76,7 +77,8 @@ def test_upload_can_queue_celery_job(temp_document_service, monkeypatch):
     )
 
     assert response.job_id == "job-123"
-    assert queued["filename"] == response.filename
+    assert queued["document_id"] == response.filename
+    assert queued["stored_filename"] == response.filename
     assert queued["original_filename"] == "notes.md"
     assert queued["user_id"] == "local-dev"
     assert fake_jobs.created[0][0] == "job-123"
@@ -142,12 +144,13 @@ def test_parsed_document_persists_chunks_and_entities(temp_document_service, mon
     saved = {}
 
     class FakeArtifactRepository:
-        def replace_for_document(self, filename, parsed, entities):
+        def replace_for_document(self, filename, parsed, entities, *, user_id="local-dev"):
             saved["filename"] = filename
+            saved["user_id"] = user_id
             saved["chunks"] = parsed.get("chunks", [])
             saved["entities"] = entities
 
-        def delete_for_document(self, filename):
+        def delete_for_document(self, filename, *, user_id="local-dev"):
             saved["deleted"] = filename
 
     monkeypatch.setattr(

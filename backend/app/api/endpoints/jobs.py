@@ -1,6 +1,6 @@
 """HTTP access to background job state."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
@@ -50,6 +50,11 @@ async def get_job(
 ) -> dict:
     """Return the same snapshot the upload UI receives over WebSocket."""
     stored = job_repository.get(job_id, _user_id(user))
+    if not stored:
+        # Celery knows task ids, but it does not know which account owns them.
+        # Do not let that global lookup become an access-control bypass.
+        raise HTTPException(status_code=404, detail="Job not found")
+
     if stored and stored["status"] in {"SUCCESS", "FAILURE", "REVOKED", "ERROR"}:
         # Finished jobs can come straight from our history table. Celery result
         # backends may expire; the app's recent history is the steadier source.
@@ -63,10 +68,9 @@ async def get_job(
 
     task = celery_app.AsyncResult(job_id)
     snapshot = task_snapshot(task)
-    if stored:
-        # Active jobs still use Celery for live state, with DB details attached
-        # for filename/document context.
-        snapshot["job"] = stored
+    # Active jobs still use Celery for live state, with DB details attached for
+    # filename/document context. The ownership check happened above.
+    snapshot["job"] = stored
     return snapshot
 
 
@@ -76,13 +80,18 @@ async def cancel_job(
     user: UserRecord = Depends(current_user_or_dev),
 ) -> dict:
     """Ask Celery to stop a queued or running task."""
+    stored = job_repository.get(job_id, _user_id(user))
+    if not stored:
+        # Revoke is a global Celery operation, so it must never happen before
+        # we know that this user owns the job id.
+        raise HTTPException(status_code=404, detail="Job not found")
+
     celery_app.control.revoke(job_id, terminate=True)
     task = celery_app.AsyncResult(job_id)
     snapshot = task_snapshot(task)
     if snapshot["state"] in {"PENDING", "PROGRESS", "STARTED"}:
         # Celery can take a moment to report REVOKED. For the UI, the important
         # thing is that the user already cancelled it, so reflect that now.
-        stored = job_repository.get(job_id, _user_id(user)) or {}
         job_repository.upsert(
             job_id,
             user_id=_user_id(user),

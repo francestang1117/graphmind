@@ -256,6 +256,7 @@ Respond in the same language as the user's question."""
             return None
 
         query_tokens = self._content_tokens(question)
+        owner_id = user_id or "local-dev"
         best: tuple[int, str, dict[str, Any]] | None = None
         for metadata in document_service.list_documents(user_id):
             filename = metadata.get("filename", "")
@@ -267,10 +268,16 @@ Respond in the same language as the user's question."""
             score = len(query_tokens & doc_tokens)
             if score < 2:
                 continue
-            parsed = get_cached_parse(filename)
+            parsed = get_cached_parse(filename, owner_id)
             if not parsed:
                 try:
-                    parsed = parse_document_file(filename, file_path, original)
+                    parsed = parse_document_file(
+                        filename,
+                        file_path,
+                        original,
+                        user_id=owner_id,
+                        document_id=metadata.get("document_id", ""),
+                    )
                 except (OSError, ValueError, RuntimeError) as exc:
                     log.warning("Could not parse %s while answering named-document question: %s", original, exc)
                     continue
@@ -360,16 +367,23 @@ Respond in the same language as the user's question."""
             return "I couldn't access the uploaded document list yet."
 
         summaries = []
+        owner_id = user_id or "local-dev"
         for metadata in document_service.list_documents(user_id):
             filename = metadata.get("filename", "")
             original = metadata.get("original_filename") or filename
             file_path = metadata.get("file_path", "")
             if not filename or not file_path:
                 continue
-            parsed = get_cached_parse(filename)
+            parsed = get_cached_parse(filename, owner_id)
             if not parsed:
                 try:
-                    parsed = parse_document_file(filename, file_path, original)
+                    parsed = parse_document_file(
+                        filename,
+                        file_path,
+                        original,
+                        user_id=owner_id,
+                        document_id=metadata.get("document_id", ""),
+                    )
                 except (OSError, ValueError, RuntimeError) as exc:
                     log.warning("Skipping %s while building collection summary: %s", original, exc)
                     continue

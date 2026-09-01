@@ -85,9 +85,10 @@ class JobRepository:
         now = utc_now()
         # Progress can arrive from Celery, tests, or future maintenance tasks.
         # Clamp it here once so callers do not each need their own guard.
+        document_ref = document_id or None
         values = {
             "user_id": user_id,
-            "document_id": document_id,
+            "document_id": document_ref,
             "original_filename": original_filename,
             "status": status,
             "step": step,
@@ -103,6 +104,8 @@ class JobRepository:
                     for key, value in values.items():
                         # Later progress updates often only know status/step.
                         # Do not wipe filename/user fields with blanks.
+                        if key == "document_id" and not document_ref:
+                            continue
                         if value != "" or key in {"status", "step", "progress", "error", "updated_at", "finished_at"}:
                             setattr(record, key, value)
                 else:
@@ -164,7 +167,7 @@ def _record_to_dict(record: ProcessingJobRecord) -> dict[str, Any]:
     return {
         "job_id": record.job_id,
         "user_id": record.user_id,
-        "document_id": record.document_id,
+        "document_id": record.document_id or "",
         "original_filename": record.original_filename,
         "status": record.status,
         "step": record.step,

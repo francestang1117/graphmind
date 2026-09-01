@@ -79,6 +79,16 @@ class DocumentService:
                 return record
         return self.storage.get_file_info(filename, user_id)
 
+    def get_document_by_id(
+        self,
+        document_id: str,
+        user_id: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Find a persisted document by ID while keeping storage lookup separate."""
+        if not self._db_available() or not hasattr(self.repository, "get_by_id"):
+            return None
+        return self.repository.get_by_id(document_id, user_id)
+
     def delete_document(self, filename: str, user_id: Optional[str] = None) -> bool:
         # A DB row can outlive its bytes after a storage reset or an old test
         # run. It should still be possible to remove that stale row from the UI.
@@ -96,8 +106,9 @@ class DocumentService:
             from app.services.parsed_artifact_repository import parsed_artifact_repository
             from app.services.graph_repository import graph_repository
 
-            parsed_artifact_repository.delete_for_document(filename)
-            graph_repository.delete_for_document(filename, user_id)
+            document_id = database_record.get("document_id", filename) if database_record else filename
+            parsed_artifact_repository.delete_for_document(document_id, user_id=user_id)
+            graph_repository.delete_for_document(document_id, user_id)
         return deleted
 
     def _db_available(self) -> bool:

@@ -162,13 +162,16 @@ async def get_parsed_document(
     if not metadata:
         raise HTTPException(status_code=404, detail="File not found")
 
-    parsed = get_cached_parse(filename)
+    user_id = _user_id(user)
+    parsed = get_cached_parse(filename, user_id)
     if not parsed:
         try:
             parsed = parse_document_file(
                 filename,
                 metadata["file_path"],
                 metadata["original_filename"],
+                user_id=user_id,
+                document_id=metadata.get("document_id", ""),
             )
         except Exception as exc:
             # Parsing can fail for format-specific reasons. Expose a stable
@@ -185,6 +188,8 @@ async def get_parsed_document(
             filename,
             metadata["file_path"],
             metadata["original_filename"],
+            user_id=user_id,
+            document_id=metadata.get("document_id", ""),
         )
     return ParsedDocumentSummary(
         **document_summary(filename, parsed, metadata["original_filename"])
@@ -244,18 +249,20 @@ def _queue_processing(background_tasks: BackgroundTasks, metadata: dict, user_id
     if settings.CELERY_ENABLED:
         # In Docker/prod the worker owns parsing, graph updates, and indexing.
         # The id is what the WebSocket endpoint watches.
+        document_id = metadata.get("document_id") or metadata["stored_filename"]
         result = process_document.delay(
             metadata["file_path"],
-            metadata["stored_filename"],
+            document_id,
             metadata["original_filename"],
             user_id,
+            metadata["stored_filename"],
         )
         job_id = getattr(result, "id", None)
         if job_id:
             job_repository.create(
                 job_id,
                 user_id=user_id,
-                document_id=metadata["stored_filename"],
+                document_id=document_id,
                 original_filename=metadata["original_filename"],
             )
         return job_id
@@ -266,6 +273,7 @@ def _queue_processing(background_tasks: BackgroundTasks, metadata: dict, user_id
         metadata["file_path"],
         metadata["original_filename"],
         user_id,
+        metadata.get("document_id", ""),
     )
     return None
 
@@ -290,5 +298,5 @@ async def delete_document(
     """Delete a stored document by its stored filename."""
     if not document_service.delete_document(filename, _user_id(user)):
         raise HTTPException(status_code=404, detail="File not found")
-    clear_cached_parse(filename)
+    clear_cached_parse(filename, _user_id(user))
     return {"message": "File deleted"}
