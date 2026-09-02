@@ -74,6 +74,7 @@ def init_db() -> None:
         ParsedEntityRecord,
         ProcessingJobRecord,
         UserRecord,
+        WorkspaceRecord,
     )
 
     Base.metadata.create_all(bind=engine)

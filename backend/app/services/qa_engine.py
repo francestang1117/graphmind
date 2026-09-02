@@ -9,6 +9,8 @@ import os
 import re
 from typing import Any, Dict, List, Optional
 
+from app.core.workspace import default_workspace_id
+
 log = logging.getLogger(__name__)
 
 NO_VECTOR_CONTEXT = "No relevant context found."
@@ -35,11 +37,16 @@ class QAEngine:
         question: str,
         conversation_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Return an answer with sources, using local retrieval when no LLM is configured."""
-        context = self._get_vector_context(question, user_id)
-        graph_context = self._get_graph_context(question, user_id)
-        history = self._get_history(conversation_id)
+        if workspace_id is None:
+            context = self._get_vector_context(question, user_id)
+            graph_context = self._get_graph_context(question, user_id)
+        else:
+            context = self._get_vector_context(question, user_id, workspace_id)
+            graph_context = self._get_graph_context(question, user_id, workspace_id)
+        history = self._get_history(conversation_id, user_id, workspace_id)
 
         llm_answer, fallback_reason = self._answer_with_optional_llm(
             question,
@@ -48,12 +55,24 @@ class QAEngine:
             history,
         )
         mode = "llm" if llm_answer else "local"
-        answer_text = llm_answer or self._build_local_answer(question, context, graph_context, user_id)
+        answer_text = llm_answer or self._build_local_answer(
+            question,
+            context,
+            graph_context,
+            user_id,
+            workspace_id,
+        )
         if not llm_answer and context == NO_VECTOR_CONTEXT:
             fallback_reason = "no_retrieval_context"
 
         if conversation_id:
-            self._save_to_history(conversation_id, question, answer_text)
+            self._save_to_history(
+                conversation_id,
+                question,
+                answer_text,
+                user_id,
+                workspace_id,
+            )
 
         result = QAResult(
             answer=answer_text,
@@ -70,12 +89,21 @@ class QAEngine:
             "fallback_reason": result.fallback_reason,
         }
 
-    def _get_vector_context(self, question: str, user_id: Optional[str]) -> str:
+    def _get_vector_context(
+        self,
+        question: str,
+        user_id: Optional[str],
+        workspace_id: Optional[str] = None,
+    ) -> str:
         """Rebuild search from current uploads so chat does not depend on tab order."""
         try:
             from app.api.endpoints.search import rebuild_vector_index
 
-            store = rebuild_vector_index(user_id)
+            store = (
+                rebuild_vector_index(user_id, workspace_id)
+                if workspace_id is not None
+                else rebuild_vector_index(user_id)
+            )
             return store.get_context_for_qa(question, n_chunks=5)
         except (ImportError, RuntimeError, ValueError, OSError, AttributeError) as exc:
             # Chat should still answer politely if search is temporarily broken.
@@ -83,12 +111,21 @@ class QAEngine:
             log.warning("QA vector context unavailable: %s", exc)
             return NO_VECTOR_CONTEXT
 
-    def _get_graph_context(self, question: str, user_id: Optional[str]) -> str:
+    def _get_graph_context(
+        self,
+        question: str,
+        user_id: Optional[str],
+        workspace_id: Optional[str] = None,
+    ) -> str:
         """Rebuild graph context from current uploads for a graph-augmented hint."""
         try:
             from app.api.endpoints.graph import rebuild_graph_from_documents
 
-            graph = rebuild_graph_from_documents(user_id)
+            graph = (
+                rebuild_graph_from_documents(user_id, workspace_id)
+                if workspace_id is not None
+                else rebuild_graph_from_documents(user_id)
+            )
             nodes = graph.search_nodes(question, limit=5)
         except (ImportError, RuntimeError, ValueError, OSError, AttributeError) as exc:
             log.warning("QA graph context unavailable: %s", exc)
@@ -176,15 +213,16 @@ Respond in the same language as the user's question."""
         context: str,
         graph_context: str,
         user_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> str:
         """Readable extractive response used before an LLM key is configured."""
         snippets = self._parse_context_blocks(context)
-        document_answer = self._build_named_document_answer(question, user_id)
+        document_answer = self._build_named_document_answer(question, user_id, workspace_id)
         if document_answer:
             return document_answer
 
         if self._asks_for_collection_summary(question):
-            return self._build_collection_summary(user_id)
+            return self._build_collection_summary(user_id, workspace_id)
 
         if self._asks_for_frameworks(question):
             framework_answer = self._build_framework_answer(graph_context, snippets)
@@ -216,11 +254,16 @@ Respond in the same language as the user's question."""
             lines.append(graph_context)
         return "\n".join(lines)
 
-    def _build_named_document_answer(self, question: str, user_id: Optional[str]) -> Optional[str]:
+    def _build_named_document_answer(
+        self,
+        question: str,
+        user_id: Optional[str],
+        workspace_id: Optional[str] = None,
+    ) -> Optional[str]:
         """Answer questions that name a specific uploaded file/title."""
         if not self._asks_about_document_content(question):
             return None
-        match = self._find_document_for_question(question, user_id)
+        match = self._find_document_for_question(question, user_id, workspace_id)
         if not match:
             return None
         filename, parsed = match
@@ -247,6 +290,7 @@ Respond in the same language as the user's question."""
         self,
         question: str,
         user_id: Optional[str],
+        workspace_id: Optional[str] = None,
     ) -> Optional[tuple[str, dict[str, Any]]]:
         try:
             from app.api.endpoints.documents_with_markdown import get_cached_parse, parse_document_file
@@ -258,7 +302,12 @@ Respond in the same language as the user's question."""
         query_tokens = self._content_tokens(question)
         owner_id = user_id or "local-dev"
         best: tuple[int, str, dict[str, Any]] | None = None
-        for metadata in document_service.list_documents(user_id):
+        documents = (
+            document_service.list_documents(user_id, workspace_id=workspace_id)
+            if workspace_id is not None
+            else document_service.list_documents(user_id)
+        )
+        for metadata in documents:
             filename = metadata.get("filename", "")
             original = metadata.get("original_filename") or filename
             file_path = metadata.get("file_path", "")
@@ -268,15 +317,24 @@ Respond in the same language as the user's question."""
             score = len(query_tokens & doc_tokens)
             if score < 2:
                 continue
-            parsed = get_cached_parse(filename, owner_id)
+            parsed = (
+                get_cached_parse(filename, owner_id, workspace_id)
+                if workspace_id is not None
+                else get_cached_parse(filename, owner_id)
+            )
             if not parsed:
                 try:
+                    arguments = {
+                        "user_id": owner_id,
+                        "document_id": metadata.get("document_id", ""),
+                    }
+                    if workspace_id is not None:
+                        arguments["workspace_id"] = workspace_id
                     parsed = parse_document_file(
                         filename,
                         file_path,
                         original,
-                        user_id=owner_id,
-                        document_id=metadata.get("document_id", ""),
+                        **arguments,
                     )
                 except (OSError, ValueError, RuntimeError) as exc:
                     log.warning("Could not parse %s while answering named-document question: %s", original, exc)
@@ -357,7 +415,11 @@ Respond in the same language as the user's question."""
             and ("all file" in lowered or "all document" in lowered or "across" in lowered or "所有" in lowered)
         )
 
-    def _build_collection_summary(self, user_id: Optional[str]) -> str:
+    def _build_collection_summary(
+        self,
+        user_id: Optional[str],
+        workspace_id: Optional[str] = None,
+    ) -> str:
         """Summarize each uploaded file from parser output, not search snippets."""
         try:
             from app.api.endpoints.documents_with_markdown import get_cached_parse, parse_document_file
@@ -368,21 +430,35 @@ Respond in the same language as the user's question."""
 
         summaries = []
         owner_id = user_id or "local-dev"
-        for metadata in document_service.list_documents(user_id):
+        documents = (
+            document_service.list_documents(user_id, workspace_id=workspace_id)
+            if workspace_id is not None
+            else document_service.list_documents(user_id)
+        )
+        for metadata in documents:
             filename = metadata.get("filename", "")
             original = metadata.get("original_filename") or filename
             file_path = metadata.get("file_path", "")
             if not filename or not file_path:
                 continue
-            parsed = get_cached_parse(filename, owner_id)
+            parsed = (
+                get_cached_parse(filename, owner_id, workspace_id)
+                if workspace_id is not None
+                else get_cached_parse(filename, owner_id)
+            )
             if not parsed:
                 try:
+                    arguments = {
+                        "user_id": owner_id,
+                        "document_id": metadata.get("document_id", ""),
+                    }
+                    if workspace_id is not None:
+                        arguments["workspace_id"] = workspace_id
                     parsed = parse_document_file(
                         filename,
                         file_path,
                         original,
-                        user_id=owner_id,
-                        document_id=metadata.get("document_id", ""),
+                        **arguments,
                     )
                 except (OSError, ValueError, RuntimeError) as exc:
                     log.warning("Skipping %s while building collection summary: %s", original, exc)
@@ -564,18 +640,43 @@ Respond in the same language as the user's question."""
             return "Retrieved context"
         return source_line.split("From:", 1)[1].split("|", 1)[0].strip()
 
-    def _get_history(self, conversation_id: Optional[str]) -> list[dict[str, str]]:
+    def _get_history(
+        self,
+        conversation_id: Optional[str],
+        user_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+    ) -> list[dict[str, str]]:
         if not conversation_id:
             return []
-        return self.conversations.get(conversation_id, [])[-6:]
+        key = self._conversation_key(conversation_id, user_id, workspace_id)
+        return self.conversations.get(key, [])[-6:]
 
-    def _save_to_history(self, conversation_id: str, question: str, answer: str) -> None:
-        self.conversations.setdefault(conversation_id, []).extend(
+    def _save_to_history(
+        self,
+        conversation_id: str,
+        question: str,
+        answer: str,
+        user_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+    ) -> None:
+        key = self._conversation_key(conversation_id, user_id, workspace_id)
+        self.conversations.setdefault(key, []).extend(
             [
                 {"role": "user", "content": question},
                 {"role": "assistant", "content": answer},
             ]
         )
+
+    def _conversation_key(
+        self,
+        conversation_id: str,
+        user_id: Optional[str],
+        workspace_id: Optional[str],
+    ) -> str:
+        """Keep a conversation id from crossing account or project boundaries."""
+        owner_id = user_id or "local-dev"
+        scope = workspace_id or default_workspace_id(owner_id)
+        return f"{owner_id}:{scope}:{conversation_id}"
 
     def _extract_sources(self, context: str) -> list[dict[str, str]]:
         """Extract source documents from vector context blocks."""

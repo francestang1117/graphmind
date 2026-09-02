@@ -1210,6 +1210,29 @@ ranges without maintaining a growing blocklist.
 I added parameterized coverage for CGNAT, metadata/link-local addresses,
 documentation ranges, IPv6 local ranges, and known public resolver addresses.
 
+## 2026-09 — V2 Research Workspace Boundary
+
+The next direction for GraphMind is medical literature research. A flat list of
+documents is not enough for that workflow because one account may have several
+research questions, and the same paper may belong to more than one project.
+
+I added a workspace record with an account owner, research question, domain,
+status, and timestamps. The existing document, parsed-artifact, graph, and job
+records now carry the workspace ID as well. The document uniqueness rule is
+scoped to account, workspace, and content hash, so one paper can be reused in
+two projects without mixing their derived data.
+
+The old document, search, graph, and chat routes still work without a project
+ID. They use one stable default workspace per account, which keeps existing
+local data usable while the V2 UI is being built. New workspace routes provide
+create, list, and owner-checked detail operations.
+
+The startup migration creates those default workspaces and backfills old rows.
+The worker also reads the workspace from the job row before processing, so a
+custom project does not fall back to the default project when a task starts.
+Tests now cover workspace ownership, the same paper in two projects, graph
+isolation, and the worker scope passed into the processing pipeline.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:
@@ -1236,7 +1259,9 @@ As of September 2026, GraphMind has a working foundation:
 - web scraper MVP that stores public pages as searchable Markdown documents
 - email/password and optional GitHub OAuth login with access/refresh token flow
 - frontend login/register dialog with session restore and automatic token refresh
+- workspace CRUD with a stable default workspace for compatibility routes
 - user-scoped document, graph, search, and chat reads
+- workspace-scoped documents, parsed artifacts, graph rows, and job history
 - Redis-backed rate-limit wrapper with local no-op fallback
 - SQLAlchemy persistence for users, document metadata, parsed artifacts, graph
   nodes/edges, and job history
@@ -1255,14 +1280,17 @@ As of September 2026, GraphMind has a working foundation:
 
 The project is not yet a full knowledge graph system. The graph, search, and
 chat screens can now use real extracted data, but relation quality, graph query
-depth, and production auth are still early-stage.
+depth, and production auth are still early-stage. The V2 medical research
+workflow currently stops after the workspace boundary; paper classification,
+standard section parsing, study cards, and sentence-level citations are not
+implemented yet.
 
 ## Next Steps
 
 The next realistic steps are:
 
-1. Expand the Markdown viewer to show full sections and chunks.
-2. Improve graph quality with better relation extraction and edge weighting.
-3. Add graph migrations and stronger graph queries.
-4. Test the account flow with `AUTH_REQUIRED=true` behind HTTPS and secure cookies.
-5. Replace local chat answers with GPT-backed answer generation when the OpenAI layer is ready.
+1. Add medical document types and identify the main paper sections with page-aware chunks.
+2. Add study cards whose facts carry sentence-level citations and an explicit not-found state.
+3. Add the workspace and paper workflow to the frontend.
+4. Improve graph quality with better relation extraction and edge weighting.
+5. Test the account flow with `AUTH_REQUIRED=true` behind HTTPS and secure cookies.

@@ -5,6 +5,7 @@ from typing import Any, Optional
 
 from app.core.config import settings
 from app.core.database import db_enabled
+from app.core.workspace import default_workspace_id
 from app.core.errors import (
     DuplicateUploadError,
     MalwareDetectedError,
@@ -39,8 +40,15 @@ class DocumentService:
         # Temp storage in tests should not write into the local graphmind.db.
         self.use_database = (storage is file_storage and db_enabled()) if use_database is None else use_database
 
-    def save_upload(self, filename: str, content: bytes, user_id: str = "local-dev") -> dict[str, Any]:
+    def save_upload(
+        self,
+        filename: str,
+        content: bytes,
+        user_id: str = "local-dev",
+        workspace_id: Optional[str] = None,
+    ) -> dict[str, Any]:
         safe_name, mime_type = self.validator.validate(filename or "upload", content)
+        scope = workspace_id or default_workspace_id(user_id)
         # Scan before save_file so unchecked bytes never touch storage.
         self._scan_for_malware(content)
 
@@ -50,6 +58,24 @@ class DocumentService:
             # Storage knows the duplicate by hash; the API only needs a stable
             # conflict shape it can turn into a nice "already uploaded" row.
             existing = exc.metadata
+            if self._db_available() and hasattr(self.repository, "get_by_hash"):
+                existing_in_scope = self.repository.get_by_hash(
+                    existing.get("file_hash", ""),
+                    user_id,
+                    scope,
+                )
+                if not existing_in_scope:
+                    # One physical copy can back document rows in several
+                    # research projects. Only the metadata row is duplicated.
+                    metadata = {
+                        **existing,
+                        "user_id": user_id,
+                        "workspace_id": scope,
+                        "original_filename": safe_name,
+                        "status": "uploaded",
+                    }
+                    self.repository.save_metadata(metadata)
+                    return metadata
             raise DuplicateUploadError(
                 details={
                     "existing_filename": existing.get("filename", ""),
@@ -61,23 +87,51 @@ class DocumentService:
             log.warning("Could not store uploaded file %s: %s", safe_name, exc)
             raise StorageOperationError(details={"filename": safe_name}) from exc
 
+        metadata["workspace_id"] = scope
         if self._db_available():
             self.repository.save_metadata(metadata)
         return metadata
 
-    def list_documents(self, user_id: Optional[str] = None) -> list[dict[str, Any]]:
+    def list_documents(
+        self,
+        user_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
         if self._db_available():
-            records = self.repository.list(user_id)
+            records = (
+                self.repository.list(user_id, workspace_id)
+                if workspace_id is not None
+                else self.repository.list(user_id)
+            )
             # If the DB has ever seen this user, it is the source of truth.
             # That keeps soft-deleted rows from reappearing through sidecars.
-            if records or self.repository.has_any(user_id):
+            has_any = (
+                self.repository.has_any(user_id, workspace_id)
+                if workspace_id is not None
+                else self.repository.has_any(user_id)
+            )
+            if records or has_any:
                 return records
         return self.storage.list_files(user_id)
 
-    def get_document(self, filename: str, user_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+    def get_document(
+        self,
+        filename: str,
+        user_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
         if self._db_available():
-            record = self.repository.get(filename, user_id)
-            if record or self.repository.has_record(filename, user_id):
+            record = (
+                self.repository.get(filename, user_id, workspace_id)
+                if workspace_id is not None
+                else self.repository.get(filename, user_id)
+            )
+            has_record = (
+                self.repository.has_record(filename, user_id, workspace_id)
+                if workspace_id is not None
+                else self.repository.has_record(filename, user_id)
+            )
+            if record or has_record:
                 return record
         return self.storage.get_file_info(filename, user_id)
 
@@ -85,43 +139,91 @@ class DocumentService:
         self,
         document_id: str,
         user_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> Optional[dict[str, Any]]:
         """Find a persisted document by ID while keeping storage lookup separate."""
         if not self._db_available() or not hasattr(self.repository, "get_by_id"):
             return None
-        return self.repository.get_by_id(document_id, user_id)
+        return (
+            self.repository.get_by_id(document_id, user_id, workspace_id)
+            if workspace_id is not None
+            else self.repository.get_by_id(document_id, user_id)
+        )
 
-    def delete_document(self, filename: str, user_id: Optional[str] = None) -> bool:
+    def delete_document(
+        self,
+        filename: str,
+        user_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+    ) -> bool:
         # A DB row can outlive its bytes after a storage reset or an old test
         # run. It should still be possible to remove that stale row from the UI.
-        database_record = self.repository.get(filename, user_id) if self._db_available() else None
+        database_record = None
+        if self._db_available():
+            database_record = (
+                self.repository.get(filename, user_id, workspace_id)
+                if workspace_id is not None
+                else self.repository.get(filename, user_id)
+            )
+
+        should_delete_storage = True
+        document_id = (database_record or {}).get("document_id") or filename
+        if database_record and hasattr(self.repository, "has_other_active_copy"):
+            should_delete_storage = not self.repository.has_other_active_copy(
+                database_record.get("file_hash", ""),
+                user_id or "local-dev",
+                exclude_document_id=document_id,
+            )
         try:
-            storage_deleted = self.storage.delete_file(filename, user_id)
+            storage_deleted = (
+                self.storage.delete_file(filename, user_id)
+                if should_delete_storage
+                else False
+            )
         except FileStorageError as exc:
             log.warning("Could not delete stored file %s: %s", filename, exc)
             raise StorageOperationError(details={"filename": filename}) from exc
 
         deleted = bool(storage_deleted or database_record)
         if deleted and user_id:
-            document_id = (database_record or {}).get("document_id") or filename
             if database_record:
-                self.repository.mark_deleted(filename, user_id)
+                if workspace_id is not None:
+                    self.repository.mark_deleted(filename, user_id, workspace_id)
+                else:
+                    self.repository.mark_deleted(filename, user_id)
             from app.services.parsed_artifact_repository import parsed_artifact_repository
             from app.services.graph_repository import graph_repository
 
-            self._cancel_document_jobs(document_id, user_id)
-            parsed_artifact_repository.delete_for_document(document_id, user_id=user_id)
-            graph_repository.delete_for_document(document_id, user_id)
+            self._cancel_document_jobs(document_id, user_id, workspace_id)
+            if workspace_id is not None:
+                parsed_artifact_repository.delete_for_document(
+                    document_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+                graph_repository.delete_for_document(document_id, user_id, workspace_id)
+            else:
+                parsed_artifact_repository.delete_for_document(document_id, user_id=user_id)
+                graph_repository.delete_for_document(document_id, user_id)
         return deleted
 
-    def _cancel_document_jobs(self, document_id: str, user_id: str) -> None:
+    def _cancel_document_jobs(
+        self,
+        document_id: str,
+        user_id: str,
+        workspace_id: Optional[str] = None,
+    ) -> None:
         """Leave a tombstone before asking Celery to stop the worker."""
         from app.core.celery_app import celery_app
         from app.services.job_repository import job_repository as default_job_repo
 
         jobs = self.job_repo or default_job_repo
         try:
-            active_jobs = jobs.list_for_document(document_id, user_id)
+            active_jobs = (
+                jobs.list_for_document(document_id, user_id, workspace_id=workspace_id)
+                if workspace_id is not None
+                else jobs.list_for_document(document_id, user_id)
+            )
         except Exception as exc:
             # The document is already marked deleted. A missing job-history
             # connection should not turn that successful delete into a 500.
@@ -136,16 +238,18 @@ class DocumentService:
             try:
                 # Store the tombstone first. A worker that cannot be killed
                 # still sees REVOKED on its next progress update.
-                jobs.upsert(
-                    job_id,
-                    user_id=user_id,
-                    document_id=document_id,
-                    original_filename=job.get("original_filename", ""),
-                    status="REVOKED",
-                    step="Cancelled: document deleted",
-                    progress=0,
-                    error="Document deleted",
-                )
+                values = {
+                    "user_id": user_id,
+                    "document_id": document_id,
+                    "original_filename": job.get("original_filename", ""),
+                    "status": "REVOKED",
+                    "step": "Cancelled: document deleted",
+                    "progress": 0,
+                    "error": "Document deleted",
+                }
+                if workspace_id is not None:
+                    values["workspace_id"] = workspace_id
+                jobs.upsert(job_id, **values)
             except Exception as exc:
                 log.warning("Could not mark job %s as revoked: %s", job_id, exc)
 

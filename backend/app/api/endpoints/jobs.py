@@ -22,6 +22,7 @@ def _user_id(user: UserRecord) -> str:
 
 class JobInfo(BaseModel):
     job_id: str
+    workspace_id: str | None = None
     document_id: str = ""
     original_filename: str = ""
     status: str
@@ -46,10 +47,18 @@ class WebSocketTicketResponse(BaseModel):
 @router.get("/", response_model=JobListResponse)
 async def list_jobs(
     limit: int = Query(default=50, ge=1, le=200),
+    workspace_id: str | None = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> JobListResponse:
     """Return recent background jobs for the current user."""
-    jobs = [JobInfo(**item) for item in job_repository.list(_user_id(user), limit=limit)]
+    if workspace_id is None:
+        rows = job_repository.list(_user_id(user), limit=limit)
+    else:
+        from app.api.workspace_scope import resolve_workspace_id
+
+        scope = resolve_workspace_id(_user_id(user), workspace_id)
+        rows = job_repository.list(_user_id(user), limit=limit, workspace_id=scope)
+    jobs = [JobInfo(**item) for item in rows]
     return JobListResponse(jobs=jobs, total=len(jobs))
 
 
@@ -57,11 +66,13 @@ async def list_jobs(
 async def create_ws_ticket(
     job_id: str,
     response: Response,
+    workspace_id: str | None = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> WebSocketTicketResponse:
     """Create the short-lived credential used by the job progress socket."""
     user_id = _user_id(user)
-    if not job_repository.get(job_id, user_id):
+    stored = _get_job(job_id, user_id, workspace_id)
+    if not stored:
         raise HTTPException(status_code=404, detail="Job not found")
 
     response.headers["Cache-Control"] = "no-store"
@@ -83,10 +94,11 @@ async def create_ws_ticket(
 @router.get("/{job_id}")
 async def get_job(
     job_id: str,
+    workspace_id: str | None = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> dict:
     """Return the same snapshot the upload UI receives over WebSocket."""
-    stored = job_repository.get(job_id, _user_id(user))
+    stored = _get_job(job_id, _user_id(user), workspace_id)
     if not stored:
         # Celery knows task ids, but it does not know which account owns them.
         # Do not let that global lookup become an access-control bypass.
@@ -114,10 +126,11 @@ async def get_job(
 @router.post("/{job_id}/cancel")
 async def cancel_job(
     job_id: str,
+    workspace_id: str | None = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> dict:
     """Ask Celery to stop a queued or running task."""
-    stored = job_repository.get(job_id, _user_id(user))
+    stored = _get_job(job_id, _user_id(user), workspace_id)
     if not stored:
         # Revoke is a global Celery operation, so it must never happen before
         # we know that this user owns the job id.
@@ -138,6 +151,18 @@ async def cancel_job(
             step="Cancelled",
             progress=0,
             error="Cancelled",
+            workspace_id=stored.get("workspace_id"),
         )
         return {"state": "REVOKED", "pct": 0, "step": "Cancelled", "error": "Cancelled"}
     return snapshot
+
+
+def _get_job(job_id: str, user_id: str, workspace_id: str | None = None):
+    """Validate a workspace only when the caller explicitly selected one."""
+    if workspace_id is None:
+        return job_repository.get(job_id, user_id)
+
+    from app.api.workspace_scope import resolve_workspace_id
+
+    scope = resolve_workspace_id(user_id, workspace_id)
+    return job_repository.get(job_id, user_id, scope)

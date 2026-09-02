@@ -1,12 +1,13 @@
 import logging
 import uuid
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from app.api.workspace_scope import normalize_workspace_id, resolve_workspace_id
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.documents_with_markdown import (
     clear_cached_parse,
@@ -55,6 +56,7 @@ class UploadResponse(BaseModel):
     file_hash: str
     status: str = "uploaded"
     job_id: str | None = None
+    workspace_id: str | None = None
 
 
 class DuplicateResponse(BaseModel):
@@ -74,6 +76,7 @@ class FileInfo(BaseModel):
     mime_type: str
     created_at: str
     modified_at: str
+    workspace_id: str | None = None
 
 
 class FileListResponse(BaseModel):
@@ -116,6 +119,7 @@ class ParsedDocumentSummary(BaseModel):
 async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    workspace_id: Optional[str] = Form(None),
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
     response: Response = None,
@@ -125,9 +129,17 @@ async def upload_document(
     `request` is only here because slowapi needs it for the rate-limit key.
     """
     content = await file.read()
+    user_id = _user_id(user)
+    requested_workspace_id = normalize_workspace_id(workspace_id)
+    scope = resolve_workspace_id(user_id, requested_workspace_id)
 
     try:
-        metadata = document_service.save_upload(file.filename or "upload", content, user_id=_user_id(user))
+        metadata = document_service.save_upload(
+            file.filename or "upload",
+            content,
+            user_id=user_id,
+            workspace_id=requested_workspace_id,
+        )
     except UploadValidationError as exc:
         # Keep upload failures machine-readable for the UI; raw exception text
         # alone is hard to branch on.
@@ -135,7 +147,7 @@ async def upload_document(
         raise UploadRejectedError(str(exc)) from exc
 
     record_upload("accepted", metadata["original_filename"], metadata["file_size"])
-    job_id = _queue_processing(background_tasks, metadata, _user_id(user))
+    job_id = _queue_processing(background_tasks, metadata, user_id, scope)
 
     return UploadResponse(
         filename=metadata["stored_filename"],
@@ -144,28 +156,41 @@ async def upload_document(
         file_type=metadata["file_type"],
         file_hash=metadata["file_hash"],
         job_id=job_id,
+        workspace_id=metadata.get("workspace_id") or scope,
     )
 
 
 @router.get("/", response_model=FileListResponse)
-async def list_documents(user: UserRecord = Depends(current_user_or_dev)) -> FileListResponse:
+async def list_documents(
+    workspace_id: Optional[str] = Query(None),
+    user: UserRecord = Depends(current_user_or_dev),
+) -> FileListResponse:
     """Return stored documents, newest first."""
-    files = [FileInfo(**item) for item in document_service.list_documents(_user_id(user))]
+    user_id = _user_id(user)
+    workspace_id = normalize_workspace_id(workspace_id)
+    resolve_workspace_id(user_id, workspace_id)
+    files = [
+        FileInfo(**item)
+        for item in document_service.list_documents(user_id, workspace_id=workspace_id)
+    ]
     return FileListResponse(files=files, total=len(files))
 
 
 @router.get("/{filename}/parsed", response_model=ParsedDocumentSummary)
 async def get_parsed_document(
     filename: str,
+    workspace_id: Optional[str] = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> ParsedDocumentSummary:
     """Return the cached parse summary for a stored file."""
-    metadata = document_service.get_document(filename, _user_id(user))
+    user_id = _user_id(user)
+    workspace_id = normalize_workspace_id(workspace_id)
+    resolve_workspace_id(user_id, workspace_id)
+    metadata = document_service.get_document(filename, user_id, workspace_id=workspace_id)
     if not metadata:
         raise HTTPException(status_code=404, detail="File not found")
 
-    user_id = _user_id(user)
-    parsed = get_cached_parse(filename, user_id)
+    parsed = get_cached_parse(filename, user_id, workspace_id)
     if not parsed:
         try:
             parsed = parse_document_file(
@@ -174,6 +199,7 @@ async def get_parsed_document(
                 metadata["original_filename"],
                 user_id=user_id,
                 document_id=metadata.get("document_id", ""),
+                workspace_id=workspace_id,
             )
         except Exception as exc:
             # Parsing can fail for format-specific reasons. Expose a stable
@@ -192,6 +218,7 @@ async def get_parsed_document(
             metadata["original_filename"],
             user_id=user_id,
             document_id=metadata.get("document_id", ""),
+            workspace_id=workspace_id,
         )
     return ParsedDocumentSummary(
         **document_summary(filename, parsed, metadata["original_filename"])
@@ -201,10 +228,14 @@ async def get_parsed_document(
 @router.get("/{filename}/open")
 async def open_document(
     filename: str,
+    workspace_id: Optional[str] = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> FileResponse:
     """Serve the original file without letting risky formats execute inline."""
-    metadata = document_service.get_document(filename, _user_id(user))
+    user_id = _user_id(user)
+    workspace_id = normalize_workspace_id(workspace_id)
+    resolve_workspace_id(user_id, workspace_id)
+    metadata = document_service.get_document(filename, user_id, workspace_id=workspace_id)
     if not metadata:
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -247,7 +278,13 @@ def _is_within(path: Path, root: Path) -> bool:
         return False
 
 
-def _queue_processing(background_tasks: BackgroundTasks, metadata: dict, user_id: str) -> str | None:
+def _queue_processing(
+    background_tasks: BackgroundTasks,
+    metadata: dict,
+    user_id: str,
+    workspace_id: Optional[str] = None,
+) -> str | None:
+    scope = workspace_id or metadata.get("workspace_id")
     if settings.CELERY_ENABLED:
         document_id = metadata.get("document_id") or metadata["stored_filename"]
         # Put the row in the database before the broker can wake a worker up.
@@ -259,6 +296,7 @@ def _queue_processing(background_tasks: BackgroundTasks, metadata: dict, user_id
             user_id=user_id,
             document_id=document_id,
             original_filename=metadata["original_filename"],
+            workspace_id=scope,
         )
 
         try:
@@ -285,6 +323,7 @@ def _queue_processing(background_tasks: BackgroundTasks, metadata: dict, user_id
                     step="Queue failed",
                     progress=0,
                     error=failure_message,
+                    workspace_id=scope,
                 )
             except Exception:
                 log.exception("Could not record failed processing job %s", job_id)
@@ -298,6 +337,7 @@ def _queue_processing(background_tasks: BackgroundTasks, metadata: dict, user_id
         metadata["original_filename"],
         user_id,
         metadata.get("document_id", ""),
+        workspace_id=scope,
     )
     return None
 
@@ -305,10 +345,14 @@ def _queue_processing(background_tasks: BackgroundTasks, metadata: dict, user_id
 @router.get("/{filename}", response_model=FileInfo)
 async def get_document(
     filename: str,
+    workspace_id: Optional[str] = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> FileInfo:
     """Return metadata for one stored document."""
-    metadata = document_service.get_document(filename, _user_id(user))
+    user_id = _user_id(user)
+    workspace_id = normalize_workspace_id(workspace_id)
+    resolve_workspace_id(user_id, workspace_id)
+    metadata = document_service.get_document(filename, user_id, workspace_id=workspace_id)
     if not metadata:
         raise HTTPException(status_code=404, detail="File not found")
     return FileInfo(**metadata)
@@ -317,10 +361,14 @@ async def get_document(
 @router.delete("/{filename}")
 async def delete_document(
     filename: str,
+    workspace_id: Optional[str] = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> dict[str, str]:
     """Delete a stored document by its stored filename."""
-    if not document_service.delete_document(filename, _user_id(user)):
+    user_id = _user_id(user)
+    workspace_id = normalize_workspace_id(workspace_id)
+    resolve_workspace_id(user_id, workspace_id)
+    if not document_service.delete_document(filename, user_id, workspace_id=workspace_id):
         raise HTTPException(status_code=404, detail="File not found")
-    clear_cached_parse(filename, _user_id(user))
+    clear_cached_parse(filename, user_id, workspace_id=workspace_id)
     return {"message": "File deleted"}

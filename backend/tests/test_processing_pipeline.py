@@ -107,8 +107,11 @@ class FakePipeline:
         on_progress=None,
         document_id=None,
         should_cancel=None,
+        workspace_id=None,
     ):
         self.calls.append((file_path, filename, original_filename))
+        self.workspace_ids = getattr(self, "workspace_ids", [])
+        self.workspace_ids.append(workspace_id)
         if should_cancel and should_cancel():
             raise ProcessingCancelledError("Document was deleted while reindexing")
         if filename in self.fail_for:
@@ -116,6 +119,24 @@ class FakePipeline:
         if on_progress:
             on_progress("Done", 100)
         return {"filename": filename, "status": "indexed"}
+
+
+def test_process_document_passes_job_workspace_to_pipeline(monkeypatch):
+    fake_pipeline = FakePipeline()
+    monkeypatch.setattr(task_module, "pipeline", fake_pipeline)
+    monkeypatch.setattr(task_module, "_job_workspace", lambda task, user_id: "workspace-a")
+    monkeypatch.setattr(task_module, "_job_revoked", lambda *args: False)
+
+    result = task_module.process_document.run(
+        "/tmp/hash.md",
+        "document-1",
+        "notes.md",
+        "user-1",
+        "hash.md",
+    )
+
+    assert result == {"filename": "hash.md", "status": "indexed"}
+    assert fake_pipeline.workspace_ids == ["workspace-a"]
 
 
 def test_reindex_document_uses_stored_metadata(monkeypatch):

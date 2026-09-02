@@ -8,6 +8,7 @@ import logging
 import time
 from typing import Any, Callable, Optional
 
+from app.core.workspace import default_workspace_id
 from app.services.entity_extractor import EntityExtractor, entity_extractor
 from app.services.graph_builder_enhanced import KnowledgeGraph, knowledge_graph
 from app.services.graph_repository import GraphRepository, graph_repository
@@ -70,6 +71,7 @@ class ProcessingPipeline:
         on_progress: Optional[ProgressCallback] = None,
         document_id: Optional[str] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
+        workspace_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """Process a stored file and return a compact summary.
 
@@ -82,13 +84,14 @@ class ProcessingPipeline:
 
         try:
             self._progress(on_progress, "Parsing document", 15, should_cancel)
-            file_path = self._local_file_path(filename, file_path, user_id)
+            file_path = self._local_file_path(filename, file_path, user_id, workspace_id)
             parsed = self._parse_document(
                 filename,
                 file_path,
                 original_filename,
                 user_id,
                 stable_document_id,
+                workspace_id,
             )
 
             self._progress(on_progress, "Extracting entities", 40, should_cancel)
@@ -118,6 +121,7 @@ class ProcessingPipeline:
                 user_id=user_id,
                 document_id=stable_document_id,
                 graph=document_graph.export_detailed(),
+                workspace_id=workspace_id or default_workspace_id(user_id),
             )
             graph_stats = self.graph.get_stats()
 
@@ -182,6 +186,7 @@ class ProcessingPipeline:
         original_filename: str,
         user_id: str,
         document_id: str,
+        workspace_id: Optional[str] = None,
     ) -> dict[str, Any]:
         # This helper still lives next to the document routes. Lazy import keeps
         # the service callable from the routes without tying the files in a knot.
@@ -193,13 +198,24 @@ class ProcessingPipeline:
             original_filename,
             user_id=user_id,
             document_id=document_id,
+            workspace_id=workspace_id,
         )
 
-    def _local_file_path(self, filename: str, file_path: str, user_id: str) -> str:
+    def _local_file_path(
+        self,
+        filename: str,
+        file_path: str,
+        user_id: str,
+        workspace_id: Optional[str] = None,
+    ) -> str:
         try:
             from app.services.document_service import document_service
 
-            metadata = document_service.get_document(filename, user_id)
+            metadata = (
+                document_service.get_document(filename, user_id, workspace_id)
+                if workspace_id is not None
+                else document_service.get_document(filename, user_id)
+            )
             if not metadata:
                 return file_path
             return str(document_service.storage.ensure_local_file(metadata))
@@ -216,6 +232,7 @@ def process_uploaded_document(
     original_filename: str = "",
     user_id: str = "local-dev",
     document_id: str = "",
+    workspace_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Background-task friendly wrapper used after upload."""
     return pipeline.process(
@@ -224,6 +241,7 @@ def process_uploaded_document(
         original_filename,
         user_id=user_id,
         document_id=document_id or filename,
+        workspace_id=workspace_id,
     )
 
 
