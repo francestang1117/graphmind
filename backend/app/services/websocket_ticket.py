@@ -14,6 +14,11 @@ from app.core.config import settings
 log = logging.getLogger(__name__)
 
 JOB_WS_TICKET_TTL_SECONDS = 60
+_LOCAL_ENVIRONMENTS = {"development", "test"}
+
+
+class WebSocketTicketStoreUnavailable(RuntimeError):
+    """Raised when Redis is required but cannot store or consume a ticket."""
 
 
 @dataclass
@@ -31,8 +36,39 @@ async def _redis_client():
         import redis.asyncio as aioredis
 
         return aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-    except Exception:
+    except Exception as exc:
+        log.warning("Redis client is unavailable for WebSocket tickets: %s", exc)
         return None
+
+
+def _memory_fallback_allowed() -> bool:
+    """Keep the in-process fallback limited to local and test runs."""
+    return (
+        settings.WEBSOCKET_TICKET_MEMORY_FALLBACK
+        and settings.ENVIRONMENT.strip().lower() in _LOCAL_ENVIRONMENTS
+    )
+
+
+def _memory_ticket(ticket: str, job_id: str, user_id: str) -> str:
+    """Keep local development usable when Redis is not running."""
+    now = datetime.now(timezone.utc)
+    _memory_tickets.update(
+        {
+            key: record
+            for key, record in _memory_tickets.items()
+            if record.expires_at > now
+        }
+    )
+    _memory_tickets[(ticket, job_id)] = _MemoryTicket(
+        user_id=user_id,
+        expires_at=now + timedelta(seconds=JOB_WS_TICKET_TTL_SECONDS),
+    )
+    return ticket
+
+
+def _raise_store_unavailable(exc: Exception | None = None) -> None:
+    message = "Redis is required for WebSocket ticket authentication"
+    raise WebSocketTicketStoreUnavailable(message) from exc
 
 
 def _redis_key(ticket: str, job_id: str) -> str:
@@ -49,35 +85,28 @@ async def issue_job_ws_ticket(job_id: str, user_id: str) -> str:
     ticket = secrets.token_urlsafe(32)
     client = await _redis_client()
 
-    if client:
-        try:
-            await client.setex(
-                _redis_key(ticket, job_id),
-                JOB_WS_TICKET_TTL_SECONDS,
-                _payload(user_id, job_id),
-            )
-            return ticket
-        except Exception as exc:
-            log.warning("Redis WebSocket ticket storage failed; using local fallback: %s", exc)
-        finally:
-            try:
-                await client.aclose()
-            except Exception:
-                pass
+    if client is None:
+        if _memory_fallback_allowed():
+            return _memory_ticket(ticket, job_id, user_id)
+        _raise_store_unavailable()
 
-    now = datetime.now(timezone.utc)
-    _memory_tickets.update(
-        {
-            key: record
-            for key, record in _memory_tickets.items()
-            if record.expires_at > now
-        }
-    )
-    _memory_tickets[(ticket, job_id)] = _MemoryTicket(
-        user_id=user_id,
-        expires_at=now + timedelta(seconds=JOB_WS_TICKET_TTL_SECONDS),
-    )
-    return ticket
+    try:
+        await client.setex(
+            _redis_key(ticket, job_id),
+            JOB_WS_TICKET_TTL_SECONDS,
+            _payload(user_id, job_id),
+        )
+        return ticket
+    except Exception as exc:
+        log.warning("Redis WebSocket ticket storage failed: %s", exc)
+        if _memory_fallback_allowed():
+            return _memory_ticket(ticket, job_id, user_id)
+        _raise_store_unavailable(exc)
+    finally:
+        try:
+            await client.aclose()
+        except Exception:
+            pass
 
 
 async def consume_job_ws_ticket(ticket: str, job_id: str) -> str | None:
@@ -86,7 +115,10 @@ async def consume_job_ws_ticket(ticket: str, job_id: str) -> str | None:
         return None
 
     client = await _redis_client()
-    if client:
+    if client is None:
+        if not _memory_fallback_allowed():
+            _raise_store_unavailable()
+    else:
         try:
             # GETDEL makes two tabs race safely: only one receives the value.
             raw = await client.getdel(_redis_key(ticket, job_id))
@@ -97,7 +129,9 @@ async def consume_job_ws_ticket(ticket: str, job_id: str) -> str | None:
                 return None
             return data.get("user_id")
         except Exception as exc:
-            log.warning("Redis WebSocket ticket lookup failed; using local fallback: %s", exc)
+            log.warning("Redis WebSocket ticket lookup failed: %s", exc)
+            if not _memory_fallback_allowed():
+                _raise_store_unavailable(exc)
         finally:
             try:
                 await client.aclose()

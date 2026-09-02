@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     REFRESH_COOKIE_SAMESITE: str = "lax"
     BCRYPT_ROUNDS: int = 12
     REDIS_URL: str = "redis://localhost:6379/0"
+    # Only enable this in a single-process local setup. Production needs Redis
+    # because the API and WebSocket connection may land on different workers.
+    WEBSOCKET_TICKET_MEMORY_FALLBACK: bool = False
     AUTH_REQUIRED: bool = False
     GITHUB_OAUTH_CLIENT_ID: str = ""
     GITHUB_OAUTH_CLIENT_SECRET: str = ""

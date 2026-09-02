@@ -1,13 +1,17 @@
 """HTTP access to background job state."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.websocket import task_snapshot
 from app.core.celery_app import celery_app
 from app.services.job_repository import job_repository
-from app.services.websocket_ticket import JOB_WS_TICKET_TTL_SECONDS, issue_job_ws_ticket
+from app.services.websocket_ticket import (
+    JOB_WS_TICKET_TTL_SECONDS,
+    WebSocketTicketStoreUnavailable,
+    issue_job_ws_ticket,
+)
 
 router = APIRouter()
 
@@ -61,7 +65,15 @@ async def create_ws_ticket(
         raise HTTPException(status_code=404, detail="Job not found")
 
     response.headers["Cache-Control"] = "no-store"
-    ticket = await issue_job_ws_ticket(job_id, user_id)
+    try:
+        ticket = await issue_job_ws_ticket(job_id, user_id)
+    except WebSocketTicketStoreUnavailable as exc:
+        # A ticket must be shared by the API and WebSocket instances.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="WebSocket progress is temporarily unavailable",
+            headers={"Retry-After": "5"},
+        ) from exc
     return WebSocketTicketResponse(
         ticket=ticket,
         expires_in=JOB_WS_TICKET_TTL_SECONDS,

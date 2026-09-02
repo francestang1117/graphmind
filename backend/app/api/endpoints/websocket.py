@@ -10,7 +10,10 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.api.endpoints.auth import _ensure_dev_user, _user_from_id
 from app.core.config import settings
 from app.services.job_repository import job_repository
-from app.services.websocket_ticket import consume_job_ws_ticket
+from app.services.websocket_ticket import (
+    WebSocketTicketStoreUnavailable,
+    consume_job_ws_ticket,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -20,7 +23,12 @@ _TERMINAL_JOB_STATES = {"SUCCESS", "FAILURE", "REVOKED", "ERROR"}
 @router.websocket("/ws/jobs/{job_id}")
 async def job_progress_ws(websocket: WebSocket, job_id: str):
     """Stream a job only after authenticating and checking its owner."""
-    user = await _websocket_user(websocket, job_id)
+    try:
+        user = await _websocket_user(websocket, job_id)
+    except WebSocketTicketStoreUnavailable:
+        log.warning("WebSocket ticket store unavailable for job %s", job_id)
+        await websocket.close(code=1013, reason="Try again later")
+        return
     if user is None:
         await websocket.close(code=1008, reason="Authentication required")
         return

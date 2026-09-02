@@ -12,11 +12,15 @@ From the project root:
 PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
 
-Expected current result:
+The exact count can change as tests are added. The current local result is:
 
 ```text
-156 passed
+210 passed, 1 skipped
 ```
+
+The skipped test is the PostgreSQL migration check when
+`GRAPHMIND_TEST_POSTGRES_URL` is not set. GitHub Actions supplies PostgreSQL 16
+and runs that test explicitly.
 
 If you are starting from a fresh environment:
 
@@ -69,6 +73,20 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests -x
 # Show print/log output
 PYTHONPATH=backend .venv/bin/python -m pytest backend/tests -s
 ```
+
+## PostgreSQL Migration Test
+
+Run the database service from Docker Compose, then point only this test at it:
+
+```bash
+docker compose up -d postgres
+GRAPHMIND_TEST_POSTGRES_URL=postgresql+psycopg://graphmind:graphmind@localhost:5433/graphmind \
+  PYTHONPATH=backend .venv/bin/python -m pytest backend/tests/test_database_migrations.py
+```
+
+Compose uses host port `5433` by default so it can coexist with a local
+PostgreSQL installation. If `POSTGRES_PORT` is changed, use the same port in
+the connection URL.
 
 ## Useful Manual Checks
 
@@ -149,6 +167,9 @@ parsed, open, and delete endpoints with the stored filename.
   responses; a real EICAR test still requires the Docker ClamAV service.
 - WebSocket progress is implemented on the backend. Upload returns `job_id`
   when `CELERY_ENABLED=true`; local background-task mode still returns `null`.
+- WebSocket tickets use Redis when available. The in-memory fallback requires
+  both `WEBSOCKET_TICKET_MEMORY_FALLBACK=true` and a `development` or `test`
+  environment; production returns `503` when Redis cannot be reached.
 - Job controls are covered by backend tests. For a manual browser check, upload
   a larger file with Celery enabled, cancel the active row, then retry it from
   the same row.

@@ -16,6 +16,8 @@ _TEST_ROOT = Path(tempfile.mkdtemp(prefix="graphmind-pytest-"))
 _TEST_DB = _TEST_ROOT / "graphmind.sqlite3"
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
 os.environ["UPLOAD_DIR"] = str(_TEST_ROOT / "uploads")
+# Keep no-Redis ticket tests explicit; production cases override the environment.
+os.environ["WEBSOCKET_TICKET_MEMORY_FALLBACK"] = "true"
 
 
 @pytest.fixture(scope="session", autouse=True)

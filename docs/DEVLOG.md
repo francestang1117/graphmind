@@ -1174,6 +1174,31 @@ I added coverage for ticket binding, one-time use, unknown jobs, and rejection
 of the old access-token query parameter. The API reference now documents the
 two-step handshake.
 
+## 2026-09 — Redis Ticket Failure Boundary
+
+The ticket fallback was useful when developing without Redis, but it was too
+quiet about the limit of that approach. In a multi-process deployment, a ticket
+kept in one API process cannot be consumed by another process.
+
+The fallback is now controlled by `WEBSOCKET_TICKET_MEMORY_FALLBACK` and only
+works when `ENVIRONMENT` is `development` or `test`. When Redis is unavailable
+outside those environments, the HTTP ticket endpoint returns `503` with a short
+retry hint. A WebSocket handshake closes with `1013` so the client knows this is
+a temporary service problem rather than a bad ticket.
+
+The test suite covers both the local fallback and the production failure path.
+
+## 2026-09 — PostgreSQL Migration Test in CI
+
+The PostgreSQL migration regression test used to be skipped unless a developer
+set `GRAPHMIND_TEST_POSTGRES_URL` by hand. That left the most database-specific
+part of the upgrade path outside the normal check run.
+
+GitHub Actions now starts PostgreSQL 16, runs the migration test explicitly,
+and then runs the full backend suite with the same connection available. Local
+runs can still use the isolated SQLite fixture; the PostgreSQL test remains
+opt-in so it does not connect to a developer's database by accident.
+
 ## 2026-09 — Scraper Address Boundary
 
 The scraper already checked private, loopback, and link-local addresses, but

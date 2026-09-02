@@ -179,6 +179,34 @@ def test_ws_ticket_requires_the_owned_job_and_returns_short_lived_ticket(monkeyp
     assert response.headers["cache-control"] == "no-store"
 
 
+def test_ws_ticket_returns_503_when_redis_is_unavailable_in_production(monkeypatch):
+    async def no_redis():
+        return None
+
+    monkeypatch.setattr("app.services.websocket_ticket._redis_client", no_redis)
+    monkeypatch.setattr("app.services.websocket_ticket.settings.ENVIRONMENT", "production")
+    jobs = FakeJobRepository({
+        "job_id": "job-1",
+        "document_id": "doc-1",
+        "original_filename": "notes.md",
+        "status": "PROGRESS",
+        "step": "Parsing",
+        "progress": 25,
+        "error": "",
+        "created_at": "",
+        "updated_at": "",
+        "finished_at": None,
+    })
+    client = _client(monkeypatch, FakeCelery())
+    monkeypatch.setattr("app.api.endpoints.jobs.job_repository", jobs)
+
+    response = client.post("/api/v1/jobs/job-1/ws-ticket")
+
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == "5"
+    assert response.json()["detail"] == "WebSocket progress is temporarily unavailable"
+
+
 def test_ws_ticket_does_not_query_celery_for_unknown_job(monkeypatch):
     fake = FakeCelery()
     client = _client(monkeypatch, fake)

@@ -35,6 +35,8 @@ class FakeWebSocket:
     def __init__(self) -> None:
         self.accepted = False
         self.closed = False
+        self.close_code = None
+        self.close_reason = None
         self.messages: list[dict] = []
         self.query_params = {}
 
@@ -46,6 +48,8 @@ class FakeWebSocket:
 
     async def close(self, *args, **kwargs) -> None:
         self.closed = True
+        self.close_code = args[0] if args else kwargs.get("code")
+        self.close_reason = kwargs.get("reason")
 
 
 def test_task_snapshot_formats_progress_and_success():
@@ -161,6 +165,22 @@ def test_websocket_does_not_accept_access_token_query(monkeypatch):
 
     assert websocket.accepted is False
     assert websocket.closed is True
+
+
+def test_websocket_rejects_redis_failure_outside_local_environment(monkeypatch):
+    async def no_redis():
+        return None
+
+    monkeypatch.setattr("app.services.websocket_ticket._redis_client", no_redis)
+    monkeypatch.setattr("app.services.websocket_ticket.settings.ENVIRONMENT", "production")
+    websocket = FakeWebSocket()
+    websocket.query_params = {"ticket": "short-lived-ticket"}
+
+    asyncio.run(job_progress_ws(websocket, "job-123"))
+
+    assert websocket.accepted is False
+    assert websocket.closed is True
+    assert websocket.close_code == 1013
 
 
 class _FakeJobRepository:
