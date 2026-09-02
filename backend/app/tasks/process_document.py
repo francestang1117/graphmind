@@ -7,7 +7,7 @@ from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.services.document_service import document_service
 from app.services.job_repository import job_repository
-from app.services.pipeline import pipeline
+from app.services.pipeline import ProcessingCancelledError, pipeline
 
 
 log = logging.getLogger(__name__)
@@ -17,39 +17,52 @@ log = logging.getLogger(__name__)
 def process_document(
     self,
     file_path: str,
-    filename: str = "",
+    document_id: str = "",
     original_filename: str = "",
     user_id: str = "",
+    stored_filename: str = "",
 ) -> Dict[str, Any]:
-    document_id = filename or file_path.rsplit("/", 1)[-1]
-    display_name = original_filename or filename or ""
-    # The upload route creates the first row, but the worker owns the live
-    # status from here on.
-    _progress(self, 5, "Queued document pipeline", user_id, document_id, display_name)
+    stable_document_id = document_id or file_path.rsplit("/", 1)[-1]
+    stored_name = stored_filename or document_id or file_path.rsplit("/", 1)[-1]
+    display_name = original_filename or stored_name or ""
+    owner_id = user_id or "local-dev"
     try:
+        # The upload route creates the first row, but the worker owns the live
+        # status from here on.
+        _progress(self, 5, "Queued document pipeline", owner_id, stable_document_id, display_name)
         result = pipeline.process(
             file_path,
-            document_id,
+            stored_name,
             display_name,
-            user_id=user_id or "local-dev",
+            user_id=owner_id,
+            document_id=stable_document_id,
             on_progress=lambda step, pct: _progress(
                 self,
                 pct,
                 step,
-                user_id,
-                document_id,
+                owner_id,
+                stable_document_id,
                 display_name,
             ),
+            should_cancel=lambda: _job_was_revoked(self, owner_id),
         )
-        _progress(self, 100, "Done", user_id, document_id, display_name, status="SUCCESS")
+        _progress(self, 100, "Done", owner_id, stable_document_id, display_name, status="SUCCESS")
         return result
+    except ProcessingCancelledError:
+        log.info("Skipping the rest of deleted document job %s", getattr(self.request, "id", ""))
+        _set_revoked_state(self)
+        return {
+            "filename": stored_name,
+            "document_id": stable_document_id,
+            "status": "cancelled",
+        }
     except Exception as exc:
         _progress(
             self,
             100,
             "Failed",
-            user_id,
-            document_id,
+            owner_id,
+            stable_document_id,
             display_name,
             status="FAILURE",
             error=str(exc),
@@ -71,47 +84,60 @@ def reindex_document(
         log.warning("Could not reindex missing document %s", filename)
         return {"filename": filename, "status": "not_found"}
 
-    _progress(
-        self,
-        5,
-        "Queued document reindex",
-        user_id or metadata.get("user_id", ""),
-        filename,
-        metadata.get("original_filename", filename),
-    )
+    owner_id = user_id or metadata.get("user_id", "local-dev")
+    stable_document_id = metadata.get("document_id") or metadata["filename"]
+    stored_filename = metadata.get("stored_filename") or metadata["filename"]
     try:
+        _progress(
+            self,
+            5,
+            "Queued document reindex",
+            owner_id,
+            stable_document_id,
+            metadata.get("original_filename", stored_filename),
+        )
         result = pipeline.process(
             metadata["file_path"],
-            metadata["filename"],
+            stored_filename,
             metadata.get("original_filename", metadata["filename"]),
-            user_id=user_id or metadata.get("user_id", "local-dev"),
+            user_id=owner_id,
+            document_id=stable_document_id,
             on_progress=lambda step, pct: _progress(
                 self,
                 pct,
                 step,
-                user_id or metadata.get("user_id", ""),
-                filename,
-                metadata.get("original_filename", filename),
+                owner_id,
+                stable_document_id,
+                metadata.get("original_filename", stored_filename),
             ),
+            should_cancel=lambda: _job_was_revoked(self, owner_id),
         )
         _progress(
             self,
             100,
             "Done",
-            user_id or metadata.get("user_id", ""),
-            filename,
-            metadata.get("original_filename", filename),
+            owner_id,
+            stable_document_id,
+            metadata.get("original_filename", stored_filename),
             status="SUCCESS",
         )
         return result
+    except ProcessingCancelledError:
+        log.info("Skipping the rest of deleted document reindex job %s", getattr(self.request, "id", ""))
+        _set_revoked_state(self)
+        return {
+            "filename": stored_filename,
+            "document_id": stable_document_id,
+            "status": "cancelled",
+        }
     except Exception as exc:
         _progress(
             self,
             100,
             "Failed",
-            user_id or metadata.get("user_id", ""),
-            filename,
-            metadata.get("original_filename", filename),
+            owner_id,
+            stable_document_id,
+            metadata.get("original_filename", stored_filename),
             status="FAILURE",
             error=str(exc),
         )
@@ -133,17 +159,22 @@ def reindex_all_documents(
     for index, metadata in enumerate(documents, start=1):
         filename = metadata["filename"]
         original = metadata.get("original_filename", filename)
+        owner_id = user_id or metadata.get("user_id", "local-dev")
+        stable_document_id = metadata.get("document_id") or filename
+        stored_filename = metadata.get("stored_filename") or filename
         # Batch progress is file-count based. It is rough, but it keeps the
         # maintenance task readable without pretending we know each file's cost.
         pct = 5 + int((index - 1) / max(total, 1) * 90)
-        _progress(self, pct, f"Reindexing {original}", user_id or "", filename, original)
+        _progress(self, pct, f"Reindexing {original}", owner_id, stable_document_id, original)
         try:
             results.append(
                 pipeline.process(
                     metadata["file_path"],
-                    filename,
+                    stored_filename,
                     original,
-                    user_id=user_id or metadata.get("user_id", "local-dev"),
+                    user_id=owner_id,
+                    document_id=stable_document_id,
+                    should_cancel=lambda: not document_service.get_document(filename, owner_id),
                 )
             )
         except Exception as exc:
@@ -191,6 +222,8 @@ def _progress(
         job_id = getattr(request, "id", "") or ""
 
     if job_id:
+        if _job_was_revoked(task, user_id):
+            raise ProcessingCancelledError("Document job was revoked")
         # Keep our DB copy close to Celery's state. The WebSocket is live-only;
         # this row is what survives refreshes and result-backend expiry.
         job_repository.upsert(
@@ -209,3 +242,20 @@ def _progress(
             return
         # Celery's result backend feeds the WebSocket path.
         update_state(state=status, meta={"pct": pct, "step": step, "error": error})
+
+
+def _job_was_revoked(task, user_id: str) -> bool:
+    """Read the database tombstone between worker stages."""
+    request = getattr(task, "request", None)
+    job_id = getattr(request, "id", "") if request is not None else ""
+    checker = getattr(job_repository, "is_revoked", None)
+    return bool(job_id and checker and checker(job_id, user_id))
+
+
+def _set_revoked_state(task) -> None:
+    """Keep Celery's live result in step with the persisted cancellation."""
+    update_state = getattr(task, "update_state", None)
+    request = getattr(task, "request", None)
+    if not update_state or (request is not None and not getattr(request, "id", None)):
+        return
+    update_state(state="REVOKED", meta={"pct": 0, "step": "Cancelled", "error": "Document deleted"})

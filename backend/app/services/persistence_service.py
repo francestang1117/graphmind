@@ -8,6 +8,7 @@ grow without forcing a risky rewrite of upload/search/graph in one pass.
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -147,17 +148,37 @@ def save_document_record(metadata: dict[str, Any]) -> None:
     if not db_enabled():
         return
 
+    from sqlalchemy import select
     from app.models.persistence import DocumentRecord
 
-    record_id = metadata.get("stored_filename") or metadata["filename"]
+    user_id = str(metadata.get("user_id") or "local-dev")
+    document_id = str(metadata.get("document_id") or "")
+    file_hash = str(metadata.get("file_hash") or "")
     with SessionLocal() as db:  # type: ignore[misc]
-        existing = db.get(DocumentRecord, record_id)
+        existing = None
+        if document_id:
+            existing = db.scalars(
+                select(DocumentRecord).where(
+                    DocumentRecord.id == document_id,
+                    DocumentRecord.user_id == user_id,
+                )
+            ).first()
+        if not existing and file_hash:
+            existing = db.scalars(
+                select(DocumentRecord).where(
+                    DocumentRecord.user_id == user_id,
+                    DocumentRecord.file_hash == file_hash,
+                )
+            ).first()
+
         values = _document_values(metadata)
         if existing:
             for key, value in values.items():
                 setattr(existing, key, value)
         else:
-            db.add(DocumentRecord(id=record_id, **values))
+            existing = DocumentRecord(id=uuid.uuid4().hex, **values)
+            db.add(existing)
+        metadata["document_id"] = existing.id
         db.commit()
 
 
@@ -166,11 +187,17 @@ def mark_document_deleted(filename: str, user_id: str) -> None:
     if not db_enabled():
         return
 
+    from sqlalchemy import select
     from app.models.persistence import DocumentRecord
 
     with SessionLocal() as db:  # type: ignore[misc]
-        record = db.get(DocumentRecord, filename)
-        if record and record.user_id == user_id:
+        record = db.scalars(
+            select(DocumentRecord).where(
+                DocumentRecord.filename == filename,
+                DocumentRecord.user_id == user_id,
+            )
+        ).first()
+        if record:
             record.deleted_at = datetime.now(timezone.utc)
             db.commit()
 

@@ -102,6 +102,11 @@ export interface JobHistoryItem {
   finished_at?: string | null;
 }
 
+export interface WebSocketTicketResponse {
+  ticket: string;
+  expires_in: number;
+}
+
 export interface GraphNode {
   id: string;
   label: string;
@@ -217,12 +222,21 @@ export const uploadDocument = (
     .then((r) => r.data);
 };
 
-export function watchJobProgress(
+export const createJobWebSocketTicket = (jobId: string): Promise<WebSocketTicketResponse> =>
+  http
+    .post<WebSocketTicketResponse>(`/jobs/${encodeURIComponent(jobId)}/ws-ticket`)
+    .then((r) => r.data);
+
+export async function watchJobProgress(
   jobId: string,
   onProgress: (progress: JobProgress) => void,
 ) {
+  const { ticket } = await createJobWebSocketTicket(jobId);
+
   return new Promise<JobProgress>((resolve, reject) => {
-    const ws = new WebSocket(`${toWsBase(API_BASE)}/ws/jobs/${encodeURIComponent(jobId)}`);
+    const ws = new WebSocket(
+      `${toWsBase(API_BASE)}/ws/jobs/${encodeURIComponent(jobId)}?ticket=${encodeURIComponent(ticket)}`,
+    );
 
     ws.onmessage = (event) => {
       const progress = JSON.parse(event.data) as JobProgress;

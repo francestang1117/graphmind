@@ -23,6 +23,10 @@ class PipelineError(RuntimeError):
     """Raised when one document cannot finish the processing pipeline."""
 
 
+class ProcessingCancelledError(RuntimeError):
+    """Raised when a document was deleted while its worker was running."""
+
+
 @dataclass
 class PipelineResult:
     filename: str
@@ -64,6 +68,8 @@ class ProcessingPipeline:
         original_filename: str = "",
         user_id: str = "local-dev",
         on_progress: Optional[ProgressCallback] = None,
+        document_id: Optional[str] = None,
+        should_cancel: Optional[Callable[[], bool]] = None,
     ) -> dict[str, Any]:
         """Process a stored file and return a compact summary.
 
@@ -72,38 +78,55 @@ class ProcessingPipeline:
         """
         started_at = time.time()
         display_name = original_filename or filename
+        stable_document_id = document_id or filename
 
         try:
-            self._progress(on_progress, "Parsing document", 15)
+            self._progress(on_progress, "Parsing document", 15, should_cancel)
             file_path = self._local_file_path(filename, file_path, user_id)
-            parsed = self._parse_document(filename, file_path, original_filename)
+            parsed = self._parse_document(
+                filename,
+                file_path,
+                original_filename,
+                user_id,
+                stable_document_id,
+            )
 
-            self._progress(on_progress, "Extracting entities", 40)
+            self._progress(on_progress, "Extracting entities", 40, should_cancel)
             entities = self.extractor.extract_from_parsed_document(parsed)
 
-            self._progress(on_progress, "Finding relationships", 60)
+            self._progress(on_progress, "Finding relationships", 60, should_cancel)
             relations = self.extractor.extract_relations(entities, parsed.get("content", ""))
 
-            self._progress(on_progress, "Updating graph", 75)
-            self.graph.add_document(display_name, entities, relations, document_id=f"doc:{filename}")
+            self._progress(on_progress, "Updating graph", 75, should_cancel)
+            self.graph.add_document(
+                display_name,
+                entities,
+                relations,
+                document_id=f"doc:{stable_document_id}",
+            )
             # The global graph keeps the current process feeling live. This
             # smaller graph is just the current file's slice, which is what the
             # DB needs for clean reindex/delete behavior.
             document_graph = KnowledgeGraph()
-            document_graph.add_document(display_name, entities, relations, document_id=f"doc:{filename}")
+            document_graph.add_document(
+                display_name,
+                entities,
+                relations,
+                document_id=f"doc:{stable_document_id}",
+            )
             self.graph_repo.replace_document_graph(
                 user_id=user_id,
-                document_id=filename,
+                document_id=stable_document_id,
                 graph=document_graph.export_detailed(),
             )
             graph_stats = self.graph.get_stats()
 
-            self._progress(on_progress, "Indexing chunks", 90)
+            self._progress(on_progress, "Indexing chunks", 90, should_cancel)
             # Search uses the same chunks the parser saved. Indexing here keeps
             # a fresh upload searchable before the user refreshes the page.
             indexed_chunks = self.store.add_chunks(parsed.get("chunks", []), display_name)
 
-            self._progress(on_progress, "Done", 100)
+            self._progress(on_progress, "Done", 100, should_cancel)
             result = PipelineResult(
                 filename=filename,
                 original_filename=display_name,
@@ -126,13 +149,24 @@ class ProcessingPipeline:
                 result.relations_count,
             )
             return result.to_dict()
+        except ProcessingCancelledError:
+            log.info("Document processing stopped after deletion: %s", display_name)
+            raise
         except Exception as exc:
             log.exception("Document processing failed for %s", display_name)
             self._progress(on_progress, "Failed", 100)
             record_pipeline("failed", "", time.time() - started_at)
             raise PipelineError(f"Could not process {display_name}: {exc}") from exc
 
-    def _progress(self, callback: Optional[ProgressCallback], step: str, pct: int) -> None:
+    def _progress(
+        self,
+        callback: Optional[ProgressCallback],
+        step: str,
+        pct: int,
+        should_cancel: Optional[Callable[[], bool]] = None,
+    ) -> None:
+        if should_cancel and should_cancel():
+            raise ProcessingCancelledError("Document was deleted while processing")
         if not callback:
             return
         result = callback(step, pct)
@@ -146,12 +180,20 @@ class ProcessingPipeline:
         filename: str,
         file_path: str,
         original_filename: str,
+        user_id: str,
+        document_id: str,
     ) -> dict[str, Any]:
         # This helper still lives next to the document routes. Lazy import keeps
         # the service callable from the routes without tying the files in a knot.
         from app.api.endpoints.documents_with_markdown import parse_document_file
 
-        return parse_document_file(filename, file_path, original_filename)
+        return parse_document_file(
+            filename,
+            file_path,
+            original_filename,
+            user_id=user_id,
+            document_id=document_id,
+        )
 
     def _local_file_path(self, filename: str, file_path: str, user_id: str) -> str:
         try:
@@ -173,9 +215,16 @@ def process_uploaded_document(
     file_path: str,
     original_filename: str = "",
     user_id: str = "local-dev",
+    document_id: str = "",
 ) -> dict[str, Any]:
     """Background-task friendly wrapper used after upload."""
-    return pipeline.process(file_path, filename, original_filename, user_id=user_id)
+    return pipeline.process(
+        file_path,
+        filename,
+        original_filename,
+        user_id=user_id,
+        document_id=document_id or filename,
+    )
 
 
 pipeline = ProcessingPipeline()

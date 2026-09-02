@@ -1,12 +1,17 @@
 """HTTP access to background job state."""
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.websocket import task_snapshot
 from app.core.celery_app import celery_app
 from app.services.job_repository import job_repository
+from app.services.websocket_ticket import (
+    JOB_WS_TICKET_TTL_SECONDS,
+    WebSocketTicketStoreUnavailable,
+    issue_job_ws_ticket,
+)
 
 router = APIRouter()
 
@@ -33,6 +38,11 @@ class JobListResponse(BaseModel):
     total: int
 
 
+class WebSocketTicketResponse(BaseModel):
+    ticket: str
+    expires_in: int
+
+
 @router.get("/", response_model=JobListResponse)
 async def list_jobs(
     limit: int = Query(default=50, ge=1, le=200),
@@ -43,6 +53,33 @@ async def list_jobs(
     return JobListResponse(jobs=jobs, total=len(jobs))
 
 
+@router.post("/{job_id}/ws-ticket", response_model=WebSocketTicketResponse)
+async def create_ws_ticket(
+    job_id: str,
+    response: Response,
+    user: UserRecord = Depends(current_user_or_dev),
+) -> WebSocketTicketResponse:
+    """Create the short-lived credential used by the job progress socket."""
+    user_id = _user_id(user)
+    if not job_repository.get(job_id, user_id):
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        ticket = await issue_job_ws_ticket(job_id, user_id)
+    except WebSocketTicketStoreUnavailable as exc:
+        # A ticket must be shared by the API and WebSocket instances.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="WebSocket progress is temporarily unavailable",
+            headers={"Retry-After": "5"},
+        ) from exc
+    return WebSocketTicketResponse(
+        ticket=ticket,
+        expires_in=JOB_WS_TICKET_TTL_SECONDS,
+    )
+
+
 @router.get("/{job_id}")
 async def get_job(
     job_id: str,
@@ -50,6 +87,11 @@ async def get_job(
 ) -> dict:
     """Return the same snapshot the upload UI receives over WebSocket."""
     stored = job_repository.get(job_id, _user_id(user))
+    if not stored:
+        # Celery knows task ids, but it does not know which account owns them.
+        # Do not let that global lookup become an access-control bypass.
+        raise HTTPException(status_code=404, detail="Job not found")
+
     if stored and stored["status"] in {"SUCCESS", "FAILURE", "REVOKED", "ERROR"}:
         # Finished jobs can come straight from our history table. Celery result
         # backends may expire; the app's recent history is the steadier source.
@@ -63,10 +105,9 @@ async def get_job(
 
     task = celery_app.AsyncResult(job_id)
     snapshot = task_snapshot(task)
-    if stored:
-        # Active jobs still use Celery for live state, with DB details attached
-        # for filename/document context.
-        snapshot["job"] = stored
+    # Active jobs still use Celery for live state, with DB details attached for
+    # filename/document context. The ownership check happened above.
+    snapshot["job"] = stored
     return snapshot
 
 
@@ -76,13 +117,18 @@ async def cancel_job(
     user: UserRecord = Depends(current_user_or_dev),
 ) -> dict:
     """Ask Celery to stop a queued or running task."""
+    stored = job_repository.get(job_id, _user_id(user))
+    if not stored:
+        # Revoke is a global Celery operation, so it must never happen before
+        # we know that this user owns the job id.
+        raise HTTPException(status_code=404, detail="Job not found")
+
     celery_app.control.revoke(job_id, terminate=True)
     task = celery_app.AsyncResult(job_id)
     snapshot = task_snapshot(task)
     if snapshot["state"] in {"PENDING", "PROGRESS", "STARTED"}:
         # Celery can take a moment to report REVOKED. For the UI, the important
         # thing is that the user already cancelled it, so reflect that now.
-        stored = job_repository.get(job_id, _user_id(user)) or {}
         job_repository.upsert(
             job_id,
             user_id=_user_id(user),

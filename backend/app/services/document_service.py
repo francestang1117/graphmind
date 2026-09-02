@@ -28,11 +28,13 @@ class DocumentService:
         repository: Optional[DocumentRepository] = document_repository,
         use_database: Optional[bool] = None,
         virus_scan_enabled: Optional[bool] = None,
+        job_repo: Any = None,
     ) -> None:
         self.storage = storage
         self.validator = validator or FileValidator()
         self.scanner = scanner
         self.repository = repository
+        self.job_repo = job_repo
         self.virus_scan_enabled = settings.VIRUS_SCAN_ENABLED if virus_scan_enabled is None else virus_scan_enabled
         # Temp storage in tests should not write into the local graphmind.db.
         self.use_database = (storage is file_storage and db_enabled()) if use_database is None else use_database
@@ -79,6 +81,16 @@ class DocumentService:
                 return record
         return self.storage.get_file_info(filename, user_id)
 
+    def get_document_by_id(
+        self,
+        document_id: str,
+        user_id: Optional[str] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Find a persisted document by ID while keeping storage lookup separate."""
+        if not self._db_available() or not hasattr(self.repository, "get_by_id"):
+            return None
+        return self.repository.get_by_id(document_id, user_id)
+
     def delete_document(self, filename: str, user_id: Optional[str] = None) -> bool:
         # A DB row can outlive its bytes after a storage reset or an old test
         # run. It should still be possible to remove that stale row from the UI.
@@ -91,14 +103,58 @@ class DocumentService:
 
         deleted = bool(storage_deleted or database_record)
         if deleted and user_id:
+            document_id = (database_record or {}).get("document_id") or filename
             if database_record:
                 self.repository.mark_deleted(filename, user_id)
             from app.services.parsed_artifact_repository import parsed_artifact_repository
             from app.services.graph_repository import graph_repository
 
-            parsed_artifact_repository.delete_for_document(filename)
-            graph_repository.delete_for_document(filename, user_id)
+            self._cancel_document_jobs(document_id, user_id)
+            parsed_artifact_repository.delete_for_document(document_id, user_id=user_id)
+            graph_repository.delete_for_document(document_id, user_id)
         return deleted
+
+    def _cancel_document_jobs(self, document_id: str, user_id: str) -> None:
+        """Leave a tombstone before asking Celery to stop the worker."""
+        from app.core.celery_app import celery_app
+        from app.services.job_repository import job_repository as default_job_repo
+
+        jobs = self.job_repo or default_job_repo
+        try:
+            active_jobs = jobs.list_for_document(document_id, user_id)
+        except Exception as exc:
+            # The document is already marked deleted. A missing job-history
+            # connection should not turn that successful delete into a 500.
+            log.warning("Could not find jobs for deleted document %s: %s", document_id, exc)
+            return
+
+        for job in active_jobs:
+            job_id = job.get("job_id", "")
+            if not job_id:
+                continue
+
+            try:
+                # Store the tombstone first. A worker that cannot be killed
+                # still sees REVOKED on its next progress update.
+                jobs.upsert(
+                    job_id,
+                    user_id=user_id,
+                    document_id=document_id,
+                    original_filename=job.get("original_filename", ""),
+                    status="REVOKED",
+                    step="Cancelled: document deleted",
+                    progress=0,
+                    error="Document deleted",
+                )
+            except Exception as exc:
+                log.warning("Could not mark job %s as revoked: %s", job_id, exc)
+
+            try:
+                celery_app.control.revoke(job_id, terminate=True)
+            except Exception as exc:
+                # The database guard remains the final protection if the
+                # broker is down or the worker has already disappeared.
+                log.warning("Could not revoke job %s: %s", job_id, exc)
 
     def _db_available(self) -> bool:
         return bool(self.use_database and self.repository and self.repository.available())

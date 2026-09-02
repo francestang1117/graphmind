@@ -1068,9 +1068,151 @@ with thicker lines, and the selection panel shows both relation strength and
 node importance. A repeated weak relation can become visible; a one-off weak
 guess still stays out of the default entity view.
 
+## 2026-09 — Security Review Follow-up
+
+A review found three places where an identifier was being trusted too early:
+job IDs, scraped redirect targets, and content-hash filenames used as database
+IDs.
+
+Job reads, cancellation, and WebSocket connections now check the current user
+before touching Celery. The scraper validates every redirect, only allows the
+standard web ports, and opens the socket to the IP address that was checked.
+
+Document rows now get their own UUID. Parsed chunks and entities keep both the
+document ID and user ID, and their database constraints point back to the
+owning document. Existing SQLite and PostgreSQL databases are upgraded at
+startup so old hash IDs and their graph, job, and parse references move
+together.
+
+## 2026-09 — PostgreSQL Migration Hardening
+
+The first server-side migration assumed that every old `document_id` still
+pointed to a document. That is not safe for a database that has been running
+for a while: maintenance jobs used empty strings, failed jobs could keep
+deleted IDs, and old tables could still have a `NOT NULL` job link.
+
+I changed the PostgreSQL upgrade order so it now:
+
+1. Allows `processing_jobs.document_id` to be null.
+2. Clears empty and missing job references.
+3. Removes orphaned parse artifacts and graph edges.
+4. Adds each document foreign key as `NOT VALID`, then validates it after the
+   cleanup has completed.
+
+The migration also checks the delete action on an existing foreign key. If an
+older constraint uses the wrong action, it is replaced so deleting a document
+can really set its job history link to `NULL`.
+
+I added an opt-in PostgreSQL regression test covering the old schema, orphaned
+rows, repeatable startup migration, nullable job links, and `ON DELETE SET
+NULL`. It runs when `GRAPHMIND_TEST_POSTGRES_URL` is set, so the normal local
+test suite does not touch a developer's database.
+
+## 2026-09 — SQLite Foreign-Key Enforcement
+
+SQLite accepts foreign-key definitions but does not enforce them unless the
+pragma is enabled on every connection. The database engine now registers a
+SQLAlchemy connect listener for SQLite and turns `PRAGMA foreign_keys` on
+before the connection is used.
+
+The persistence tests now cover the behavior, not just the table metadata: an
+orphaned parsed artifact is rejected, parsed rows and graph edges are removed
+with their document, and a finished job keeps its history while its document
+link becomes `NULL`.
+
+## 2026-09 — Celery Job Creation Race
+
+There was a small but real race in the upload path. The API used to publish the
+Celery task and create the history row afterward. A fast worker could finish in
+that gap, then the late `PENDING` write would make the job look stuck forever.
+
+The API now creates the job ID and its `PENDING` row before calling
+`apply_async(task_id=...)`. If publishing fails, the same row is marked
+`FAILURE` so the upload does not leave behind an unexplained job. The repository
+also ignores stale active updates after a terminal state has been recorded.
+
+The tests cover the ordering, a worker that completes before `apply_async`
+returns, broker failure, and the repository's terminal-state guard.
+
+## 2026-09 — Stop Deleted Documents From Being Reprocessed
+
+Another race showed up around document deletion. A worker could already be
+inside the parser when the user deleted the source file. Soft deletion leaves
+the parent row in the database, so the worker could later insert fresh chunks
+and graph rows even though the document was gone from the library.
+
+Deletion now writes the tombstone first, marks active jobs as `REVOKED`, and
+asks Celery to stop them. The worker checks that job state between pipeline
+stages. The parsed-artifact and graph repositories also require an active
+document owned by the current user, then check that condition again before
+committing. The second check matters for the short window between parsing and
+the database write.
+
+The progress socket reads terminal job history as well as Celery state. That
+keeps a deleted job visibly cancelled even if Celery reports `SUCCESS` after
+the revoke request arrived. Regression tests cover late artifact writes, late
+graph writes, job cancellation, reindex cancellation, and the WebSocket view.
+
+## 2026-09 — WebSocket Ticket Authentication
+
+The browser originally put the full access token in the WebSocket query string.
+That works with the browser WebSocket API, but request targets are commonly
+recorded by Uvicorn and reverse proxies. A reusable token should not end up in
+those logs.
+
+The upload flow now asks the authenticated jobs endpoint for a short-lived
+ticket before opening the socket. The ticket is random, expires after 60
+seconds, is tied to one `job_id`, and is consumed atomically on the first
+connection. The socket checks the job owner again after consuming it.
+
+The ticket store uses Redis when available and a small in-memory fallback for
+local development. The fallback keeps the normal no-Redis setup usable, while
+production deployments can share tickets across API instances. The WebSocket
+handler no longer accepts `access_token` from the query string.
+
+I added coverage for ticket binding, one-time use, unknown jobs, and rejection
+of the old access-token query parameter. The API reference now documents the
+two-step handshake.
+
+## 2026-09 — Redis Ticket Failure Boundary
+
+The ticket fallback was useful when developing without Redis, but it was too
+quiet about the limit of that approach. In a multi-process deployment, a ticket
+kept in one API process cannot be consumed by another process.
+
+The fallback is now controlled by `WEBSOCKET_TICKET_MEMORY_FALLBACK` and only
+works when `ENVIRONMENT` is `development` or `test`. When Redis is unavailable
+outside those environments, the HTTP ticket endpoint returns `503` with a short
+retry hint. A WebSocket handshake closes with `1013` so the client knows this is
+a temporary service problem rather than a bad ticket.
+
+The test suite covers both the local fallback and the production failure path.
+
+## 2026-09 — PostgreSQL Migration Test in CI
+
+The PostgreSQL migration regression test used to be skipped unless a developer
+set `GRAPHMIND_TEST_POSTGRES_URL` by hand. That left the most database-specific
+part of the upgrade path outside the normal check run.
+
+GitHub Actions now starts PostgreSQL 16, runs the migration test explicitly,
+and then runs the full backend suite with the same connection available. Local
+runs can still use the isolated SQLite fixture; the PostgreSQL test remains
+opt-in so it does not connect to a developer's database by accident.
+
+## 2026-09 — Scraper Address Boundary
+
+The scraper already checked private, loopback, and link-local addresses, but
+that list missed the shared `100.64.0.0/10` range used by CGNAT and overlay
+networks. The check now allows only addresses that Python marks as globally
+routable. That keeps the rule short and also covers special-use IPv4 and IPv6
+ranges without maintaining a growing blocklist.
+
+I added parameterized coverage for CGNAT, metadata/link-local addresses,
+documentation ranges, IPv6 local ranges, and known public resolver addresses.
+
 ## Current State
 
-As of August 2026, GraphMind has a working foundation:
+As of September 2026, GraphMind has a working foundation:
 
 - FastAPI backend
 - React + TypeScript frontend
@@ -1102,6 +1244,7 @@ As of August 2026, GraphMind has a working foundation:
 - optional ClamAV virus scan before file storage
 - WebSocket job progress stream for Celery-backed processing
 - frontend upload rows can follow returned Celery `job_id` progress
+- one-use, job-bound WebSocket tickets instead of access tokens in URLs
 - frontend Recent jobs panel shows persisted worker job history
 - Redis-backed Celery worker and beat services in Docker Compose
 - Prometheus-compatible `/metrics` endpoint for API and pipeline counters

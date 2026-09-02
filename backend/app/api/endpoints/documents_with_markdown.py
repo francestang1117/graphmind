@@ -13,15 +13,21 @@ _parse_cache: dict[str, dict[str, Any]] = {}
 log = logging.getLogger(__name__)
 
 
-def cache_key(filename: str) -> str:
-    return filename
+def cache_key(filename: str, user_id: str = "local-dev") -> str:
+    # The process cache is shared by all requests, so the account belongs in
+    # the key even though the public filename already contains a content hash.
+    return f"{user_id}:{filename}"
 
 
-def parse_markdown_bytes(filename: str, data: bytes) -> dict[str, Any]:
+def parse_markdown_bytes(
+    filename: str,
+    data: bytes,
+    user_id: str = "local-dev",
+) -> dict[str, Any]:
     """Parse Markdown bytes and store the result in a small local cache."""
     text = _decode_text(data)
     result = MarkdownParser().parse_content(text)
-    _parse_cache[cache_key(filename)] = result
+    _parse_cache[cache_key(filename, user_id)] = result
     return result
 
 
@@ -29,26 +35,45 @@ def parse_document_file(
     filename: str,
     file_path: str,
     original_filename: str = "",
+    user_id: str = "local-dev",
+    document_id: str = "",
 ) -> dict[str, Any]:
     """Parse any supported stored file and cache the normalized parser output."""
     result = DocumentParser().parse(file_path)
     metadata = result.setdefault("metadata", {})
     metadata["stored_filename"] = filename
+    metadata["user_id"] = user_id
+    metadata["document_id"] = document_id or metadata.get("document_id") or filename
     if original_filename:
         metadata["original_filename"] = original_filename
-    _parse_cache[cache_key(filename)] = result
-    _persist_parse_artifacts(filename, result)
+    _parse_cache[cache_key(filename, user_id)] = result
+    _persist_parse_artifacts(
+        filename,
+        result,
+        user_id=user_id,
+        document_id=metadata["document_id"],
+    )
     return result
 
 
-def get_cached_parse(filename: str) -> Optional[dict[str, Any]]:
-    return _parse_cache.get(cache_key(filename))
+def get_cached_parse(
+    filename: str,
+    user_id: str = "local-dev",
+) -> Optional[dict[str, Any]]:
+    return _parse_cache.get(cache_key(filename, user_id))
 
 
-def clear_cached_parse(filename: str) -> None:
-    _parse_cache.pop(cache_key(filename), None)
+def clear_cached_parse(
+    filename: str,
+    user_id: str = "local-dev",
+    document_id: str = "",
+) -> None:
+    _parse_cache.pop(cache_key(filename, user_id), None)
     # The DB copy should follow the same lifetime as the in-memory parse.
-    parsed_artifact_repository.delete_for_document(filename)
+    parsed_artifact_repository.delete_for_document(
+        document_id or filename,
+        user_id=user_id,
+    )
 
 
 def markdown_summary(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
@@ -136,12 +161,23 @@ def _decode_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def _persist_parse_artifacts(filename: str, parsed: dict[str, Any]) -> None:
+def _persist_parse_artifacts(
+    filename: str,
+    parsed: dict[str, Any],
+    *,
+    user_id: str = "local-dev",
+    document_id: str = "",
+) -> None:
     try:
         # Parser-level entities catch things like imports; the NER pass catches
         # broader concepts and named entities from the extracted text.
         entities = entity_extractor.extract_from_parsed_document(parsed)
         parser_entities = parsed.get("extra", {}).get("entities", [])
-        parsed_artifact_repository.replace_for_document(filename, parsed, [*parser_entities, *entities])
+        parsed_artifact_repository.replace_for_document(
+            document_id or parsed.get("metadata", {}).get("document_id") or filename,
+            parsed,
+            [*parser_entities, *entities],
+            user_id=user_id,
+        )
     except Exception as exc:
         log.warning("Could not persist parsed artifacts for %s: %s", filename, exc)

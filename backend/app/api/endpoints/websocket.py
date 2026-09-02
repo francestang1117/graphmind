@@ -7,13 +7,38 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from app.api.endpoints.auth import _ensure_dev_user, _user_from_id
+from app.core.config import settings
+from app.services.job_repository import job_repository
+from app.services.websocket_ticket import (
+    WebSocketTicketStoreUnavailable,
+    consume_job_ws_ticket,
+)
+
 log = logging.getLogger(__name__)
 router = APIRouter()
+_TERMINAL_JOB_STATES = {"SUCCESS", "FAILURE", "REVOKED", "ERROR"}
 
 
 @router.websocket("/ws/jobs/{job_id}")
 async def job_progress_ws(websocket: WebSocket, job_id: str):
-    """Stream Celery task progress to the browser."""
+    """Stream a job only after authenticating and checking its owner."""
+    try:
+        user = await _websocket_user(websocket, job_id)
+    except WebSocketTicketStoreUnavailable:
+        log.warning("WebSocket ticket store unavailable for job %s", job_id)
+        await websocket.close(code=1013, reason="Try again later")
+        return
+    if user is None:
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+
+    stored = job_repository.get(job_id, user.id)
+    if not stored:
+        # A Celery id alone is not proof that the caller may see the task.
+        await websocket.close(code=1008, reason="Job not found")
+        return
+
     await websocket.accept()
     log.debug("WS connected for job %s", job_id)
 
@@ -24,7 +49,14 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
         last_state: dict[str, Any] = {}
 
         while True:
-            current = task_snapshot(task)
+            # Celery may report SUCCESS after a revoke reached the database.
+            # The persisted terminal state is the source of truth in that race.
+            stored = job_repository.get(job_id, user.id)
+            stored_status = stored.get("status") if stored else ""
+            if stored and stored_status in _TERMINAL_JOB_STATES:
+                current = _stored_job_snapshot(stored)
+            else:
+                current = task_snapshot(task)
 
             # Keep the socket quiet while Celery is reporting the same state.
             if current != last_state:
@@ -49,6 +81,20 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
             await websocket.close()
         except Exception:
             pass
+
+
+async def _websocket_user(websocket: WebSocket, job_id: str):
+    """Resolve the user from a one-use job ticket, not a reusable JWT."""
+    ticket = websocket.query_params.get("ticket")
+    if ticket:
+        user_id = await consume_job_ws_ticket(ticket, job_id)
+        return _user_from_id(user_id) if user_id else None
+    if websocket.query_params.get("access_token"):
+        # The old URL token is deliberately not supported anymore.
+        return None
+    if settings.AUTH_REQUIRED:
+        return None
+    return _ensure_dev_user()
 
 
 def task_snapshot(task) -> dict[str, Any]:
@@ -92,6 +138,19 @@ def task_snapshot(task) -> dict[str, Any]:
 
     # STARTED or custom states
     return {"state": state, "pct": 0, "step": state.capitalize()}
+
+
+def _stored_job_snapshot(job: dict[str, Any]) -> dict[str, Any]:
+    """Use the job row when Celery's final state is stale or already expired."""
+    state = str(job.get("status") or "ERROR").upper()
+    snapshot = {
+        "state": state,
+        "pct": int(job.get("progress") or 0),
+        "step": job.get("step") or state.capitalize(),
+    }
+    if state in {"FAILURE", "REVOKED", "ERROR"}:
+        snapshot["error"] = job.get("error") or state.capitalize()
+    return snapshot
 
 
 class JobBroadcaster:

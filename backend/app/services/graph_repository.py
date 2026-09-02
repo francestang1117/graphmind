@@ -12,13 +12,15 @@ from app.core.database import SessionLocal, db_enabled
 log = logging.getLogger(__name__)
 
 try:
-    from sqlalchemy import delete, select
+    from sqlalchemy import delete, select, update
     from sqlalchemy.exc import SQLAlchemyError
-    from app.models.persistence import GraphEdgeRecord, GraphNodeRecord, utc_now
+    from app.models.persistence import DocumentRecord, GraphEdgeRecord, GraphNodeRecord, utc_now
 except ImportError:  # pragma: no cover - only before DB deps are installed
     delete = None
     select = None
+    update = None
     SQLAlchemyError = Exception
+    DocumentRecord = None  # type: ignore[assignment]
     GraphEdgeRecord = None  # type: ignore[assignment]
     GraphNodeRecord = None  # type: ignore[assignment]
     utc_now = None  # type: ignore[assignment]
@@ -41,6 +43,8 @@ class GraphRepository:
             and self.session_factory
             and delete
             and select
+            and update
+            and DocumentRecord
             and GraphNodeRecord
             and GraphEdgeRecord
         )
@@ -58,6 +62,11 @@ class GraphRepository:
 
         try:
             with self.session_factory() as db:
+                document = self._active_document(db, user_id, document_id)
+                if not document:
+                    log.info("Skipping graph write for deleted or missing document %s", document_id)
+                    return
+
                 # Reindexing should leave one clean slice per document, not a
                 # pile of stale edges from older parser/entity rules.
                 self._remove_document_slice(db, user_id, document_id)
@@ -72,6 +81,11 @@ class GraphRepository:
                 for edge in graph.get("edges", []):
                     db.add(_edge_record(user_id, document_id, edge))
 
+                # The row lock covers PostgreSQL. The conditional update gives
+                # SQLite one last check before derived rows become visible.
+                if not self._document_is_active(db, user_id, document_id):
+                    db.rollback()
+                    return
                 db.commit()
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
             log.warning("Could not persist graph slice for %s: %s", document_id, exc)
@@ -145,6 +159,35 @@ class GraphRepository:
                 continue
             node.source_document_ids_json = _json(source_ids)
             node.updated_at = utc_now()
+
+    def _active_document(self, db, user_id: str, document_id: str):
+        """Lock the source row before replacing its graph slice."""
+        stmt = (
+            select(DocumentRecord)
+            .where(
+                DocumentRecord.id == document_id,
+                DocumentRecord.user_id == user_id,
+                DocumentRecord.deleted_at.is_(None),
+            )
+            .with_for_update()
+        )
+        return db.scalars(stmt).first()
+
+    def _document_is_active(self, db, user_id: str, document_id: str) -> bool:
+        """Make the final write conditional on the document still being live."""
+        if update is None:
+            return True
+
+        result = db.execute(
+            update(DocumentRecord)
+            .where(
+                DocumentRecord.id == document_id,
+                DocumentRecord.user_id == user_id,
+                DocumentRecord.deleted_at.is_(None),
+            )
+            .values(deleted_at=None)
+        )
+        return int(result.rowcount or 0) == 1
 
     def _upsert_node(
         self,

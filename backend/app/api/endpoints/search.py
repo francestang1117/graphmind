@@ -81,13 +81,20 @@ def rebuild_vector_index(user_id: Optional[str] = None) -> VectorStore:
     """Build a fresh search index from stored parser chunks."""
     store = vector_store
     store.clear()
+    owner_id = user_id or "local-dev"
     for metadata in document_service.list_documents(user_id):
         filename = metadata["filename"]
         original_name = metadata.get("original_filename", filename)
-        parsed = get_cached_parse(filename)
+        parsed = get_cached_parse(filename, owner_id)
         if not parsed:
             try:
-                parsed = parse_document_file(filename, metadata["file_path"], original_name)
+                parsed = parse_document_file(
+                    filename,
+                    metadata["file_path"],
+                    original_name,
+                    user_id=owner_id,
+                    document_id=metadata.get("document_id", ""),
+                )
             except (OSError, ValueError, RuntimeError) as exc:
                 # Search should stay usable even if one stored file no longer
                 # parses, but the skip should not be invisible.

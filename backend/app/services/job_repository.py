@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover - only before DB deps are installed
 
 
 TERMINAL_STATES = {"SUCCESS", "FAILURE", "REVOKED", "ERROR"}
+ACTIVE_STATE_ORDER = {"PENDING": 0, "STARTED": 1, "PROGRESS": 2}
 
 
 class JobRepository:
@@ -85,24 +86,45 @@ class JobRepository:
         now = utc_now()
         # Progress can arrive from Celery, tests, or future maintenance tasks.
         # Clamp it here once so callers do not each need their own guard.
+        document_ref = document_id or None
+        status_name = str(status or "PENDING").upper()
         values = {
             "user_id": user_id,
-            "document_id": document_id,
+            "document_id": document_ref,
             "original_filename": original_filename,
-            "status": status,
+            "status": status_name,
             "step": step,
             "progress": max(0, min(100, int(progress))),
             "error": error,
             "updated_at": now,
-            "finished_at": now if status in TERMINAL_STATES else None,
+            "finished_at": now if status_name in TERMINAL_STATES else None,
         }
         try:
             with self.session_factory() as db:
-                record = db.get(ProcessingJobRecord, job_id)
+                # PostgreSQL locks the row while the decision is made. SQLite
+                # serializes the eventual write, and the same guard still
+                # prevents stale states from being accepted in either mode.
+                record = db.scalars(
+                    select(ProcessingJobRecord)
+                    .where(ProcessingJobRecord.job_id == job_id)
+                    .with_for_update()
+                ).first()
                 if record:
+                    if not _can_transition(record.status, status_name):
+                        log.info(
+                            "Ignoring stale state %s for job %s already at %s",
+                            status_name,
+                            job_id,
+                            record.status,
+                        )
+                        return
+                    if status_name in TERMINAL_STATES:
+                        values["finished_at"] = record.finished_at or now
                     for key, value in values.items():
                         # Later progress updates often only know status/step.
                         # Do not wipe filename/user fields with blanks.
+                        if key == "document_id" and not document_ref:
+                            continue
                         if value != "" or key in {"status", "step", "progress", "error", "updated_at", "finished_at"}:
                             setattr(record, key, value)
                 else:
@@ -125,6 +147,34 @@ class JobRepository:
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
             _raise_db_error("list job history", exc, {"user_id": user_id or ""})
 
+    def list_for_document(
+        self,
+        document_id: str,
+        user_id: str,
+        *,
+        active_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Find jobs tied to one document in the current workspace."""
+        if not self.available() or not document_id:
+            return []
+
+        try:
+            with self.session_factory() as db:
+                stmt = select(ProcessingJobRecord).where(
+                    ProcessingJobRecord.document_id == document_id,
+                    ProcessingJobRecord.user_id == user_id,
+                )
+                if active_only:
+                    stmt = stmt.where(~ProcessingJobRecord.status.in_(TERMINAL_STATES))
+                stmt = stmt.order_by(ProcessingJobRecord.created_at.desc())
+                return [_record_to_dict(record) for record in db.scalars(stmt).all()]
+        except (SQLAlchemyError, OSError, RuntimeError) as exc:
+            _raise_db_error(
+                "list document jobs",
+                exc,
+                {"document_id": document_id, "user_id": user_id},
+            )
+
     def get(self, job_id: str, user_id: Optional[str]) -> Optional[dict[str, Any]]:
         if not self.available():
             return None
@@ -138,6 +188,11 @@ class JobRepository:
                 return _record_to_dict(record) if record else None
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
             _raise_db_error("get job history", exc, {"job_id": job_id})
+
+    def is_revoked(self, job_id: str, user_id: str) -> bool:
+        """Let a worker notice the delete tombstone between pipeline stages."""
+        job = self.get(job_id, user_id)
+        return bool(job and job["status"] == "REVOKED")
 
     def cleanup_finished(self, older_than_days: int = 30) -> int:
         if not self.available() or delete is None:
@@ -164,7 +219,7 @@ def _record_to_dict(record: ProcessingJobRecord) -> dict[str, Any]:
     return {
         "job_id": record.job_id,
         "user_id": record.user_id,
-        "document_id": record.document_id,
+        "document_id": record.document_id or "",
         "original_filename": record.original_filename,
         "status": record.status,
         "step": record.step,
@@ -174,6 +229,21 @@ def _record_to_dict(record: ProcessingJobRecord) -> dict[str, Any]:
         "updated_at": record.updated_at.isoformat() if record.updated_at else "",
         "finished_at": record.finished_at.isoformat() if record.finished_at else None,
     }
+
+
+def _can_transition(current_status: str, new_status: str) -> bool:
+    """Keep a late progress update from moving a job backwards."""
+    current = str(current_status or "PENDING").upper()
+    incoming = str(new_status or "PENDING").upper()
+
+    # Once a job has finished, its first terminal result is the one we keep.
+    if current in TERMINAL_STATES:
+        return incoming == current
+
+    if current in ACTIVE_STATE_ORDER and incoming in ACTIVE_STATE_ORDER:
+        return ACTIVE_STATE_ORDER[incoming] >= ACTIVE_STATE_ORDER[current]
+
+    return True
 
 
 def _raise_db_error(operation: str, exc: Exception, details: dict[str, Any]) -> None:

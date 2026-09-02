@@ -5,6 +5,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
+from app.models.persistence import DocumentRecord, utc_now
 from app.services.graph_repository import GraphRepository
 
 
@@ -20,8 +21,25 @@ def _repo() -> GraphRepository:
     return GraphRepository(session_factory=session_factory, enabled=lambda: True)
 
 
+def _add_document(repo: GraphRepository, document_id: str, user_id: str = "u1") -> None:
+    with repo.session_factory() as db:
+        db.add(
+            DocumentRecord(
+                id=document_id,
+                user_id=user_id,
+                filename=document_id,
+                stored_filename=document_id,
+                original_filename=document_id,
+                file_hash=f"hash-{user_id}-{document_id}",
+                file_path=f"/tmp/{document_id}",
+            )
+        )
+        db.commit()
+
+
 def test_graph_repository_replaces_one_document_slice():
     repo = _repo()
+    _add_document(repo, "doc-a.md")
 
     repo.replace_document_graph(
         user_id="u1",
@@ -74,6 +92,8 @@ def test_graph_repository_replaces_one_document_slice():
 
 def test_graph_repository_keeps_shared_nodes_until_all_sources_are_deleted():
     repo = _repo()
+    _add_document(repo, "a.md")
+    _add_document(repo, "b.md")
     shared_node = {"id": "python", "label": "Python", "type": "PROGRAMMING_LANGUAGE", "sources": ["docs"]}
 
     repo.replace_document_graph(
@@ -96,6 +116,8 @@ def test_graph_repository_keeps_shared_nodes_until_all_sources_are_deleted():
 
 def test_graph_repository_combines_relation_evidence_from_multiple_documents():
     repo = _repo()
+    _add_document(repo, "a.md")
+    _add_document(repo, "b.md")
     nodes = [
         {"id": "python", "label": "Python", "type": "PROGRAMMING_LANGUAGE"},
         {"id": "fastapi", "label": "FastAPI", "type": "FRAMEWORK"},
@@ -121,3 +143,53 @@ def test_graph_repository_combines_relation_evidence_from_multiple_documents():
     edge = repo.load_graph("u1")["edges"][0]
     assert edge["weight"] == 2
     assert edge["sources"] == ["a.md", "b.md"]
+
+
+def test_graph_repository_ignores_late_write_after_document_deletion():
+    repo = _repo()
+    _add_document(repo, "doc-a.md")
+
+    repo.replace_document_graph(
+        user_id="u1",
+        document_id="doc-a.md",
+        graph={
+            "nodes": [{"id": "old", "label": "Old", "type": "CONCEPT"}],
+            "edges": [],
+        },
+    )
+
+    with repo.session_factory() as db:
+        document = db.get(DocumentRecord, "doc-a.md")
+        document.deleted_at = utc_now()
+        db.commit()
+
+    # Deletion removes the old slice. A worker that finishes afterwards must
+    # not be able to recreate it from the soft-deleted parent row.
+    repo.delete_for_document("doc-a.md", "u1")
+    repo.replace_document_graph(
+        user_id="u1",
+        document_id="doc-a.md",
+        graph={
+            "nodes": [{"id": "late", "label": "Late", "type": "CONCEPT"}],
+            "edges": [],
+        },
+    )
+
+    assert repo.load_graph("u1") == {"nodes": [], "edges": []}
+
+
+def test_graph_repository_requires_an_active_document_owned_by_user():
+    repo = _repo()
+    _add_document(repo, "doc-a.md", user_id="u1")
+
+    repo.replace_document_graph(
+        user_id="u2",
+        document_id="doc-a.md",
+        graph={
+            "nodes": [{"id": "secret", "label": "Secret", "type": "CONCEPT"}],
+            "edges": [],
+        },
+    )
+
+    assert repo.load_graph("u1") == {"nodes": [], "edges": []}
+    assert repo.load_graph("u2") == {"nodes": [], "edges": []}

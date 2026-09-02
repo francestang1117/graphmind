@@ -216,6 +216,65 @@ def test_scraper_blocks_private_network_urls(monkeypatch):
     assert "private or local network" in exc.value.message
 
 
+@pytest.mark.parametrize(
+    "address",
+    [
+        "10.0.0.1",
+        "100.64.0.1",
+        "100.127.255.254",
+        "127.0.0.1",
+        "169.254.169.254",
+        "192.0.2.1",
+        "198.51.100.1",
+        "203.0.113.1",
+        "::",
+        "::1",
+        "fc00::1",
+        "fe80::1",
+        "ff02::1",
+        "2001:db8::1",
+        "224.0.0.1",
+    ],
+)
+def test_scraper_blocks_non_global_addresses(address):
+    assert scraper_module._is_blocked_address(address) is True
+
+
+@pytest.mark.parametrize("address", ["8.8.8.8", "1.1.1.1", "2001:4860:4860::8888"])
+def test_scraper_allows_global_addresses(address):
+    assert scraper_module._is_blocked_address(address) is False
+
+
+def test_scraper_validates_each_redirect_before_fetching_next_url(monkeypatch):
+    def resolve(host):
+        return {"93.184.216.34"} if host == "example.com" else {"127.0.0.1"}
+
+    monkeypatch.setattr(scraper_module, "_resolve_host", resolve)
+    requested = []
+
+    def fake_request(_url, _address, _headers):
+        requested.append(_url)
+        return 302, {"location": "http://internal.example/secret"}, b""
+
+    scraper = WebScraper()
+    monkeypatch.setattr(scraper, "_request_once", fake_request)
+
+    with pytest.raises(WebScrapeError) as exc:
+        run(scraper._fetch("https://example.com/start"))
+
+    assert "private or local network" in exc.value.message
+    assert requested == ["https://example.com/start"]
+
+
+def test_scraper_rejects_non_standard_ports(monkeypatch):
+    monkeypatch.setattr(scraper_module, "_resolve_host", lambda _host: {"93.184.216.34"})
+
+    with pytest.raises(WebScrapeError) as exc:
+        run(WebScraper()._assert_public_url("https://example.com:8443"))
+
+    assert "standard HTTP and HTTPS ports" in exc.value.message
+
+
 def test_scrape_and_store_uses_document_upload_path(monkeypatch):
     monkeypatch.setattr(scraper_module, "_resolve_host", lambda _host: {"93.184.216.34"})
 

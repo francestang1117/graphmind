@@ -8,6 +8,7 @@ detail, search, graph, and chat request.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Any, Callable, Optional
 
 from app.core.database import SessionLocal, db_enabled
@@ -45,19 +46,47 @@ class DocumentRepository:
         if not self.available():
             return
 
-        record_id = metadata.get("stored_filename") or metadata["filename"]
+        user_id = str(metadata.get("user_id") or "local-dev")
+        document_id = str(metadata.get("document_id") or "")
+        file_hash = str(metadata.get("file_hash") or "")
         try:
             with self.session_factory() as db:
-                record = db.get(DocumentRecord, record_id)
+                record = None
+                if document_id:
+                    record = db.scalars(
+                        select(DocumentRecord).where(
+                            DocumentRecord.id == document_id,
+                            DocumentRecord.user_id == user_id,
+                        )
+                    ).first()
+                if not record and file_hash:
+                    # A soft-deleted row can be reused when the same bytes are
+                    # uploaded again. The uniqueness check is still per user.
+                    record = db.scalars(
+                        select(DocumentRecord).where(
+                            DocumentRecord.user_id == user_id,
+                            DocumentRecord.file_hash == file_hash,
+                        )
+                    ).first()
+
                 values = _document_values(metadata)
                 if record:
                     for key, value in values.items():
                         setattr(record, key, value)
                 else:
-                    db.add(DocumentRecord(id=record_id, **values))
+                    record = DocumentRecord(id=uuid.uuid4().hex, **values)
+                    db.add(record)
+
+                # The worker and parsed-artifact tables use this stable ID;
+                # stored filenames remain a storage/API concern.
+                metadata["document_id"] = record.id
                 db.commit()
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
-            _raise_db_error("save document metadata", exc, {"filename": record_id})
+            _raise_db_error(
+                "save document metadata",
+                exc,
+                {"filename": metadata.get("stored_filename") or metadata.get("filename", "")},
+            )
 
     def list(self, user_id: Optional[str]) -> list[dict[str, Any]]:
         if not self.available():
@@ -89,6 +118,24 @@ class DocumentRepository:
                 return _record_to_metadata(record) if record else None
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
             _raise_db_error("get document metadata", exc, {"filename": filename})
+
+    def get_by_id(self, document_id: str, user_id: Optional[str]) -> Optional[dict[str, Any]]:
+        """Look up a document by its internal ID without crossing workspaces."""
+        if not self.available():
+            return None
+
+        try:
+            with self.session_factory() as db:
+                stmt = select(DocumentRecord).where(
+                    DocumentRecord.deleted_at.is_(None),
+                    DocumentRecord.id == document_id,
+                )
+                if user_id:
+                    stmt = stmt.where(DocumentRecord.user_id == user_id)
+                record = db.scalars(stmt).first()
+                return _record_to_metadata(record) if record else None
+        except (SQLAlchemyError, OSError, RuntimeError) as exc:
+            _raise_db_error("get document metadata by id", exc, {"document_id": document_id})
 
     def has_any(self, user_id: Optional[str]) -> bool:
         """Return whether this user has any DB document records, including deleted ones."""
@@ -162,6 +209,7 @@ def _document_values(metadata: dict[str, Any]) -> dict[str, Any]:
 
 def _record_to_metadata(record: DocumentRecord) -> dict[str, Any]:
     return {
+        "document_id": record.id,
         "filename": record.filename,
         "stored_filename": record.stored_filename,
         "original_filename": record.original_filename,

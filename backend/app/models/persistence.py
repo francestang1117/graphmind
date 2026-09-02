@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import uuid
 
-from sqlalchemy import DateTime, Float, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -45,7 +46,13 @@ class DocumentRecord(Base):
         UniqueConstraint("user_id", "file_hash", name="uq_documents_user_hash"),
     )
 
-    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    # A content hash identifies bytes, not a user's document row. Keep those
+    # two identities separate so the same file can belong to two users.
+    id: Mapped[str] = mapped_column(
+        String(255),
+        primary_key=True,
+        default=lambda: uuid.uuid4().hex,
+    )
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     filename: Mapped[str] = mapped_column(String(255), index=True)
     stored_filename: Mapped[str] = mapped_column(String(255), index=True)
@@ -71,11 +78,20 @@ class ParsedChunkRecord(Base):
 
     __tablename__ = "parsed_chunks"
     __table_args__ = (
-        UniqueConstraint("document_id", "chunk_index", name="uq_chunks_document_index"),
+        UniqueConstraint(
+            "user_id",
+            "document_id",
+            "chunk_index",
+            name="uq_chunks_user_document_index",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(320), primary_key=True)
-    document_id: Mapped[str] = mapped_column(String(255), index=True)
+    document_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     chunk_index: Mapped[int] = mapped_column(Integer)
     chunk_type: Mapped[str] = mapped_column(String(64), default="text")
@@ -93,11 +109,21 @@ class ParsedEntityRecord(Base):
 
     __tablename__ = "parsed_entities"
     __table_args__ = (
-        UniqueConstraint("document_id", "normalized", "label", name="uq_entities_document_name_label"),
+        UniqueConstraint(
+            "user_id",
+            "document_id",
+            "normalized",
+            "label",
+            name="uq_entities_user_document_name_label",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(320), primary_key=True)
-    document_id: Mapped[str] = mapped_column(String(255), index=True)
+    document_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     text: Mapped[str] = mapped_column(String(255), index=True)
     normalized: Mapped[str] = mapped_column(String(255), index=True)
@@ -158,7 +184,11 @@ class GraphEdgeRecord(Base):
     source_node_id: Mapped[str] = mapped_column(String(255), index=True)
     target_node_id: Mapped[str] = mapped_column(String(255), index=True)
     relation_type: Mapped[str] = mapped_column(String(80), default="RELATED_TO", index=True)
-    source_document_id: Mapped[str] = mapped_column(String(255), index=True)
+    source_document_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
     weight: Mapped[int] = mapped_column(Integer, default=1)
     sources_json: Mapped[str] = mapped_column(Text, default="[]")
@@ -177,7 +207,12 @@ class ProcessingJobRecord(Base):
 
     job_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
-    document_id: Mapped[str] = mapped_column(String(255), default="", index=True)
+    document_id: Mapped[str | None] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     original_filename: Mapped[str] = mapped_column(String(255), default="")
     status: Mapped[str] = mapped_column(String(32), default="PENDING", index=True)
     step: Mapped[str] = mapped_column(String(255), default="Queued")

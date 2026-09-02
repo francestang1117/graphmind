@@ -48,7 +48,9 @@ class FileStorage:
 
         # Same bytes should map to one stored file, even under a new filename.
         if dest.exists():
-            existing = self.get_file_info(dest.name)
+            # The hash is shared by users, but the sidecar is not. Looking up
+            # without the owner could return another user's copy first.
+            existing = self.get_file_info(dest.name, user_id)
             if existing:
                 raise DuplicateFileError(existing)
 

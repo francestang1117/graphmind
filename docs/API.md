@@ -145,7 +145,9 @@ curl -X POST /api/v1/documents/upload \
 6. ClamAV scan runs when `VIRUS_SCAN_ENABLED=true`.
 7. File is written to content-addressed local storage.
 8. Duplicate content returns `409`.
-9. Parser work is queued as FastAPI background work or a Celery job.
+9. With Celery enabled, the API creates a `PENDING` job row first and publishes
+   the task with that same `job_id`; a broker failure is recorded as `FAILURE`.
+   Otherwise parser work is queued as FastAPI background work.
 
 ### `GET /documents/`
 
@@ -341,12 +343,31 @@ instead of the optional LLM path.
 
 ## WebSocket
 
+### `POST /jobs/{job_id}/ws-ticket`
+
+Create a one-use WebSocket ticket after the current user has been verified as
+the owner of the job:
+
+```json
+{ "ticket": "short-lived-random-value", "expires_in": 60 }
+```
+
+The ticket is valid for 60 seconds, is tied to this `job_id`, and is removed
+when the WebSocket consumes it. It is not an access token and cannot be used
+with the normal HTTP API.
+
 ### `WS /ws/jobs/{job_id}`
 
-Connect to receive real-time job progress:
+Call the ticket endpoint with the normal Bearer token first, then connect with
+the returned ticket:
 
 ```js
-const ws = new WebSocket("ws://localhost:8000/ws/jobs/job123");
+const { ticket } = await fetch("http://localhost:8000/api/v1/jobs/job123/ws-ticket", {
+  method: "POST",
+  headers: { Authorization: `Bearer ${accessToken}` },
+}).then((response) => response.json());
+
+const ws = new WebSocket(`ws://localhost:8000/ws/jobs/job123?ticket=${encodeURIComponent(ticket)}`);
 ws.onmessage = (e) => {
   const { state, pct, step, result, error } = JSON.parse(e.data);
   // state: PENDING | PROGRESS | SUCCESS | FAILURE
@@ -356,7 +377,9 @@ ws.onmessage = (e) => {
 Connection closes automatically when the job reaches a terminal state.
 
 When `CELERY_ENABLED=true`, the upload response returns `job_id`. The frontend
-can connect to this WebSocket URL to show real processing progress.
+requests a ticket and then connects to this WebSocket URL to show real
+processing progress. A reusable access token is never put in the WebSocket
+request URL.
 
 ## Jobs
 
@@ -436,9 +459,9 @@ Markdown document so search, graph, and chat can reuse the same pipeline.
 }
 ```
 
-The scraper only accepts `http` and `https` URLs, blocks local/private network
-addresses, follows redirects with the same checks, limits response size, and
-only ingests readable text/HTML responses.
+The scraper only accepts `http` and `https` URLs, allows only globally routable
+destination addresses, follows redirects with the same checks, limits response
+size, and only ingests readable text/HTML responses.
 
 ---
 
@@ -474,6 +497,7 @@ Current app-level codes include:
 - `malware_detected`
 - `virus_scanner_unavailable`
 - `parse_failed`
+- `processing_queue_failed`
 - `stored_file_path_invalid`
 - `stored_file_missing`
 - `storage_operation_failed`

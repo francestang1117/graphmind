@@ -57,7 +57,8 @@ GraphMind/
 │   │   │   ├── persistence_service.py
 │   │   │   ├── qa_engine.py
 │   │   │   ├── vector_store.py
-│   │   │   └── virus_scanner.py
+│   │   │   ├── virus_scanner.py
+│   │   │   └── websocket_ticket.py
 │   │   ├── tasks/
 │   │   │   ├── __init__.py
 │   │   │   └── process_document.py
@@ -140,8 +141,10 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `graph.py`, `search.py`, and `chat.py` are connected to real uploaded content.
   They are MVP implementations, not demo-only screens anymore.
 - `jobs.py` exposes small HTTP controls for worker jobs: check status and cancel.
-- `websocket.py` exposes Celery-style job progress snapshots. Upload can return
-  a Celery job id, and the frontend upload hook can watch it.
+- `jobs.py` also issues one-use, job-bound WebSocket tickets after ownership is
+  checked.
+- `websocket.py` exposes Celery-style job progress snapshots. The socket accepts
+  those short-lived tickets instead of reusable access tokens.
 
 ## Core Layer
 
@@ -175,6 +178,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
   persisted graph exists yet.
 - `job_repository.py` stores recent background job state so upload work remains
   visible after refreshes and old finished jobs can be cleaned up.
+- `websocket_ticket.py` stores short-lived job-bound socket tickets in Redis,
+  with an in-memory fallback for local development.
 - `pipeline.py` is the current single-document processing path used after
   upload and by the Celery-compatible task: parse, persist artifacts, extract
   entities/relations, persist graph nodes/edges, update the in-memory graph,
