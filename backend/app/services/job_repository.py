@@ -147,6 +147,34 @@ class JobRepository:
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
             _raise_db_error("list job history", exc, {"user_id": user_id or ""})
 
+    def list_for_document(
+        self,
+        document_id: str,
+        user_id: str,
+        *,
+        active_only: bool = True,
+    ) -> list[dict[str, Any]]:
+        """Find jobs tied to one document in the current workspace."""
+        if not self.available() or not document_id:
+            return []
+
+        try:
+            with self.session_factory() as db:
+                stmt = select(ProcessingJobRecord).where(
+                    ProcessingJobRecord.document_id == document_id,
+                    ProcessingJobRecord.user_id == user_id,
+                )
+                if active_only:
+                    stmt = stmt.where(~ProcessingJobRecord.status.in_(TERMINAL_STATES))
+                stmt = stmt.order_by(ProcessingJobRecord.created_at.desc())
+                return [_record_to_dict(record) for record in db.scalars(stmt).all()]
+        except (SQLAlchemyError, OSError, RuntimeError) as exc:
+            _raise_db_error(
+                "list document jobs",
+                exc,
+                {"document_id": document_id, "user_id": user_id},
+            )
+
     def get(self, job_id: str, user_id: Optional[str]) -> Optional[dict[str, Any]]:
         if not self.available():
             return None
@@ -160,6 +188,11 @@ class JobRepository:
                 return _record_to_dict(record) if record else None
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
             _raise_db_error("get job history", exc, {"job_id": job_id})
+
+    def is_revoked(self, job_id: str, user_id: str) -> bool:
+        """Let a worker notice the delete tombstone between pipeline stages."""
+        job = self.get(job_id, user_id)
+        return bool(job and job["status"] == "REVOKED")
 
     def cleanup_finished(self, older_than_days: int = 30) -> int:
         if not self.available() or delete is None:

@@ -9,12 +9,13 @@ from typing import Any, Callable, Optional
 from app.core.database import SessionLocal, db_enabled
 
 try:
-    from sqlalchemy import delete, or_, select
+    from sqlalchemy import delete, or_, select, update
     from app.models.persistence import DocumentRecord, ParsedChunkRecord, ParsedEntityRecord
 except ImportError:  # pragma: no cover - only before DB deps are installed
     delete = None
     or_ = None
     select = None
+    update = None
     DocumentRecord = None  # type: ignore[assignment]
     ParsedChunkRecord = None  # type: ignore[assignment]
     ParsedEntityRecord = None  # type: ignore[assignment]
@@ -36,10 +37,12 @@ class ParsedArtifactRepository:
             self.enabled()
             and self.session_factory
             and delete
+            and or_
             and select
             and DocumentRecord
             and ParsedChunkRecord
             and ParsedEntityRecord
+            and update
         )
 
     def replace_for_document(
@@ -59,7 +62,7 @@ class ParsedArtifactRepository:
             return
 
         with self.session_factory() as db:
-            document = _find_document(db, identifier, user_id)
+            document = _find_document(db, identifier, user_id, lock=True)
             if not document:
                 # Never create parse rows from an unverified filename. The
                 # document row is the ownership check for everything below it.
@@ -91,6 +94,11 @@ class ParsedArtifactRepository:
                 if row:
                     db.add(row)
 
+            # with_for_update protects PostgreSQL. This conditional write also
+            # keeps SQLite from committing after a delete won the race.
+            if not _document_is_active(db, document_id, user_id):
+                db.rollback()
+                return
             db.commit()
 
     def delete_for_document(self, identifier: str, *, user_id: str = "local-dev") -> None:
@@ -99,7 +107,8 @@ class ParsedArtifactRepository:
             return
 
         with self.session_factory() as db:
-            document = _find_document(db, identifier, user_id)
+            # Cleanup must still find the row after the service sets deleted_at.
+            document = _find_document(db, identifier, user_id, include_deleted=True, lock=True)
             if not document:
                 return
             document_id = document.id
@@ -154,13 +163,43 @@ class ParsedArtifactRepository:
             return [_entity_to_dict(row) for row in db.scalars(stmt).all()]
 
 
-def _find_document(db, identifier: str, user_id: str) -> Optional["DocumentRecord"]:
-    """Resolve either the public filename or internal ID inside one workspace."""
-    stmt = select(DocumentRecord).where(
+def _find_document(
+    db,
+    identifier: str,
+    user_id: str,
+    *,
+    include_deleted: bool = False,
+    lock: bool = False,
+) -> Optional["DocumentRecord"]:
+    """Resolve one document without crossing a user's workspace."""
+    conditions = [
         DocumentRecord.user_id == user_id,
         or_(DocumentRecord.id == identifier, DocumentRecord.filename == identifier),
-    )
+    ]
+    if not include_deleted:
+        conditions.append(DocumentRecord.deleted_at.is_(None))
+
+    stmt = select(DocumentRecord).where(*conditions)
+    if lock:
+        stmt = stmt.with_for_update()
     return db.scalars(stmt).first()
+
+
+def _document_is_active(db, document_id: str, user_id: str) -> bool:
+    """Check the delete marker at the point where derived rows are committed."""
+    if update is None:
+        return True
+
+    result = db.execute(
+        update(DocumentRecord)
+        .where(
+            DocumentRecord.id == document_id,
+            DocumentRecord.user_id == user_id,
+            DocumentRecord.deleted_at.is_(None),
+        )
+        .values(deleted_at=None)
+    )
+    return int(result.rowcount or 0) == 1
 
 
 def _chunk_record(

@@ -1,8 +1,10 @@
 """Processing pipeline tests for the upload-to-search path."""
 
+import pytest
+
 from app.services.entity_extractor import EntityExtractor
 from app.services.graph_builder_enhanced import KnowledgeGraph
-from app.services.pipeline import ProcessingPipeline
+from app.services.pipeline import ProcessingCancelledError, ProcessingPipeline
 from app.services.vector_store import VectorStore
 from app.tasks import process_document as task_module
 
@@ -40,6 +42,28 @@ def test_processing_pipeline_updates_graph_and_search_index(tmp_path):
     assert persisted[0]["graph"]["nodes"]
     assert progress[0] == ("Parsing document", 15)
     assert progress[-1] == ("Done", 100)
+
+
+def test_processing_pipeline_stops_before_writing_when_document_is_deleted(tmp_path):
+    file_path = tmp_path / "deleted.md"
+    file_path.write_text("# Deleted\n\nFastAPI uses Python.", encoding="utf-8")
+    graph = KnowledgeGraph()
+    store = VectorStore()
+
+    with pytest.raises(ProcessingCancelledError):
+        ProcessingPipeline(
+            extractor=EntityExtractor(model_name=None),
+            graph=graph,
+            store=store,
+            graph_repo=FakeGraphRepository([]),
+        ).process(
+            str(file_path),
+            "deleted.md",
+            should_cancel=lambda: True,
+        )
+
+    assert graph.get_stats()["total_nodes"] == 0
+    assert store.chunks == {}
 
 
 class FakeGraphRepository:
@@ -82,8 +106,11 @@ class FakePipeline:
         user_id="local-dev",
         on_progress=None,
         document_id=None,
+        should_cancel=None,
     ):
         self.calls.append((file_path, filename, original_filename))
+        if should_cancel and should_cancel():
+            raise ProcessingCancelledError("Document was deleted while reindexing")
         if filename in self.fail_for:
             raise RuntimeError("parse failed")
         if on_progress:
@@ -106,6 +133,25 @@ def test_reindex_document_uses_stored_metadata(monkeypatch):
     result = task_module.reindex_document.run("hash.md")
 
     assert result == {"filename": "hash.md", "status": "indexed"}
+    assert fake_pipeline.calls == [("/tmp/hash.md", "hash.md", "notes.md")]
+
+
+def test_reindex_document_stops_when_its_job_is_revoked(monkeypatch):
+    docs = [
+        {
+            "filename": "hash.md",
+            "file_path": "/tmp/hash.md",
+            "original_filename": "notes.md",
+        }
+    ]
+    fake_pipeline = FakePipeline()
+    monkeypatch.setattr(task_module, "document_service", FakeDocumentService(docs))
+    monkeypatch.setattr(task_module, "pipeline", fake_pipeline)
+    monkeypatch.setattr(task_module, "_job_was_revoked", lambda task, user_id: True)
+
+    result = task_module.reindex_document.run("hash.md")
+
+    assert result["status"] == "cancelled"
     assert fake_pipeline.calls == [("/tmp/hash.md", "hash.md", "notes.md")]
 
 

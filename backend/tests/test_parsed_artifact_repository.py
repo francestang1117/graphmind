@@ -1,10 +1,11 @@
 """Parsed artifact repository tests."""
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
+from app.models.persistence import ParsedChunkRecord, ParsedEntityRecord
 from app.services.document_repository import DocumentRepository
 from app.services.parsed_artifact_repository import ParsedArtifactRepository
 
@@ -116,3 +117,27 @@ def test_artifacts_are_isolated_when_users_upload_the_same_file():
     artifacts.delete_for_document("same.md", user_id="u1")
     assert artifacts.list_chunks("same.md", user_id="u1") == []
     assert artifacts.list_chunks("same.md", user_id="u2")[0]["text"] == "User two"
+
+
+def test_artifacts_ignore_late_write_after_document_deletion():
+    docs, artifacts = _repos()
+    docs.save_metadata(_metadata())
+    artifacts.replace_for_document(
+        "hash.md",
+        {"chunks": [{"text": "Old content"}]},
+        [{"text": "Python", "label": "PROGRAMMING_LANGUAGE"}],
+        user_id="u1",
+    )
+
+    docs.mark_deleted("hash.md", "u1")
+    artifacts.delete_for_document("hash.md", user_id="u1")
+    artifacts.replace_for_document(
+        "hash.md",
+        {"chunks": [{"text": "Late content"}]},
+        [{"text": "FastAPI", "label": "FRAMEWORK"}],
+        user_id="u1",
+    )
+
+    with artifacts.session_factory() as db:
+        assert db.scalars(select(ParsedChunkRecord)).all() == []
+        assert db.scalars(select(ParsedEntityRecord)).all() == []

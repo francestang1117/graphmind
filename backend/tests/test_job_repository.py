@@ -110,3 +110,34 @@ def test_job_repository_does_not_downgrade_terminal_state():
     assert fetched["step"] == "Done"
     assert fetched["progress"] == 100
     assert fetched["finished_at"]
+
+
+def test_job_repository_finds_active_jobs_and_keeps_revocation_visible():
+    repo = _repo()
+    repo.create("active", user_id="u1", document_id="doc-1")
+    repo.create("done", user_id="u1", document_id="doc-1")
+    repo.upsert(
+        "done",
+        user_id="u1",
+        document_id="doc-1",
+        status="SUCCESS",
+        step="Done",
+        progress=100,
+    )
+    repo.create("other-doc", user_id="u1", document_id="doc-2")
+
+    assert [job["job_id"] for job in repo.list_for_document("doc-1", "u1")] == ["active"]
+    assert repo.is_revoked("active", "u1") is False
+
+    repo.upsert(
+        "active",
+        user_id="u1",
+        document_id="doc-1",
+        status="REVOKED",
+        step="Cancelled",
+        progress=0,
+        error="Document deleted",
+    )
+
+    assert repo.list_for_document("doc-1", "u1") == []
+    assert repo.is_revoked("active", "u1") is True

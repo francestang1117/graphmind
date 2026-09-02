@@ -1134,6 +1134,25 @@ also ignores stale active updates after a terminal state has been recorded.
 The tests cover the ordering, a worker that completes before `apply_async`
 returns, broker failure, and the repository's terminal-state guard.
 
+## 2026-09 — Stop Deleted Documents From Being Reprocessed
+
+Another race showed up around document deletion. A worker could already be
+inside the parser when the user deleted the source file. Soft deletion leaves
+the parent row in the database, so the worker could later insert fresh chunks
+and graph rows even though the document was gone from the library.
+
+Deletion now writes the tombstone first, marks active jobs as `REVOKED`, and
+asks Celery to stop them. The worker checks that job state between pipeline
+stages. The parsed-artifact and graph repositories also require an active
+document owned by the current user, then check that condition again before
+committing. The second check matters for the short window between parsing and
+the database write.
+
+The progress socket reads terminal job history as well as Celery state. That
+keeps a deleted job visibly cancelled even if Celery reports `SUCCESS` after
+the revoke request arrived. Regression tests cover late artifact writes, late
+graph writes, job cancellation, reindex cancellation, and the WebSocket view.
+
 ## 2026-09 — WebSocket Ticket Authentication
 
 The browser originally put the full access token in the WebSocket query string.

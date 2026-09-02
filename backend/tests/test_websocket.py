@@ -95,6 +95,36 @@ def test_job_progress_websocket_streams_until_success(monkeypatch):
     ]
 
 
+def test_job_progress_websocket_keeps_deleted_job_revoked(monkeypatch):
+    task = FakeTask([("SUCCESS", None, {"status": "indexed"})])
+    monkeypatch.setattr("app.core.celery_app.celery_app", FakeCelery(task))
+    monkeypatch.setattr(
+        "app.api.endpoints.websocket.job_repository",
+        _TerminalJobRepository(),
+    )
+
+    async def no_redis():
+        return None
+
+    monkeypatch.setattr("app.services.websocket_ticket._redis_client", no_redis)
+    auth._ensure_dev_user()
+    websocket = FakeWebSocket()
+    websocket.query_params = {
+        "ticket": asyncio.run(issue_job_ws_ticket("job-123", "local-dev")),
+    }
+
+    asyncio.run(job_progress_ws(websocket, "job-123"))
+
+    assert websocket.messages == [
+        {
+            "state": "REVOKED",
+            "pct": 0,
+            "step": "Cancelled: document deleted",
+            "error": "Document deleted",
+        }
+    ]
+
+
 def test_job_progress_websocket_rejects_unknown_job(monkeypatch):
     monkeypatch.setattr(
         "app.api.endpoints.websocket.job_repository",
@@ -141,3 +171,15 @@ class _FakeJobRepository:
         if self.owner == user_id:
             return {"job_id": "job-123", "user_id": user_id}
         return None
+
+
+class _TerminalJobRepository:
+    def get(self, _job_id, _user_id):
+        return {
+            "job_id": "job-123",
+            "user_id": "local-dev",
+            "status": "REVOKED",
+            "progress": 0,
+            "step": "Cancelled: document deleted",
+            "error": "Document deleted",
+        }

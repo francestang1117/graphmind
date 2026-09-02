@@ -14,6 +14,7 @@ from app.services.websocket_ticket import consume_job_ws_ticket
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+_TERMINAL_JOB_STATES = {"SUCCESS", "FAILURE", "REVOKED", "ERROR"}
 
 
 @router.websocket("/ws/jobs/{job_id}")
@@ -40,7 +41,14 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
         last_state: dict[str, Any] = {}
 
         while True:
-            current = task_snapshot(task)
+            # Celery may report SUCCESS after a revoke reached the database.
+            # The persisted terminal state is the source of truth in that race.
+            stored = job_repository.get(job_id, user.id)
+            stored_status = stored.get("status") if stored else ""
+            if stored and stored_status in _TERMINAL_JOB_STATES:
+                current = _stored_job_snapshot(stored)
+            else:
+                current = task_snapshot(task)
 
             # Keep the socket quiet while Celery is reporting the same state.
             if current != last_state:
@@ -122,6 +130,19 @@ def task_snapshot(task) -> dict[str, Any]:
 
     # STARTED or custom states
     return {"state": state, "pct": 0, "step": state.capitalize()}
+
+
+def _stored_job_snapshot(job: dict[str, Any]) -> dict[str, Any]:
+    """Use the job row when Celery's final state is stale or already expired."""
+    state = str(job.get("status") or "ERROR").upper()
+    snapshot = {
+        "state": state,
+        "pct": int(job.get("progress") or 0),
+        "step": job.get("step") or state.capitalize(),
+    }
+    if state in {"FAILURE", "REVOKED", "ERROR"}:
+        snapshot["error"] = job.get("error") or state.capitalize()
+    return snapshot
 
 
 class JobBroadcaster:
