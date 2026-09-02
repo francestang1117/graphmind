@@ -5,10 +5,21 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
+from app.core.database import Base
 from app.core.database_migrations import upgrade_persistence_schema
 from app.core.workspace import default_workspace_id
+from app.models.persistence import (
+    DocumentRecord,
+    GraphEdgeRecord,
+    ParsedChunkRecord,
+    ParsedEntityRecord,
+    ProcessingJobRecord,
+    UserRecord,
+    WorkspaceRecord,
+)
 
 
 def _legacy_engine():
@@ -186,6 +197,115 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
     assert inspector.get_foreign_keys("parsed_entities")[0]["referred_table"] == "documents"
     assert inspector.get_foreign_keys("graph_edges")[0]["referred_table"] == "documents"
     assert inspector.get_foreign_keys("processing_jobs")[0]["referred_table"] == "documents"
+
+
+def test_backfill_keeps_children_in_the_document_workspace_after_repeat():
+    """A rerun must repair child rows that were given the wrong fallback workspace."""
+    engine = create_engine("sqlite:///:memory:", future=True)
+    Base.metadata.create_all(bind=engine)
+
+    user_id = "user-1"
+    workspace_id = "research-workspace"
+    document_id = uuid.uuid4().hex
+    fallback_workspace_id = default_workspace_id(user_id)
+
+    with Session(engine) as db:
+        db.add_all(
+            [
+                UserRecord(
+                    id=user_id,
+                    email="user-1@example.com",
+                    name="User One",
+                    hashed_password="test-hash",
+                ),
+                WorkspaceRecord(
+                    id=workspace_id,
+                    user_id=user_id,
+                    name="Cancer research",
+                    research_question="How does this paper describe the treatment?",
+                    domain="medical",
+                    status="active",
+                ),
+                DocumentRecord(
+                    id=document_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    filename="paper.pdf",
+                    stored_filename="paper.pdf",
+                    original_filename="paper.pdf",
+                    file_extension=".pdf",
+                    file_type=".pdf",
+                    mime_type="application/pdf",
+                    file_hash="paper-hash",
+                    file_path="/tmp/paper.pdf",
+                    file_size=100,
+                    status="indexed",
+                ),
+                ParsedChunkRecord(
+                    id="chunk-1",
+                    document_id=document_id,
+                    user_id=user_id,
+                    workspace_id=None,
+                    chunk_index=0,
+                    chunk_type="page",
+                    text="A paper chunk",
+                    metadata_json="{}",
+                ),
+                ParsedEntityRecord(
+                    id="entity-1",
+                    document_id=document_id,
+                    user_id=user_id,
+                    workspace_id=fallback_workspace_id,
+                    text="Treatment",
+                    normalized="treatment",
+                    label="CONCEPT",
+                    source="rule",
+                    confidence=0.9,
+                    context="",
+                    metadata_json="{}",
+                ),
+                GraphEdgeRecord(
+                    id="edge-1",
+                    user_id=user_id,
+                    workspace_id=None,
+                    source_node_id="treatment",
+                    target_node_id="outcome",
+                    relation_type="RELATED_TO",
+                    source_document_id=document_id,
+                    confidence=0.6,
+                    weight=1,
+                    sources_json="[]",
+                ),
+                ProcessingJobRecord(
+                    job_id="job-1",
+                    user_id=user_id,
+                    workspace_id=fallback_workspace_id,
+                    document_id=document_id,
+                    original_filename="paper.pdf",
+                    status="SUCCESS",
+                    step="Done",
+                    progress=100,
+                    error="",
+                ),
+            ]
+        )
+        db.commit()
+
+    upgrade_persistence_schema(engine)
+    upgrade_persistence_schema(engine)
+
+    with engine.connect() as db:
+        for table in (
+            "parsed_chunks",
+            "parsed_entities",
+            "graph_edges",
+            "processing_jobs",
+        ):
+            assert db.scalar(
+                text(f"SELECT workspace_id FROM {table} LIMIT 1")
+            ) == workspace_id
+
+    engine.dispose()
 
 
 def _postgres_test_url() -> str | None:

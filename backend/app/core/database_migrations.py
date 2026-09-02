@@ -105,8 +105,13 @@ def _ensure_workspace_table(connection) -> None:
     if _has_table(connection, "workspaces"):
         return
 
+    timestamp_type = (
+        "DATETIME"
+        if connection.dialect.name == "sqlite"
+        else "TIMESTAMP WITH TIME ZONE"
+    )
     connection.exec_driver_sql(
-        """
+        f"""
         CREATE TABLE workspaces (
             id VARCHAR(64) NOT NULL PRIMARY KEY,
             user_id VARCHAR(64) NOT NULL,
@@ -114,8 +119,8 @@ def _ensure_workspace_table(connection) -> None:
             research_question TEXT NOT NULL,
             domain VARCHAR(64) NOT NULL,
             status VARCHAR(32) NOT NULL,
-            created_at DATETIME NOT NULL,
-            updated_at DATETIME NOT NULL
+            created_at {timestamp_type} NOT NULL,
+            updated_at {timestamp_type} NOT NULL
         )
         """
     )
@@ -201,8 +206,57 @@ def _backfill_workspace_ids(connection) -> int:
     changed = 0
     user_ids = _known_user_ids(connection)
 
+    # Documents have no parent row to copy from. Keep an existing workspace;
+    # old documents without one belong in the user's compatibility workspace.
+    if _has_table(connection, "documents") and _has_column(
+        connection, "documents", "workspace_id"
+    ):
+        for user_id in user_ids:
+            result = connection.execute(
+                text(
+                    "UPDATE documents SET workspace_id = :workspace_id "
+                    "WHERE user_id = :user_id "
+                    "AND (workspace_id IS NULL OR workspace_id = '')"
+                ),
+                {"workspace_id": default_workspace_id(user_id), "user_id": user_id},
+            )
+            changed += result.rowcount or 0
+
+    # A parsed row belongs to the workspace of its document. This must happen
+    # before the default fill below, and it also repairs a stale workspace id.
+    for table, document_column in (
+        ("parsed_chunks", "document_id"),
+        ("parsed_entities", "document_id"),
+        ("graph_edges", "source_document_id"),
+        ("processing_jobs", "document_id"),
+    ):
+        if not _has_table(connection, table) or not _has_column(
+            connection, table, document_column
+        ):
+            continue
+        result = connection.execute(
+            text(
+                f"UPDATE {table} AS child SET workspace_id = "
+                f"(SELECT doc.workspace_id FROM documents AS doc "
+                f"WHERE doc.id = child.{document_column} "
+                f"AND doc.user_id = child.user_id) "
+                f"WHERE EXISTS (SELECT 1 FROM documents AS doc "
+                f"WHERE doc.id = child.{document_column} "
+                f"AND doc.user_id = child.user_id "
+                f"AND doc.workspace_id IS NOT NULL) "
+                f"AND (child.workspace_id IS NULL OR child.workspace_id = '' "
+                f"OR child.workspace_id != (SELECT doc.workspace_id FROM documents AS doc "
+                f"WHERE doc.id = child.{document_column} "
+                f"AND doc.user_id = child.user_id))"
+            )
+        )
+        changed += result.rowcount or 0
+
+    # Anything left is an orphan or a legacy row without a document link.
     for table in _WORKSPACE_TABLES:
-        if not _has_table(connection, table):
+        if not _has_table(connection, table) or not _has_column(
+            connection, table, "workspace_id"
+        ):
             continue
         for user_id in user_ids:
             result = connection.execute(
@@ -214,27 +268,6 @@ def _backfill_workspace_ids(connection) -> int:
                 {"workspace_id": default_workspace_id(user_id), "user_id": user_id},
             )
             changed += result.rowcount or 0
-
-    # A child row may have a real document from a non-default workspace.
-    for table, document_column in (
-        ("parsed_chunks", "document_id"),
-        ("parsed_entities", "document_id"),
-        ("graph_edges", "source_document_id"),
-        ("processing_jobs", "document_id"),
-    ):
-        if not _has_table(connection, table) or not _has_column(connection, table, document_column):
-            continue
-        result = connection.execute(
-            text(
-                f"UPDATE {table} AS child SET workspace_id = "
-                f"(SELECT doc.workspace_id FROM documents AS doc "
-                f"WHERE doc.id = child.{document_column}) "
-                f"WHERE (child.workspace_id IS NULL OR child.workspace_id = '') "
-                f"AND EXISTS (SELECT 1 FROM documents AS doc "
-                f"WHERE doc.id = child.{document_column} AND doc.workspace_id IS NOT NULL)"
-            )
-        )
-        changed += result.rowcount or 0
 
     return changed
 
