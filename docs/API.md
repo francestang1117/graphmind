@@ -108,6 +108,41 @@ body remains available for non-browser clients:
 
 ---
 
+## Workspaces
+
+Workspaces are the boundary for a research project. Every workspace belongs to
+one account, and document, parsed-artifact, graph, job, search, and chat reads
+can be scoped to it.
+
+### `POST /workspaces/`
+
+```json
+{
+  "name": "Type 2 diabetes literature",
+  "research_question": "Which interventions are being studied?",
+  "domain": "medical"
+}
+```
+
+The response contains the workspace `id`, which can be sent with later
+document, search, graph, chat, and job requests.
+
+### `GET /workspaces/`
+
+Lists only the workspaces owned by the current account.
+
+### `GET /workspaces/{workspace_id}`
+
+Returns one workspace. A workspace owned by another account is reported as
+`404`, just like other account-scoped resources.
+
+The existing endpoints remain compatible without a workspace ID. When it is
+omitted, the backend uses a stable default workspace for the current user. A
+workspace ID is supplied as a multipart field for document upload and as a
+query or JSON field on the other endpoints.
+
+---
+
 ## Documents
 
 ### `POST /documents/upload`
@@ -119,7 +154,8 @@ sent to Redis/Celery and the response includes a `job_id`.
 ```bash
 curl -X POST /api/v1/documents/upload \
   -H "Authorization: Bearer $TOKEN" \
-  -F "file=@report.md"
+  -F "file=@report.md" \
+  -F "workspace_id=$WORKSPACE_ID"
 ```
 
 ```json
@@ -155,7 +191,8 @@ curl -X POST /api/v1/documents/upload \
 { "total": 3, "files": [{ "filename": "...", "file_size": 14500, ... }] }
 ```
 
-Pagination is not implemented yet; the current endpoint returns all visible files for the current user.
+Pagination is not implemented yet; the current endpoint returns all visible
+files in the selected workspace for the current user.
 
 ### `GET /documents/{filename}`
 
@@ -197,7 +234,9 @@ Passive formats such as `.pdf`, `.txt`, `.md`, `.json`, and `.csv` can open inli
 
 Graph endpoints read persisted `graph_nodes` / `graph_edges` rows when they
 exist. If a workspace has not been reprocessed since graph persistence was
-added, the API falls back to rebuilding the graph from stored documents.
+added, the API falls back to rebuilding the graph from stored documents. Pass
+`?workspace_id=<id>` to select a workspace; without it, the user's default
+workspace is used.
 
 ### `GET /graph`
 
@@ -292,7 +331,7 @@ separate downloads.
 
 ```json
 // Request
-{ "query": "neural network backpropagation", "limit": 10, "search_type": "hybrid" }
+{ "query": "neural network backpropagation", "limit": 10, "search_type": "hybrid", "workspace_id": "workspace-id" }
 
 // Response
 {
@@ -319,7 +358,7 @@ separate downloads.
 
 ```json
 // Request
-{ "message": "What frameworks are used in my documents?", "conversation_id": null }
+{ "message": "What frameworks are used in my documents?", "conversation_id": null, "workspace_id": "workspace-id" }
 
 // Response
 {

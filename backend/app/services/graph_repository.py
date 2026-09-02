@@ -8,15 +8,17 @@ import logging
 from typing import Any, Callable
 
 from app.core.database import SessionLocal, db_enabled
+from app.core.workspace import default_workspace_id
 
 log = logging.getLogger(__name__)
 
 try:
-    from sqlalchemy import delete, select, update
+    from sqlalchemy import delete, or_, select, update
     from sqlalchemy.exc import SQLAlchemyError
     from app.models.persistence import DocumentRecord, GraphEdgeRecord, GraphNodeRecord, utc_now
 except ImportError:  # pragma: no cover - only before DB deps are installed
     delete = None
+    or_ = None
     select = None
     update = None
     SQLAlchemyError = Exception
@@ -42,6 +44,7 @@ class GraphRepository:
             self.enabled()
             and self.session_factory
             and delete
+            and or_
             and select
             and update
             and DocumentRecord
@@ -55,6 +58,7 @@ class GraphRepository:
         user_id: str,
         document_id: str,
         graph: dict[str, Any],
+        workspace_id: str | None = None,
     ) -> None:
         """Replace the persisted graph slice created by one document."""
         if not self.available():
@@ -62,47 +66,72 @@ class GraphRepository:
 
         try:
             with self.session_factory() as db:
-                document = self._active_document(db, user_id, document_id)
+                document = self._active_document(db, user_id, document_id, workspace_id)
                 if not document:
                     log.info("Skipping graph write for deleted or missing document %s", document_id)
                     return
 
                 # Reindexing should leave one clean slice per document, not a
                 # pile of stale edges from older parser/entity rules.
-                self._remove_document_slice(db, user_id, document_id)
+                self._remove_document_slice(
+                    db,
+                    user_id,
+                    document_id,
+                    document.workspace_id,
+                )
                 # If a node is deleted and re-added in the same transaction,
                 # SQLite/SQLAlchemy can still remember the old identity until
                 # the delete is flushed.
                 db.flush()
 
                 for node in graph.get("nodes", []):
-                    self._upsert_node(db, user_id, document_id, node)
+                    self._upsert_node(
+                        db,
+                        user_id,
+                        document_id,
+                        node,
+                        document.workspace_id,
+                    )
 
                 for edge in graph.get("edges", []):
-                    db.add(_edge_record(user_id, document_id, edge))
+                    db.add(_edge_record(user_id, document_id, edge, document.workspace_id))
 
                 # The row lock covers PostgreSQL. The conditional update gives
                 # SQLite one last check before derived rows become visible.
-                if not self._document_is_active(db, user_id, document_id):
+                if not self._document_is_active(
+                    db,
+                    user_id,
+                    document_id,
+                    document.workspace_id,
+                ):
                     db.rollback()
                     return
                 db.commit()
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
             log.warning("Could not persist graph slice for %s: %s", document_id, exc)
 
-    def delete_for_document(self, document_id: str, user_id: str | None = None) -> None:
+    def delete_for_document(
+        self,
+        document_id: str,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> None:
         """Remove graph rows that came from one document."""
         if not self.available():
             return
 
         try:
             with self.session_factory() as db:
-                self._remove_document_slice(db, user_id, document_id)
+                self._remove_document_slice(db, user_id, document_id, workspace_id)
                 db.commit()
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
             log.warning("Could not delete graph slice for %s: %s", document_id, exc)
 
-    def load_graph(self, user_id: str | None = None) -> dict[str, Any]:
+    def load_graph(
+        self,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any]:
         """Return persisted graph data in the same detailed shape as the builder."""
         if not self.available():
             return {"nodes": [], "edges": []}
@@ -114,6 +143,15 @@ class GraphRepository:
                 if user_id:
                     node_stmt = node_stmt.where(GraphNodeRecord.user_id == user_id)
                     edge_stmt = edge_stmt.where(GraphEdgeRecord.user_id == user_id)
+                    node_stmt = node_stmt.where(
+                        _workspace_condition(GraphNodeRecord.workspace_id, user_id, workspace_id)
+                    )
+                    edge_stmt = edge_stmt.where(
+                        _workspace_condition(GraphEdgeRecord.workspace_id, user_id, workspace_id)
+                    )
+                elif workspace_id:
+                    node_stmt = node_stmt.where(GraphNodeRecord.workspace_id == workspace_id)
+                    edge_stmt = edge_stmt.where(GraphEdgeRecord.workspace_id == workspace_id)
 
                 nodes = [_node_to_dict(row) for row in db.scalars(node_stmt).all()]
                 edges = _aggregate_edges(
@@ -124,7 +162,11 @@ class GraphRepository:
             log.warning("Could not load persisted graph: %s", exc)
             return {"nodes": [], "edges": []}
 
-    def has_graph(self, user_id: str | None = None) -> bool:
+    def has_graph(
+        self,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> bool:
         if not self.available():
             return False
 
@@ -133,18 +175,38 @@ class GraphRepository:
                 stmt = select(GraphNodeRecord.id)
                 if user_id:
                     stmt = stmt.where(GraphNodeRecord.user_id == user_id)
+                    stmt = stmt.where(
+                        _workspace_condition(GraphNodeRecord.workspace_id, user_id, workspace_id)
+                    )
+                elif workspace_id:
+                    stmt = stmt.where(GraphNodeRecord.workspace_id == workspace_id)
                 return db.scalars(stmt).first() is not None
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
             log.warning("Could not check persisted graph: %s", exc)
             return False
 
-    def _remove_document_slice(self, db, user_id: str | None, document_id: str) -> None:
+    def _remove_document_slice(
+        self,
+        db,
+        user_id: str | None,
+        document_id: str,
+        workspace_id: str | None = None,
+    ) -> None:
         # Edges belong to one document slice, so they can be removed directly.
         edge_stmt = delete(GraphEdgeRecord).where(GraphEdgeRecord.source_document_id == document_id)
         node_stmt = select(GraphNodeRecord)
         if user_id:
             edge_stmt = edge_stmt.where(GraphEdgeRecord.user_id == user_id)
             node_stmt = node_stmt.where(GraphNodeRecord.user_id == user_id)
+            edge_stmt = edge_stmt.where(
+                _workspace_condition(GraphEdgeRecord.workspace_id, user_id, workspace_id)
+            )
+            node_stmt = node_stmt.where(
+                _workspace_condition(GraphNodeRecord.workspace_id, user_id, workspace_id)
+            )
+        elif workspace_id:
+            edge_stmt = edge_stmt.where(GraphEdgeRecord.workspace_id == workspace_id)
+            node_stmt = node_stmt.where(GraphNodeRecord.workspace_id == workspace_id)
 
         db.execute(edge_stmt)
         for node in db.scalars(node_stmt).all():
@@ -160,20 +222,33 @@ class GraphRepository:
             node.source_document_ids_json = _json(source_ids)
             node.updated_at = utc_now()
 
-    def _active_document(self, db, user_id: str, document_id: str):
+    def _active_document(
+        self,
+        db,
+        user_id: str,
+        document_id: str,
+        workspace_id: str | None = None,
+    ):
         """Lock the source row before replacing its graph slice."""
         stmt = (
             select(DocumentRecord)
             .where(
                 DocumentRecord.id == document_id,
                 DocumentRecord.user_id == user_id,
+                _workspace_condition(DocumentRecord.workspace_id, user_id, workspace_id),
                 DocumentRecord.deleted_at.is_(None),
             )
             .with_for_update()
         )
         return db.scalars(stmt).first()
 
-    def _document_is_active(self, db, user_id: str, document_id: str) -> bool:
+    def _document_is_active(
+        self,
+        db,
+        user_id: str,
+        document_id: str,
+        workspace_id: str | None = None,
+    ) -> bool:
         """Make the final write conditional on the document still being live."""
         if update is None:
             return True
@@ -183,6 +258,7 @@ class GraphRepository:
             .where(
                 DocumentRecord.id == document_id,
                 DocumentRecord.user_id == user_id,
+                _workspace_condition(DocumentRecord.workspace_id, user_id, workspace_id),
                 DocumentRecord.deleted_at.is_(None),
             )
             .values(deleted_at=None)
@@ -195,15 +271,17 @@ class GraphRepository:
         user_id: str,
         document_id: str,
         node: dict[str, Any],
+        workspace_id: str | None = None,
     ) -> None:
         node_id = str(node.get("id") or "")
         if not node_id:
             return
 
-        row_id = _row_id(user_id, node_id)
+        scope = workspace_id or default_workspace_id(user_id)
+        row_id = _row_id(user_id, scope, node_id)
         record = db.get(GraphNodeRecord, row_id)
         if not record:
-            db.add(_node_record(user_id, document_id, node))
+            db.add(_node_record(user_id, document_id, node, scope))
             return
 
         # Same entity, new source. Keep the strongest confidence and merge the
@@ -219,11 +297,18 @@ class GraphRepository:
         record.updated_at = utc_now()
 
 
-def _node_record(user_id: str, document_id: str, node: dict[str, Any]) -> "GraphNodeRecord":
+def _node_record(
+    user_id: str,
+    document_id: str,
+    node: dict[str, Any],
+    workspace_id: str | None = None,
+) -> "GraphNodeRecord":
     node_id = str(node.get("id") or "")
+    scope = workspace_id or default_workspace_id(user_id)
     return GraphNodeRecord(
-        id=_row_id(user_id, node_id),
+        id=_row_id(user_id, scope, node_id),
         user_id=user_id,
+        workspace_id=scope,
         node_id=node_id,
         label=str(node.get("label") or "")[:255],
         node_type=str(node.get("type") or "ENTITY").upper()[:80],
@@ -234,15 +319,22 @@ def _node_record(user_id: str, document_id: str, node: dict[str, Any]) -> "Graph
     )
 
 
-def _edge_record(user_id: str, document_id: str, edge: dict[str, Any]) -> "GraphEdgeRecord":
+def _edge_record(
+    user_id: str,
+    document_id: str,
+    edge: dict[str, Any],
+    workspace_id: str | None = None,
+) -> "GraphEdgeRecord":
     source = str(edge.get("source") or "")
     target = str(edge.get("target") or "")
     relation = str(edge.get("type") or "RELATED_TO").upper()
+    scope = workspace_id or default_workspace_id(user_id)
     # Include document_id in the key because the same relation can be supported
     # by more than one file. Later we can aggregate those rows for weight.
     return GraphEdgeRecord(
-        id=_row_id(user_id, source, target, relation, document_id),
+        id=_row_id(user_id, scope, source, target, relation, document_id),
         user_id=user_id,
+        workspace_id=scope,
         source_node_id=source,
         target_node_id=target,
         relation_type=relation[:80],
@@ -256,6 +348,7 @@ def _edge_record(user_id: str, document_id: str, edge: dict[str, Any]) -> "Graph
 def _node_to_dict(row: "GraphNodeRecord") -> dict[str, Any]:
     return {
         "id": row.node_id,
+        "workspace_id": row.workspace_id,
         "label": row.label,
         "type": row.node_type,
         "sources": _loads_list(row.sources_json),
@@ -270,6 +363,7 @@ def _edge_to_dict(row: "GraphEdgeRecord") -> dict[str, Any]:
     return {
         "source": row.source_node_id,
         "target": row.target_node_id,
+        "workspace_id": row.workspace_id,
         "type": row.relation_type,
         "confidence": row.confidence,
         "weight": row.weight,
@@ -332,6 +426,14 @@ def _loads_dict(value: str) -> dict[str, Any]:
 
 def _row_id(*parts: str) -> str:
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _workspace_condition(column, user_id: str, workspace_id: str | None):
+    """Keep legacy NULL graph rows in the user's default project."""
+    if workspace_id:
+        return column == workspace_id
+    default_id = default_workspace_id(user_id)
+    return or_(column == default_id, column.is_(None))
 
 
 graph_repository = GraphRepository()

@@ -24,6 +24,7 @@ GraphMind/
 │   │   ├── main.py
 │   │   ├── api/
 │   │   │   ├── __init__.py
+│   │   │   ├── workspace_scope.py
 │   │   │   └── endpoints/
 │   │   │       ├── auth.py
 │   │   │       ├── chat.py
@@ -31,8 +32,10 @@ GraphMind/
 │   │   │       ├── documents_with_markdown.py
 │   │   │       ├── graph.py
 │   │   │       ├── jobs.py
+│   │   │       ├── scraper.py
 │   │   │       ├── search.py
-│   │   │       └── websocket.py
+│   │   │       ├── websocket.py
+│   │   │       └── workspaces.py
 │   │   ├── core/
 │   │   │   ├── celery_app.py
 │   │   │   ├── config.py
@@ -40,7 +43,8 @@ GraphMind/
 │   │   │   ├── errors.py
 │   │   │   ├── metrics.py
 │   │   │   ├── rate_limit.py
-│   │   │   └── sentry.py
+│   │   │   ├── sentry.py
+│   │   │   └── workspace.py
 │   │   ├── models/
 │   │   │   ├── document.py
 │   │   │   └── persistence.py
@@ -58,7 +62,9 @@ GraphMind/
 │   │   │   ├── qa_engine.py
 │   │   │   ├── vector_store.py
 │   │   │   ├── virus_scanner.py
-│   │   │   └── websocket_ticket.py
+│   │   │   ├── web_scraper.py
+│   │   │   ├── websocket_ticket.py
+│   │   │   └── workspace_repository.py
 │   │   ├── tasks/
 │   │   │   ├── __init__.py
 │   │   │   └── process_document.py
@@ -84,7 +90,8 @@ GraphMind/
 │       ├── test_rate_limit.py
 │       ├── test_vector_store.py
 │       ├── test_virus_scanner.py
-│       └── test_websocket.py
+│       ├── test_websocket.py
+│       └── test_workspace_isolation.py
 └── frontend/
     ├── Dockerfile
     ├── README.md
@@ -104,10 +111,12 @@ GraphMind/
         │       ├── DocumentOverview.tsx
         │       ├── DocumentRow.tsx
         │       ├── FileIcon.tsx
+        │       ├── JobHistory.tsx
         │       ├── UploadDropzone.tsx
         │       └── UploadRow.tsx
         ├── hooks/
         │   ├── useGraph.ts
+        │   ├── useJobs.ts
         │   └── useUpload.ts
         ├── services/
         │   └── api.ts
@@ -129,7 +138,7 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `main.py` wires the FastAPI app, CORS, lifespan startup, rate limiting, API
   error handlers, `/api/v1/*` routes, and the WebSocket router.
 - `api/__init__.py` registers the active REST routers: auth, documents, graph,
-  search, and chat.
+  search, chat, scraper, jobs, and workspaces.
 - `documents.py` is the active upload/list/detail/delete/open-file API. It uses
   validation, optional virus scanning, content-hash deduplication, storage, parse
   caching, user scoping, and stable application error codes.
@@ -138,6 +147,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
   it is not registered as its own router.
 - `auth.py` handles email/password login, GitHub OAuth, JWT access tokens,
   HttpOnly refresh cookies, and the optional local-dev workspace.
+- `workspaces.py` creates and lists account-owned research projects. The
+  existing APIs use the user's stable default workspace when no ID is given.
 - `graph.py`, `search.py`, and `chat.py` are connected to real uploaded content.
   They are MVP implementations, not demo-only screens anymore.
 - `jobs.py` exposes small HTTP controls for worker jobs: check status and cancel.
@@ -151,6 +162,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `config.py` holds Pydantic settings and environment defaults.
 - `database.py` provides SQLAlchemy setup. Local development can use SQLite;
   PostgreSQL is the intended production direction.
+- `workspace.py` defines the stable compatibility workspace ID used for older
+  routes and rows created before project selection existed.
 - `errors.py` centralizes application error payloads and FastAPI handlers.
 - `metrics.py` exposes `/metrics` and records request, upload, search, chat,
   and pipeline counters for Prometheus.
@@ -180,6 +193,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
   visible after refreshes and old finished jobs can be cleaned up.
 - `websocket_ticket.py` stores short-lived job-bound socket tickets in Redis,
   with an in-memory fallback for local development.
+- `workspace_repository.py` stores account-owned research project metadata and
+  creates the default workspace used by the compatibility routes.
 - `pipeline.py` is the current single-document processing path used after
   upload and by the Celery-compatible task: parse, persist artifacts, extract
   entities/relations, persist graph nodes/edges, update the in-memory graph,
@@ -240,6 +255,7 @@ The backend currently has tests for:
 - job history persistence and cleanup
 - application error payloads
 - metrics wiring through the FastAPI app
+- workspace ownership, same-file multi-project support, and graph isolation
 
 Run the current backend suite with:
 
@@ -247,14 +263,26 @@ Run the current backend suite with:
 PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
 
+## Current Scope
+
+Workspace-scoped persistence is ready for the first V2 research workflow. The
+medical paper workflow itself is still early:
+
+- medical document classification and standard paper sections
+- study cards, sentence-level citations, and paper-focused chat
+- the frontend workspace picker and research-card pages
+- staging OAuth and `AUTH_REQUIRED=true` checks behind HTTPS and secure cookies
+
 ## Still Early
 
 The project now has real modules for upload, parsing, entity extraction, graph,
 search, chat, auth, rate limiting, persistence, metrics, Celery workers, and
-WebSocket progress. The main things that are still early are:
+WebSocket progress. The remaining gaps are:
 
 - deeper graph persistence tooling beyond the current node/edge tables
-- production-grade user/workspace isolation across every artifact
+- medical document classification and standard paper sections
+- study cards, sentence-level citations, and paper-focused chat
+- the frontend workspace picker and research-card pages
 - staging OAuth and `AUTH_REQUIRED=true` checks behind HTTPS
 - GPT-backed answer generation
 - richer relation extraction and graph quality tuning

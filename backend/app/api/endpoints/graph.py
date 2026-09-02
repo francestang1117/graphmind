@@ -9,12 +9,13 @@ from xml.etree import ElementTree
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 
+from app.api.workspace_scope import resolve_workspace_id
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.documents_with_markdown import get_cached_parse, parse_document_file
 from app.core.rate_limit import graph_read_limit
 from app.services.document_service import document_service
 from app.services.entity_extractor import entity_extractor
-from app.services.graph_builder_enhanced import KnowledgeGraph, knowledge_graph
+from app.services.graph_builder_enhanced import KnowledgeGraph
 from app.services.graph_repository import graph_repository
 
 
@@ -25,24 +26,28 @@ log = logging.getLogger(__name__)
 @router.get("/")
 @graph_read_limit
 async def get_graph(
+    workspace_id: Optional[str] = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
     response: Response = None,
 ) -> dict:
     """Return a graph built from all currently uploaded documents."""
-    graph = rebuild_graph_from_documents(user.id)
+    workspace_id = resolve_workspace_id(user.id, workspace_id)
+    graph = rebuild_graph_from_documents(user.id, workspace_id)
     return graph.export_for_visualization()
 
 
 @router.get("/stats")
 @graph_read_limit
 async def get_graph_stats(
+    workspace_id: Optional[str] = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
     response: Response = None,
 ) -> dict:
     """Return graph counters under the same read limit as the graph canvas."""
-    graph = rebuild_graph_from_documents(user.id)
+    workspace_id = resolve_workspace_id(user.id, workspace_id)
+    graph = rebuild_graph_from_documents(user.id, workspace_id)
     return graph.get_stats()
 
 
@@ -50,12 +55,14 @@ async def get_graph_stats(
 @graph_read_limit
 async def get_node(
     node_id: str,
+    workspace_id: Optional[str] = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
     response: Response = None,
 ) -> dict:
     """Return one node plus its directly connected neighborhood."""
-    graph = rebuild_graph_from_documents(user.id)
+    workspace_id = resolve_workspace_id(user.id, workspace_id)
+    graph = rebuild_graph_from_documents(user.id, workspace_id)
     node = graph.get_node(node_id)
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
@@ -70,24 +77,28 @@ async def search_nodes(
     q: str = Query("", description="Label text to search for"),
     node_type: Optional[str] = Query(None, description="Optional node type filter"),
     limit: int = Query(10, ge=1, le=50),
+    workspace_id: Optional[str] = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
     response: Response = None,
 ) -> dict:
     """Search graph nodes by label."""
-    graph = rebuild_graph_from_documents(user.id)
+    workspace_id = resolve_workspace_id(user.id, workspace_id)
+    graph = rebuild_graph_from_documents(user.id, workspace_id)
     return {"results": graph.search_nodes(q, node_type=node_type, limit=limit)}
 
 
 @router.get("/debug")
 @graph_read_limit
 async def graph_debug(
+    workspace_id: Optional[str] = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
     response: Response = None,
 ) -> dict:
     """Return full node and edge metadata for development checks."""
-    graph = rebuild_graph_from_documents(user.id)
+    workspace_id = resolve_workspace_id(user.id, workspace_id)
+    graph = rebuild_graph_from_documents(user.id, workspace_id)
     return {**graph.export_detailed(), "stats": graph.get_stats()}
 
 
@@ -95,12 +106,14 @@ async def graph_debug(
 @graph_read_limit
 async def export_graph(
     format: str = Query("json", pattern="^(json|gexf|csv)$"),
+    workspace_id: Optional[str] = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
     response: Response = None,
 ) -> Response:
     """Export the full graph for external graph/table tools."""
-    graph = rebuild_graph_from_documents(user.id)
+    workspace_id = resolve_workspace_id(user.id, workspace_id)
+    graph = rebuild_graph_from_documents(user.id, workspace_id)
     detailed = graph.export_detailed()
     export_format = format.lower()
 
@@ -125,31 +138,51 @@ async def export_graph(
     raise HTTPException(status_code=400, detail="Unsupported graph export format")
 
 
-def rebuild_graph_from_documents(user_id: Optional[str] = None) -> KnowledgeGraph:
+def rebuild_graph_from_documents(
+    user_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+) -> KnowledgeGraph:
     """Build a fresh in-memory graph from stored files and cached parses."""
-    persisted = graph_repository.load_graph(user_id)
+    persisted = (
+        graph_repository.load_graph(user_id, workspace_id)
+        if workspace_id is not None
+        else graph_repository.load_graph(user_id)
+    )
     if persisted.get("nodes"):
         return KnowledgeGraph.from_detailed(persisted)
 
     # Older local uploads may not have graph rows yet. Keep the graph panel
     # useful until those files are reprocessed into graph_nodes/graph_edges.
-    graph = knowledge_graph
-    graph.clear()
+    graph = KnowledgeGraph()
     owner_id = user_id or "local-dev"
 
-    for metadata in document_service.list_documents(user_id):
+    documents = (
+        document_service.list_documents(user_id, workspace_id=workspace_id)
+        if workspace_id is not None
+        else document_service.list_documents(user_id)
+    )
+    for metadata in documents:
         filename = metadata["filename"]
         original_name = metadata.get("original_filename", filename)
         document_id = metadata.get("document_id") or filename
-        parsed = get_cached_parse(filename, owner_id)
+        parsed = (
+            get_cached_parse(filename, owner_id, workspace_id)
+            if workspace_id is not None
+            else get_cached_parse(filename, owner_id)
+        )
         if not parsed:
             try:
+                arguments = {
+                    "user_id": owner_id,
+                    "document_id": document_id,
+                }
+                if workspace_id is not None:
+                    arguments["workspace_id"] = workspace_id
                 parsed = parse_document_file(
                     filename,
                     metadata["file_path"],
                     original_name,
-                    user_id=owner_id,
-                    document_id=document_id,
+                    **arguments,
                 )
             except (OSError, ValueError, RuntimeError) as exc:
                 # One bad upload should not blank the whole graph. Log it so
@@ -159,7 +192,8 @@ def rebuild_graph_from_documents(user_id: Optional[str] = None) -> KnowledgeGrap
 
         try:
             entities = entity_extractor.extract_from_parsed_document(parsed)
-            relations = entity_extractor.extract_relations(entities, parsed.get("content", ""))
+            source_text = parsed.get("content") or parsed.get("raw_text") or parsed.get("raw_content", "")
+            relations = entity_extractor.extract_relations(entities, source_text)
             graph.add_document(
                 original_name,
                 entities,

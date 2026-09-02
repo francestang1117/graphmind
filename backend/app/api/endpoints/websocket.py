@@ -33,7 +33,7 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
         await websocket.close(code=1008, reason="Authentication required")
         return
 
-    stored = job_repository.get(job_id, user.id)
+    stored = _owned_job(job_id, user.id)
     if not stored:
         # A Celery id alone is not proof that the caller may see the task.
         await websocket.close(code=1008, reason="Job not found")
@@ -51,7 +51,7 @@ async def job_progress_ws(websocket: WebSocket, job_id: str):
         while True:
             # Celery may report SUCCESS after a revoke reached the database.
             # The persisted terminal state is the source of truth in that race.
-            stored = job_repository.get(job_id, user.id)
+            stored = _owned_job(job_id, user.id)
             stored_status = stored.get("status") if stored else ""
             if stored and stored_status in _TERMINAL_JOB_STATES:
                 current = _stored_job_snapshot(stored)
@@ -151,6 +151,15 @@ def _stored_job_snapshot(job: dict[str, Any]) -> dict[str, Any]:
     if state in {"FAILURE", "REVOKED", "ERROR"}:
         snapshot["error"] = job.get("error") or state.capitalize()
     return snapshot
+
+
+def _owned_job(job_id: str, user_id: str):
+    """Look up the ticket owner's job without assuming the default workspace."""
+    lookup = getattr(job_repository, "get_for_owner", None)
+    if lookup:
+        return lookup(job_id, user_id)
+    # Small fakes used by local tests still implement the older repository API.
+    return job_repository.get(job_id, user_id)
 
 
 class JobBroadcaster:

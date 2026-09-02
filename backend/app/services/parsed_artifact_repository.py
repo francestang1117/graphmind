@@ -7,6 +7,7 @@ import json
 from typing import Any, Callable, Optional
 
 from app.core.database import SessionLocal, db_enabled
+from app.core.workspace import default_workspace_id
 
 try:
     from sqlalchemy import delete, or_, select, update
@@ -52,6 +53,7 @@ class ParsedArtifactRepository:
         entities: list[Any],
         *,
         user_id: str = "local-dev",
+        workspace_id: Optional[str] = None,
     ) -> None:
         """Replace stored parse artifacts for one user's document.
 
@@ -62,12 +64,19 @@ class ParsedArtifactRepository:
             return
 
         with self.session_factory() as db:
-            document = _find_document(db, identifier, user_id, lock=True)
+            document = _find_document(
+                db,
+                identifier,
+                user_id,
+                workspace_id=workspace_id,
+                lock=True,
+            )
             if not document:
                 # Never create parse rows from an unverified filename. The
                 # document row is the ownership check for everything below it.
                 return
             document_id = document.id
+            document_workspace_id = document.workspace_id
 
             # Keep only the latest parse for a document. This avoids stale
             # chunks hanging around after parser changes.
@@ -75,40 +84,79 @@ class ParsedArtifactRepository:
                 delete(ParsedChunkRecord).where(
                     ParsedChunkRecord.document_id == document_id,
                     ParsedChunkRecord.user_id == user_id,
+                    _document_workspace_condition(
+                        ParsedChunkRecord.workspace_id,
+                        user_id,
+                        document_workspace_id,
+                    ),
                 )
             )
             db.execute(
                 delete(ParsedEntityRecord).where(
                     ParsedEntityRecord.document_id == document_id,
                     ParsedEntityRecord.user_id == user_id,
+                    _document_workspace_condition(
+                        ParsedEntityRecord.workspace_id,
+                        user_id,
+                        document_workspace_id,
+                    ),
                 )
             )
 
             for index, chunk in enumerate(parsed.get("chunks", [])):
-                row = _chunk_record(document_id, user_id, index, chunk)
+                row = _chunk_record(
+                    document_id,
+                    user_id,
+                    index,
+                    chunk,
+                    workspace_id=document_workspace_id or default_workspace_id(user_id),
+                )
                 if row:
                     db.add(row)
 
             for entity in _dedupe_entities(entities):
-                row = _entity_record(document_id, user_id, entity)
+                row = _entity_record(
+                    document_id,
+                    user_id,
+                    entity,
+                    workspace_id=document_workspace_id or default_workspace_id(user_id),
+                )
                 if row:
                     db.add(row)
 
             # with_for_update protects PostgreSQL. This conditional write also
             # keeps SQLite from committing after a delete won the race.
-            if not _document_is_active(db, document_id, user_id):
+            if not _document_is_active(
+                db,
+                document_id,
+                user_id,
+                workspace_id=document_workspace_id,
+            ):
                 db.rollback()
                 return
             db.commit()
 
-    def delete_for_document(self, identifier: str, *, user_id: str = "local-dev") -> None:
+    def delete_for_document(
+        self,
+        identifier: str,
+        *,
+        user_id: str = "local-dev",
+        workspace_id: Optional[str] = None,
+    ) -> None:
         """Remove parse artifacts when the source document is deleted."""
         if not self.available():
             return
 
         with self.session_factory() as db:
             # Cleanup must still find the row after the service sets deleted_at.
-            document = _find_document(db, identifier, user_id, include_deleted=True, lock=True)
+            document = _find_document(
+                db,
+                identifier,
+                user_id,
+                workspace_id=workspace_id,
+                include_deleted=True,
+                lock=True,
+            )
             if not document:
                 return
             document_id = document.id
@@ -116,22 +164,43 @@ class ParsedArtifactRepository:
                 delete(ParsedChunkRecord).where(
                     ParsedChunkRecord.document_id == document_id,
                     ParsedChunkRecord.user_id == user_id,
+                    _document_workspace_condition(
+                        ParsedChunkRecord.workspace_id,
+                        user_id,
+                        document.workspace_id,
+                    ),
                 )
             )
             db.execute(
                 delete(ParsedEntityRecord).where(
                     ParsedEntityRecord.document_id == document_id,
                     ParsedEntityRecord.user_id == user_id,
+                    _document_workspace_condition(
+                        ParsedEntityRecord.workspace_id,
+                        user_id,
+                        document.workspace_id,
+                    ),
                 )
             )
             db.commit()
 
-    def list_chunks(self, identifier: str, *, user_id: str = "local-dev") -> list[dict[str, Any]]:
+    def list_chunks(
+        self,
+        identifier: str,
+        *,
+        user_id: str = "local-dev",
+        workspace_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
         if not self.available():
             return []
 
         with self.session_factory() as db:
-            document = _find_document(db, identifier, user_id)
+            document = _find_document(
+                db,
+                identifier,
+                user_id,
+                workspace_id=workspace_id,
+            )
             if not document:
                 return []
             stmt = (
@@ -139,17 +208,33 @@ class ParsedArtifactRepository:
                 .where(
                     ParsedChunkRecord.document_id == document.id,
                     ParsedChunkRecord.user_id == user_id,
+                    _document_workspace_condition(
+                        ParsedChunkRecord.workspace_id,
+                        user_id,
+                        document.workspace_id,
+                    ),
                 )
                 .order_by(ParsedChunkRecord.chunk_index)
             )
             return [_chunk_to_dict(row) for row in db.scalars(stmt).all()]
 
-    def list_entities(self, identifier: str, *, user_id: str = "local-dev") -> list[dict[str, Any]]:
+    def list_entities(
+        self,
+        identifier: str,
+        *,
+        user_id: str = "local-dev",
+        workspace_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
         if not self.available():
             return []
 
         with self.session_factory() as db:
-            document = _find_document(db, identifier, user_id)
+            document = _find_document(
+                db,
+                identifier,
+                user_id,
+                workspace_id=workspace_id,
+            )
             if not document:
                 return []
             stmt = (
@@ -157,6 +242,11 @@ class ParsedArtifactRepository:
                 .where(
                     ParsedEntityRecord.document_id == document.id,
                     ParsedEntityRecord.user_id == user_id,
+                    _document_workspace_condition(
+                        ParsedEntityRecord.workspace_id,
+                        user_id,
+                        document.workspace_id,
+                    ),
                 )
                 .order_by(ParsedEntityRecord.confidence.desc(), ParsedEntityRecord.text)
             )
@@ -168,6 +258,7 @@ def _find_document(
     identifier: str,
     user_id: str,
     *,
+    workspace_id: Optional[str] = None,
     include_deleted: bool = False,
     lock: bool = False,
 ) -> Optional["DocumentRecord"]:
@@ -175,6 +266,7 @@ def _find_document(
     conditions = [
         DocumentRecord.user_id == user_id,
         or_(DocumentRecord.id == identifier, DocumentRecord.filename == identifier),
+        _workspace_condition(DocumentRecord.workspace_id, user_id, workspace_id),
     ]
     if not include_deleted:
         conditions.append(DocumentRecord.deleted_at.is_(None))
@@ -185,7 +277,13 @@ def _find_document(
     return db.scalars(stmt).first()
 
 
-def _document_is_active(db, document_id: str, user_id: str) -> bool:
+def _document_is_active(
+    db,
+    document_id: str,
+    user_id: str,
+    *,
+    workspace_id: Optional[str] = None,
+) -> bool:
     """Check the delete marker at the point where derived rows are committed."""
     if update is None:
         return True
@@ -195,6 +293,7 @@ def _document_is_active(db, document_id: str, user_id: str) -> bool:
         .where(
             DocumentRecord.id == document_id,
             DocumentRecord.user_id == user_id,
+            _workspace_condition(DocumentRecord.workspace_id, user_id, workspace_id),
             DocumentRecord.deleted_at.is_(None),
         )
         .values(deleted_at=None)
@@ -207,6 +306,8 @@ def _chunk_record(
     user_id: str,
     index: int,
     chunk: Any,
+    *,
+    workspace_id: Optional[str] = None,
 ) -> Optional["ParsedChunkRecord"]:
     """Turn one parser chunk into a database row, skipping empty output."""
     if not isinstance(chunk, dict):
@@ -218,10 +319,12 @@ def _chunk_record(
     # Everything except the actual text is kept as metadata so different
     # parsers can add page/section/language details without schema churn.
     metadata = {key: value for key, value in chunk.items() if key != "text"}
+    scope = workspace_id or default_workspace_id(user_id)
     return ParsedChunkRecord(
-        id=f"{user_id}:{document_id}:chunk:{index}",
+        id=f"{user_id}:{scope}:{document_id}:chunk:{index}",
         document_id=document_id,
         user_id=user_id,
+        workspace_id=scope,
         chunk_index=index,
         chunk_type=str(chunk.get("type") or chunk.get("chunk_type") or "text"),
         text=text,
@@ -233,6 +336,8 @@ def _entity_record(
     document_id: str,
     user_id: str,
     entity: Any,
+    *,
+    workspace_id: Optional[str] = None,
 ) -> Optional["ParsedEntityRecord"]:
     """Turn one extracted entity into a database row."""
     data = _entity_dict(entity)
@@ -246,12 +351,14 @@ def _entity_record(
     confidence = float(data.get("confidence", 1.0) or 0)
     context = str(data.get("context") or "")
     # Stable ids make replace operations predictable across SQLite/Postgres.
-    row_id = _row_id(user_id, document_id, normalized.lower(), label.lower())
+    scope = workspace_id or default_workspace_id(user_id)
+    row_id = _row_id(user_id, scope, document_id, normalized.lower(), label.lower())
 
     return ParsedEntityRecord(
         id=row_id,
         document_id=document_id,
         user_id=user_id,
+        workspace_id=scope,
         text=text[:255],
         normalized=normalized[:255],
         label=label[:80],
@@ -292,6 +399,7 @@ def _chunk_to_dict(row: "ParsedChunkRecord") -> dict[str, Any]:
     return {
         "document_id": row.document_id,
         "user_id": row.user_id,
+        "workspace_id": row.workspace_id,
         "chunk_index": row.chunk_index,
         "chunk_type": row.chunk_type,
         "text": row.text,
@@ -303,6 +411,7 @@ def _entity_to_dict(row: "ParsedEntityRecord") -> dict[str, Any]:
     return {
         "document_id": row.document_id,
         "user_id": row.user_id,
+        "workspace_id": row.workspace_id,
         "text": row.text,
         "normalized": row.normalized,
         "label": row.label,
@@ -328,6 +437,22 @@ def _loads(value: str) -> dict[str, Any]:
 def _row_id(*parts: str) -> str:
     raw = "|".join(parts)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _workspace_condition(column, user_id: str, workspace_id: Optional[str]):
+    """Keep old NULL rows visible only in the user's default project."""
+    if workspace_id:
+        return column == workspace_id
+    default_id = default_workspace_id(user_id)
+    return or_(column == default_id, column.is_(None))
+
+
+def _document_workspace_condition(column, user_id: str, document_workspace_id: Optional[str]):
+    """Match derived rows written before workspace columns were introduced."""
+    if document_workspace_id:
+        return column == document_workspace_id
+    default_id = default_workspace_id(user_id)
+    return or_(column == default_id, column.is_(None))
 
 
 parsed_artifact_repository = ParsedArtifactRepository()

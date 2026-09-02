@@ -3,6 +3,7 @@
 import logging
 from typing import Any, Optional
 
+from app.core.workspace import default_workspace_id
 from app.services.document_parser import DocumentParser
 from app.services.entity_extractor import entity_extractor
 from app.services.markdown_parser import MarkdownParser
@@ -13,21 +14,28 @@ _parse_cache: dict[str, dict[str, Any]] = {}
 log = logging.getLogger(__name__)
 
 
-def cache_key(filename: str, user_id: str = "local-dev") -> str:
+def cache_key(
+    filename: str,
+    user_id: str = "local-dev",
+    workspace_id: Optional[str] = None,
+) -> str:
     # The process cache is shared by all requests, so the account belongs in
     # the key even though the public filename already contains a content hash.
-    return f"{user_id}:{filename}"
+    scope = workspace_id or default_workspace_id(user_id)
+    return f"{user_id}:{scope}:{filename}"
 
 
 def parse_markdown_bytes(
     filename: str,
     data: bytes,
     user_id: str = "local-dev",
+    workspace_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Parse Markdown bytes and store the result in a small local cache."""
     text = _decode_text(data)
     result = MarkdownParser().parse_content(text)
-    _parse_cache[cache_key(filename, user_id)] = result
+    result.setdefault("metadata", {})["workspace_id"] = workspace_id or default_workspace_id(user_id)
+    _parse_cache[cache_key(filename, user_id, workspace_id)] = result
     return result
 
 
@@ -37,21 +45,24 @@ def parse_document_file(
     original_filename: str = "",
     user_id: str = "local-dev",
     document_id: str = "",
+    workspace_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """Parse any supported stored file and cache the normalized parser output."""
     result = DocumentParser().parse(file_path)
     metadata = result.setdefault("metadata", {})
     metadata["stored_filename"] = filename
     metadata["user_id"] = user_id
+    metadata["workspace_id"] = workspace_id or default_workspace_id(user_id)
     metadata["document_id"] = document_id or metadata.get("document_id") or filename
     if original_filename:
         metadata["original_filename"] = original_filename
-    _parse_cache[cache_key(filename, user_id)] = result
+    _parse_cache[cache_key(filename, user_id, workspace_id)] = result
     _persist_parse_artifacts(
         filename,
         result,
         user_id=user_id,
         document_id=metadata["document_id"],
+        workspace_id=workspace_id,
     )
     return result
 
@@ -59,21 +70,23 @@ def parse_document_file(
 def get_cached_parse(
     filename: str,
     user_id: str = "local-dev",
+    workspace_id: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
-    return _parse_cache.get(cache_key(filename, user_id))
+    return _parse_cache.get(cache_key(filename, user_id, workspace_id))
 
 
 def clear_cached_parse(
     filename: str,
     user_id: str = "local-dev",
     document_id: str = "",
+    workspace_id: Optional[str] = None,
 ) -> None:
-    _parse_cache.pop(cache_key(filename, user_id), None)
+    _parse_cache.pop(cache_key(filename, user_id, workspace_id), None)
     # The DB copy should follow the same lifetime as the in-memory parse.
-    parsed_artifact_repository.delete_for_document(
-        document_id or filename,
-        user_id=user_id,
-    )
+    arguments = {"user_id": user_id}
+    if workspace_id is not None:
+        arguments["workspace_id"] = workspace_id
+    parsed_artifact_repository.delete_for_document(document_id or filename, **arguments)
 
 
 def markdown_summary(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
@@ -167,17 +180,21 @@ def _persist_parse_artifacts(
     *,
     user_id: str = "local-dev",
     document_id: str = "",
+    workspace_id: Optional[str] = None,
 ) -> None:
     try:
         # Parser-level entities catch things like imports; the NER pass catches
         # broader concepts and named entities from the extracted text.
         entities = entity_extractor.extract_from_parsed_document(parsed)
         parser_entities = parsed.get("extra", {}).get("entities", [])
+        arguments = {"user_id": user_id}
+        if workspace_id is not None:
+            arguments["workspace_id"] = workspace_id
         parsed_artifact_repository.replace_for_document(
             document_id or parsed.get("metadata", {}).get("document_id") or filename,
             parsed,
             [*parser_entities, *entities],
-            user_id=user_id,
+            **arguments,
         )
     except Exception as exc:
         log.warning("Could not persist parsed artifacts for %s: %s", filename, exc)

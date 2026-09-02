@@ -7,8 +7,9 @@ uploaded content.
 
 The project is intentionally honest about its current stage: the upload,
 parsing, entity extraction, graph, search, chat fallback, async jobs,
-observability, and safety layers are working MVPs. A production vector database,
-GPT/OpenAI answer generation, and deeper graph querying are planned upgrades.
+observability, safety, and workspace boundary are working MVPs. The medical
+paper study card, sentence-level citations, and GPT/OpenAI answer generation
+are planned upgrades.
 
 ## What Works Today
 
@@ -19,8 +20,8 @@ GPT/OpenAI answer generation, and deeper graph querying are planned upgrades.
   preview/download boundaries, and optional ClamAV scanning
 - Local content-addressed storage by default, with optional S3/MinIO object
   storage for Docker/production-style runs
-- SQLAlchemy-backed document metadata, parsed chunks, extracted entities,
-  graph nodes/edges, and background job history
+- SQLAlchemy-backed workspaces, document metadata, parsed chunks, extracted
+  entities, graph nodes/edges, and background job history
 - Unified parser for Markdown, TXT, PDF, DOCX, code, JSON, CSV, and HTML
 - Entity extraction with curated technical terms, alias cleanup, relation hints,
   and optional spaCy NER
@@ -31,13 +32,13 @@ GPT/OpenAI answer generation, and deeper graph querying are planned upgrades.
 - Redis-backed Celery worker and Celery Beat in Docker Compose
 - WebSocket job progress, upload cancel/retry controls, recent-job UI,
   persistent job history, and scheduled reindex/cleanup tasks
-- Email/password and optional GitHub OAuth login with JWT access tokens and
-  HttpOnly refresh cookies
+- Email/password and optional GitHub OAuth login with JWT access tokens,
+  HttpOnly refresh cookies, and account-owned workspaces
 - Redis-backed rate limiting
 - Prometheus-compatible `/metrics`
 - Optional Sentry error tracking with release names based on `VERSION` and
   optional `GIT_SHA`
-- 150+ backend tests covering the current core modules
+- 210+ backend tests covering the current core modules
 
 ## Project Status
 
@@ -50,7 +51,8 @@ GPT/OpenAI answer generation, and deeper graph querying are planned upgrades.
 | Search | Working MVP | Local hashed-vector / hybrid retrieval over parsed chunks |
 | Chat | Working MVP | Retrieval-grounded local fallback; GPT/OpenAI provider planned |
 | Async jobs | Working | Redis/Celery path, WebSocket progress, cancel/retry, job history |
-| Persistence | Partial | Documents, parsed chunks/entities, graph nodes/edges, users, and jobs |
+| Persistence | Partial | Workspaces, documents, parsed chunks/entities, graph nodes/edges, users, and jobs |
+| V2 research boundary | PR1 complete | Account-owned workspaces and workspace-scoped document-derived data |
 | Observability | Working MVP | Prometheus metrics and optional Sentry |
 | File storage backend | Working MVP | Local by default; optional S3/MinIO keeps a local parser cache |
 | Authentication | Working MVP | Email/password, optional GitHub OAuth, user-scoped workspaces |
@@ -131,6 +133,9 @@ Base URL: `http://localhost:8000/api/v1`
 - `POST /search/` searches parsed document chunks.
 - `POST /chat/` answers from retrieved document and graph context.
 - `POST /scraper/` turns a public web page into a stored Markdown document.
+- `POST /workspaces/` creates a research workspace.
+- `GET /workspaces/` lists the current user's workspaces.
+- `GET /workspaces/{workspace_id}` returns one owned workspace.
 
 More detail is in [docs/API.md](docs/API.md).
 
@@ -140,10 +145,10 @@ More detail is in [docs/API.md](docs/API.md).
 GraphMind/
   backend/
     app/
-      api/endpoints/       Documents, jobs, graph, search, chat, scraper, auth
-      core/                Settings, DB, Celery, errors, metrics, rate limits, Sentry
+      api/endpoints/       Documents, jobs, graph, search, chat, scraper, auth, workspaces
+      core/                Settings, DB, Celery, errors, metrics, rate limits, Sentry, workspace
       models/              SQLAlchemy persistence models
-      services/            Storage, parsing, extraction, graph, search, jobs, QA
+      services/            Storage, parsing, extraction, graph, search, jobs, QA, workspaces
       tasks/               Celery document processing and cleanup tasks
       utils/               Upload validation
     tests/                 Backend unit and integration tests

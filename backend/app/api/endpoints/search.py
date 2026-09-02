@@ -6,12 +6,13 @@ from typing import Literal, Optional
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
+from app.api.workspace_scope import resolve_workspace_id
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.endpoints.documents_with_markdown import get_cached_parse, parse_document_file
 from app.core.metrics import record_search
 from app.core.rate_limit import search_limit
 from app.services.document_service import document_service
-from app.services.vector_store import VectorStore, vector_store
+from app.services.vector_store import VectorStore
 
 
 router = APIRouter()
@@ -23,6 +24,7 @@ class SearchRequest(BaseModel):
     limit: int = Field(default=8, ge=1, le=30)
     search_type: Literal["semantic", "hybrid"] = "hybrid"
     document: Optional[str] = None
+    workspace_id: Optional[str] = None
 
 
 @router.post("/")
@@ -37,7 +39,8 @@ async def search_documents(
 
     request is here for the rate limiter; body carries the actual search input.
     """
-    store = rebuild_vector_index(user.id)
+    workspace_id = resolve_workspace_id(user.id, body.workspace_id)
+    store = rebuild_vector_index(user.id, workspace_id)
     if body.search_type == "semantic":
         raw_results = store.search(body.query, body.limit, body.document)
         results = [_api_result(item, percent=True) for item in raw_results]
@@ -60,40 +63,64 @@ async def search_documents(
 async def search_context(
     q: str,
     limit: int = 5,
+    workspace_id: Optional[str] = None,
     user: UserRecord = Depends(current_user_or_dev),
     request: Request = None,
     response: Response = None,
 ) -> dict:
     """Return stitched context for chat/RAG without letting one IP spam rebuilds."""
-    store = rebuild_vector_index(user.id)
+    workspace_id = resolve_workspace_id(user.id, workspace_id)
+    store = rebuild_vector_index(user.id, workspace_id)
     return {"query": q, "context": store.get_context_for_qa(q, limit)}
 
 
 @router.get("/stats")
-async def search_stats(user: UserRecord = Depends(current_user_or_dev)) -> dict:
+async def search_stats(
+    workspace_id: Optional[str] = None,
+    user: UserRecord = Depends(current_user_or_dev),
+) -> dict:
     """Return the current in-memory index size."""
-    store = rebuild_vector_index(user.id)
+    workspace_id = resolve_workspace_id(user.id, workspace_id)
+    store = rebuild_vector_index(user.id, workspace_id)
     documents = {chunk.document for chunk in store.chunks.values()}
     return {"chunks": len(store.chunks), "documents": len(documents)}
 
 
-def rebuild_vector_index(user_id: Optional[str] = None) -> VectorStore:
+def rebuild_vector_index(
+    user_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+) -> VectorStore:
     """Build a fresh search index from stored parser chunks."""
-    store = vector_store
-    store.clear()
+    # A request gets its own index. A shared mutable store could briefly expose
+    # another project's chunks while two searches are rebuilding at once.
+    store = VectorStore()
     owner_id = user_id or "local-dev"
-    for metadata in document_service.list_documents(user_id):
+    documents = (
+        document_service.list_documents(user_id, workspace_id=workspace_id)
+        if workspace_id is not None
+        else document_service.list_documents(user_id)
+    )
+    for metadata in documents:
         filename = metadata["filename"]
         original_name = metadata.get("original_filename", filename)
-        parsed = get_cached_parse(filename, owner_id)
+        parsed = (
+            get_cached_parse(filename, owner_id, workspace_id)
+            if workspace_id is not None
+            else get_cached_parse(filename, owner_id)
+        )
         if not parsed:
             try:
+                arguments = {
+                    "user_id": owner_id,
+                    "document_id": metadata.get("document_id", ""),
+                }
+                if workspace_id is not None:
+                    arguments["workspace_id"] = workspace_id
                 parsed = parse_document_file(
                     filename,
                     metadata["file_path"],
                     original_name,
-                    user_id=owner_id,
-                    document_id=metadata.get("document_id", ""),
+                    **arguments,
                 )
             except (OSError, ValueError, RuntimeError) as exc:
                 # Search should stay usable even if one stored file no longer

@@ -150,8 +150,11 @@ def save_document_record(metadata: dict[str, Any]) -> None:
 
     from sqlalchemy import select
     from app.models.persistence import DocumentRecord
+    from app.core.workspace import default_workspace_id
 
     user_id = str(metadata.get("user_id") or "local-dev")
+    workspace_id = str(metadata.get("workspace_id") or default_workspace_id(user_id))
+    metadata["workspace_id"] = workspace_id
     document_id = str(metadata.get("document_id") or "")
     file_hash = str(metadata.get("file_hash") or "")
     with SessionLocal() as db:  # type: ignore[misc]
@@ -161,12 +164,14 @@ def save_document_record(metadata: dict[str, Any]) -> None:
                 select(DocumentRecord).where(
                     DocumentRecord.id == document_id,
                     DocumentRecord.user_id == user_id,
+                    DocumentRecord.workspace_id == workspace_id,
                 )
             ).first()
         if not existing and file_hash:
             existing = db.scalars(
                 select(DocumentRecord).where(
                     DocumentRecord.user_id == user_id,
+                    DocumentRecord.workspace_id == workspace_id,
                     DocumentRecord.file_hash == file_hash,
                 )
             ).first()
@@ -182,19 +187,31 @@ def save_document_record(metadata: dict[str, Any]) -> None:
         db.commit()
 
 
-def mark_document_deleted(filename: str, user_id: str) -> None:
+def mark_document_deleted(
+    filename: str,
+    user_id: str,
+    workspace_id: str | None = None,
+) -> None:
     """Soft-delete a document record after local storage removes the file."""
     if not db_enabled():
         return
 
     from sqlalchemy import select
     from app.models.persistence import DocumentRecord
+    from sqlalchemy import or_
+    from app.core.workspace import default_workspace_id
+
+    scope = workspace_id or default_workspace_id(user_id)
 
     with SessionLocal() as db:  # type: ignore[misc]
         record = db.scalars(
             select(DocumentRecord).where(
                 DocumentRecord.filename == filename,
                 DocumentRecord.user_id == user_id,
+                or_(
+                    DocumentRecord.workspace_id == scope,
+                    DocumentRecord.workspace_id.is_(None) if workspace_id is None else False,
+                ),
             )
         ).first()
         if record:
@@ -203,8 +220,12 @@ def mark_document_deleted(filename: str, user_id: str) -> None:
 
 
 def _document_values(metadata: dict[str, Any]) -> dict[str, Any]:
+    from app.core.workspace import default_workspace_id
+
+    user_id = str(metadata.get("user_id") or "local-dev")
     return {
-        "user_id": metadata.get("user_id", "local-dev"),
+        "user_id": user_id,
+        "workspace_id": metadata.get("workspace_id") or default_workspace_id(user_id),
         "filename": metadata.get("filename", ""),
         "stored_filename": metadata.get("stored_filename", metadata.get("filename", "")),
         "original_filename": metadata.get("original_filename", ""),

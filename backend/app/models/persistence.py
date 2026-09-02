@@ -40,10 +40,30 @@ class OAuthIdentityRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class WorkspaceRecord(Base):
+    """A user's research area; every document and derived row belongs to one."""
+
+    __tablename__ = "workspaces"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    research_question: Mapped[str] = mapped_column(Text, default="")
+    domain: Mapped[str] = mapped_column(String(64), default="medical", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class DocumentRecord(Base):
     __tablename__ = "documents"
     __table_args__ = (
-        UniqueConstraint("user_id", "file_hash", name="uq_documents_user_hash"),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "file_hash",
+            name="uq_documents_user_workspace_hash",
+        ),
     )
 
     # A content hash identifies bytes, not a user's document row. Keep those
@@ -54,6 +74,7 @@ class DocumentRecord(Base):
         default=lambda: uuid.uuid4().hex,
     )
     user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     filename: Mapped[str] = mapped_column(String(255), index=True)
     stored_filename: Mapped[str] = mapped_column(String(255), index=True)
     original_filename: Mapped[str] = mapped_column(String(255))
@@ -80,9 +101,10 @@ class ParsedChunkRecord(Base):
     __table_args__ = (
         UniqueConstraint(
             "user_id",
+            "workspace_id",
             "document_id",
             "chunk_index",
-            name="uq_chunks_user_document_index",
+            name="uq_chunks_user_workspace_document_index",
         ),
     )
 
@@ -93,6 +115,7 @@ class ParsedChunkRecord(Base):
         index=True,
     )
     user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     chunk_index: Mapped[int] = mapped_column(Integer)
     chunk_type: Mapped[str] = mapped_column(String(64), default="text")
     text: Mapped[str] = mapped_column(Text)
@@ -111,10 +134,11 @@ class ParsedEntityRecord(Base):
     __table_args__ = (
         UniqueConstraint(
             "user_id",
+            "workspace_id",
             "document_id",
             "normalized",
             "label",
-            name="uq_entities_user_document_name_label",
+            name="uq_entities_user_workspace_document_name_label",
         ),
     )
 
@@ -125,6 +149,7 @@ class ParsedEntityRecord(Base):
         index=True,
     )
     user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     text: Mapped[str] = mapped_column(String(255), index=True)
     normalized: Mapped[str] = mapped_column(String(255), index=True)
     label: Mapped[str] = mapped_column(String(80), default="ENTITY", index=True)
@@ -144,11 +169,17 @@ class GraphNodeRecord(Base):
 
     __tablename__ = "graph_nodes"
     __table_args__ = (
-        UniqueConstraint("user_id", "node_id", name="uq_graph_nodes_user_node"),
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "node_id",
+            name="uq_graph_nodes_user_workspace_node",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(320), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     node_id: Mapped[str] = mapped_column(String(255), index=True)
     label: Mapped[str] = mapped_column(String(255), index=True)
     node_type: Mapped[str] = mapped_column(String(80), default="ENTITY", index=True)
@@ -171,16 +202,18 @@ class GraphEdgeRecord(Base):
     __table_args__ = (
         UniqueConstraint(
             "user_id",
+            "workspace_id",
             "source_node_id",
             "target_node_id",
             "relation_type",
             "source_document_id",
-            name="uq_graph_edges_user_relation_doc",
+            name="uq_graph_edges_user_workspace_relation_doc",
         ),
     )
 
     id: Mapped[str] = mapped_column(String(320), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     source_node_id: Mapped[str] = mapped_column(String(255), index=True)
     target_node_id: Mapped[str] = mapped_column(String(255), index=True)
     relation_type: Mapped[str] = mapped_column(String(80), default="RELATED_TO", index=True)
@@ -207,6 +240,7 @@ class ProcessingJobRecord(Base):
 
     job_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     document_id: Mapped[str | None] = mapped_column(
         String(255),
         ForeignKey("documents.id", ondelete="SET NULL"),

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 import uuid
 
+from app.api.workspace_scope import resolve_workspace_id
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.core.metrics import record_chat
 from app.core.rate_limit import chat_limit
@@ -17,6 +18,7 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
     conversation_id: Optional[str] = None
     stream: bool = False
+    workspace_id: Optional[str] = None
 
 
 @router.post("/")
@@ -29,12 +31,13 @@ async def chat(
 ):
     """Answer a question using retrieved document and graph context."""
     conv_id = body.conversation_id or str(uuid.uuid4())
+    workspace_id = resolve_workspace_id(user.id, body.workspace_id)
 
     if body.stream:
         # Streamed replies do not have a final size yet.
         record_chat("stream", True)
         return StreamingResponse(
-            stream_response(body.message, conv_id, user.id),
+            stream_response(body.message, conv_id, user.id, workspace_id),
             media_type="text/event-stream",
         )
 
@@ -42,6 +45,7 @@ async def chat(
         question=body.message,
         conversation_id=conv_id,
         user_id=user.id,
+        workspace_id=workspace_id,
     )
     # Keep local fallback separate from the future GPT path.
     record_chat(result.get("mode", "local"), False, result.get("answer", ""))
@@ -55,9 +59,19 @@ async def chat(
     }
 
 
-async def stream_response(message: str, conv_id: str, user_id: str):
+async def stream_response(
+    message: str,
+    conv_id: str,
+    user_id: str,
+    workspace_id: Optional[str] = None,
+):
     """Dependency-free SSE stream over the same QA engine result."""
-    result = qa_engine.answer(question=message, conversation_id=conv_id, user_id=user_id)
+    result = qa_engine.answer(
+        question=message,
+        conversation_id=conv_id,
+        user_id=user_id,
+        workspace_id=workspace_id,
+    )
     text = result["answer"]
     for start in range(0, len(text), 80):
         yield f"data: {json.dumps({'text': text[start:start + 80]})}\n\n"
