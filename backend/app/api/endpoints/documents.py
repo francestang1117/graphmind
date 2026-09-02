@@ -1,5 +1,5 @@
-"""Routes for upload, file lookup, parsing summary, and delete."""
-
+import logging
+import uuid
 from pathlib import Path
 from typing import List
 
@@ -18,6 +18,7 @@ from app.services.document_service import document_service
 from app.core.config import settings
 from app.core.errors import (
     ParseError,
+    ProcessingQueueError,
     StorageAccessError,
     StoredFileMissingError,
     UploadRejectedError,
@@ -31,6 +32,7 @@ from app.utils.file_validator import UploadValidationError
 
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 INLINE_PREVIEW_EXTENSIONS = {".pdf", ".txt", ".md", ".json", ".csv"}
 SAFE_FILE_HEADERS = {
@@ -247,24 +249,46 @@ def _is_within(path: Path, root: Path) -> bool:
 
 def _queue_processing(background_tasks: BackgroundTasks, metadata: dict, user_id: str) -> str | None:
     if settings.CELERY_ENABLED:
-        # In Docker/prod the worker owns parsing, graph updates, and indexing.
-        # The id is what the WebSocket endpoint watches.
         document_id = metadata.get("document_id") or metadata["stored_filename"]
-        result = process_document.delay(
-            metadata["file_path"],
-            document_id,
-            metadata["original_filename"],
-            user_id,
-            metadata["stored_filename"],
+        # Put the row in the database before the broker can wake a worker up.
+        # Otherwise a fast worker can write SUCCESS and then lose it to the
+        # route's late PENDING insert.
+        job_id = uuid.uuid4().hex
+        job_repository.create(
+            job_id,
+            user_id=user_id,
+            document_id=document_id,
+            original_filename=metadata["original_filename"],
         )
-        job_id = getattr(result, "id", None)
-        if job_id:
-            job_repository.create(
-                job_id,
-                user_id=user_id,
-                document_id=document_id,
-                original_filename=metadata["original_filename"],
+
+        try:
+            process_document.apply_async(
+                args=(
+                    metadata["file_path"],
+                    document_id,
+                    metadata["original_filename"],
+                    user_id,
+                    metadata["stored_filename"],
+                ),
+                task_id=job_id,
             )
+        except Exception as exc:
+            failure_message = "Could not queue document processing."
+            log.exception("Could not publish processing job %s", job_id)
+            try:
+                job_repository.upsert(
+                    job_id,
+                    user_id=user_id,
+                    document_id=document_id,
+                    original_filename=metadata["original_filename"],
+                    status="FAILURE",
+                    step="Queue failed",
+                    progress=0,
+                    error=failure_message,
+                )
+            except Exception:
+                log.exception("Could not record failed processing job %s", job_id)
+            raise ProcessingQueueError(details={"job_id": job_id}) from exc
         return job_id
 
     background_tasks.add_task(

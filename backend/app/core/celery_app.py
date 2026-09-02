@@ -1,6 +1,7 @@
 """Celery wiring, with a tiny local fallback."""
 
 from functools import wraps
+from types import SimpleNamespace
 from typing import Any, Callable
 
 from app.core.config import settings
@@ -18,25 +19,41 @@ class LocalTaskQueue:
         def decorator(func: Callable) -> Callable:
             @wraps(func)
             def run(*args: Any, **call_kwargs: Any) -> Any:
+                task_id = call_kwargs.pop("_task_id", None)
                 if bind:
-                    return func(LocalTaskContext(), *args, **call_kwargs)
+                    return func(LocalTaskContext(task_id), *args, **call_kwargs)
                 return func(*args, **call_kwargs)
 
             run.delay = run  # type: ignore[attr-defined]
+
+            def apply_async(
+                args: tuple[Any, ...] | list[Any] | None = None,
+                kwargs: dict[str, Any] | None = None,
+                task_id: str | None = None,
+                **_options: Any,
+            ) -> "LocalTaskResult":
+                call_kwargs = dict(kwargs or {})
+                if task_id:
+                    call_kwargs["_task_id"] = task_id
+                result = run(*(args or ()), **call_kwargs)
+                return LocalTaskResult(task_id, result, state="SUCCESS")
+
+            run.apply_async = apply_async  # type: ignore[attr-defined]
             return run
 
         return decorator
 
     def AsyncResult(self, _job_id: str) -> "LocalTaskResult":
-        return LocalTaskResult()
+        return LocalTaskResult(_job_id)
 
 
 class LocalTaskContext:
     """Enough of Celery's task API for local progress-aware tasks."""
 
-    def __init__(self) -> None:
+    def __init__(self, task_id: str | None = None) -> None:
         self.state = "PENDING"
         self.info: dict[str, Any] = {}
+        self.request = SimpleNamespace(id=task_id)
 
     def update_state(self, state: str, meta: dict[str, Any]) -> None:
         self.state = state
@@ -53,9 +70,17 @@ class LocalTaskControl:
 class LocalTaskResult:
     """Fallback shape for the WebSocket route when no worker exists."""
 
-    state = "PENDING"
-    info: dict[str, Any] = {}
-    result: dict[str, Any] = {}
+    def __init__(
+        self,
+        task_id: str | None,
+        result: Any = None,
+        *,
+        state: str = "PENDING",
+    ) -> None:
+        self.id = task_id
+        self.state = state
+        self.info: dict[str, Any] = {}
+        self.result = result
 
 
 try:

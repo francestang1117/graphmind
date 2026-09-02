@@ -145,7 +145,9 @@ curl -X POST /api/v1/documents/upload \
 6. ClamAV scan runs when `VIRUS_SCAN_ENABLED=true`.
 7. File is written to content-addressed local storage.
 8. Duplicate content returns `409`.
-9. Parser work is queued as FastAPI background work or a Celery job.
+9. With Celery enabled, the API creates a `PENDING` job row first and publishes
+   the task with that same `job_id`; a broker failure is recorded as `FAILURE`.
+   Otherwise parser work is queued as FastAPI background work.
 
 ### `GET /documents/`
 
@@ -495,6 +497,7 @@ Current app-level codes include:
 - `malware_detected`
 - `virus_scanner_unavailable`
 - `parse_failed`
+- `processing_queue_failed`
 - `stored_file_path_invalid`
 - `stored_file_missing`
 - `storage_operation_failed`

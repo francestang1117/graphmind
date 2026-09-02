@@ -24,6 +24,7 @@ except ImportError:  # pragma: no cover - only before DB deps are installed
 
 
 TERMINAL_STATES = {"SUCCESS", "FAILURE", "REVOKED", "ERROR"}
+ACTIVE_STATE_ORDER = {"PENDING": 0, "STARTED": 1, "PROGRESS": 2}
 
 
 class JobRepository:
@@ -86,21 +87,39 @@ class JobRepository:
         # Progress can arrive from Celery, tests, or future maintenance tasks.
         # Clamp it here once so callers do not each need their own guard.
         document_ref = document_id or None
+        status_name = str(status or "PENDING").upper()
         values = {
             "user_id": user_id,
             "document_id": document_ref,
             "original_filename": original_filename,
-            "status": status,
+            "status": status_name,
             "step": step,
             "progress": max(0, min(100, int(progress))),
             "error": error,
             "updated_at": now,
-            "finished_at": now if status in TERMINAL_STATES else None,
+            "finished_at": now if status_name in TERMINAL_STATES else None,
         }
         try:
             with self.session_factory() as db:
-                record = db.get(ProcessingJobRecord, job_id)
+                # PostgreSQL locks the row while the decision is made. SQLite
+                # serializes the eventual write, and the same guard still
+                # prevents stale states from being accepted in either mode.
+                record = db.scalars(
+                    select(ProcessingJobRecord)
+                    .where(ProcessingJobRecord.job_id == job_id)
+                    .with_for_update()
+                ).first()
                 if record:
+                    if not _can_transition(record.status, status_name):
+                        log.info(
+                            "Ignoring stale state %s for job %s already at %s",
+                            status_name,
+                            job_id,
+                            record.status,
+                        )
+                        return
+                    if status_name in TERMINAL_STATES:
+                        values["finished_at"] = record.finished_at or now
                     for key, value in values.items():
                         # Later progress updates often only know status/step.
                         # Do not wipe filename/user fields with blanks.
@@ -177,6 +196,21 @@ def _record_to_dict(record: ProcessingJobRecord) -> dict[str, Any]:
         "updated_at": record.updated_at.isoformat() if record.updated_at else "",
         "finished_at": record.finished_at.isoformat() if record.finished_at else None,
     }
+
+
+def _can_transition(current_status: str, new_status: str) -> bool:
+    """Keep a late progress update from moving a job backwards."""
+    current = str(current_status or "PENDING").upper()
+    incoming = str(new_status or "PENDING").upper()
+
+    # Once a job has finished, its first terminal result is the one we keep.
+    if current in TERMINAL_STATES:
+        return incoming == current
+
+    if current in ACTIVE_STATE_ORDER and incoming in ACTIVE_STATE_ORDER:
+        return ACTIVE_STATE_ORDER[incoming] >= ACTIVE_STATE_ORDER[current]
+
+    return True
 
 
 def _raise_db_error(operation: str, exc: Exception, details: dict[str, Any]) -> None:

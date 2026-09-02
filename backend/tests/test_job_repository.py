@@ -81,3 +81,32 @@ def test_job_repository_cleanup_only_removes_old_terminal_jobs():
     assert repo.get("old", "u1") is None
     assert repo.get("recent", "u1") is not None
     assert repo.get("running", "u1") is not None
+
+
+def test_job_repository_does_not_downgrade_terminal_state():
+    repo = _repo()
+    repo.create("job-1", user_id="u1")
+    repo.upsert(
+        "job-1",
+        user_id="u1",
+        status="SUCCESS",
+        step="Done",
+        progress=100,
+    )
+
+    # This is the late API write that used to turn a completed job back into
+    # PENDING when a worker won the race.
+    repo.create("job-1", user_id="u1", status="PENDING", step="Queued", progress=0)
+    repo.upsert(
+        "job-1",
+        user_id="u1",
+        status="PROGRESS",
+        step="Parsing",
+        progress=25,
+    )
+
+    fetched = repo.get("job-1", "u1")
+    assert fetched["status"] == "SUCCESS"
+    assert fetched["step"] == "Done"
+    assert fetched["progress"] == 100
+    assert fetched["finished_at"]

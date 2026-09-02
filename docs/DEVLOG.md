@@ -1120,6 +1120,20 @@ orphaned parsed artifact is rejected, parsed rows and graph edges are removed
 with their document, and a finished job keeps its history while its document
 link becomes `NULL`.
 
+## 2026-09 — Celery Job Creation Race
+
+There was a small but real race in the upload path. The API used to publish the
+Celery task and create the history row afterward. A fast worker could finish in
+that gap, then the late `PENDING` write would make the job look stuck forever.
+
+The API now creates the job ID and its `PENDING` row before calling
+`apply_async(task_id=...)`. If publishing fails, the same row is marked
+`FAILURE` so the upload does not leave behind an unexplained job. The repository
+also ignores stale active updates after a terminal state has been recorded.
+
+The tests cover the ordering, a worker that completes before `apply_async`
+returns, broker failure, and the repository's terminal-state guard.
+
 ## 2026-09 — WebSocket Ticket Authentication
 
 The browser originally put the full access token in the WebSocket query string.

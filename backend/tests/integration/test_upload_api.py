@@ -8,7 +8,7 @@ from fastapi import BackgroundTasks, UploadFile
 import pytest
 
 from app.api.endpoints import documents
-from app.core.errors import DuplicateUploadError, UploadRejectedError
+from app.core.errors import DuplicateUploadError, ProcessingQueueError, UploadRejectedError
 from app.services.document_service import DocumentService
 from app.services.file_storage import FileStorage
 
@@ -46,16 +46,20 @@ def test_upload_can_queue_celery_job(temp_document_service, monkeypatch):
     queued = {}
 
     class FakeAsyncResult:
-        id = "job-123"
+        def __init__(self, job_id):
+            self.id = job_id
 
     class FakeTask:
-        def delay(self, file_path, document_id, original_filename, user_id, stored_filename):
-            queued["file_path"] = file_path
-            queued["document_id"] = document_id
-            queued["original_filename"] = original_filename
-            queued["user_id"] = user_id
-            queued["stored_filename"] = stored_filename
-            return FakeAsyncResult()
+        def apply_async(self, args, task_id):
+            (
+                queued["file_path"],
+                queued["document_id"],
+                queued["original_filename"],
+                queued["user_id"],
+                queued["stored_filename"],
+            ) = args
+            queued["task_id"] = task_id
+            return FakeAsyncResult(task_id)
 
     class FakeJobRepository:
         def __init__(self):
@@ -76,12 +80,96 @@ def test_upload_can_queue_celery_job(temp_document_service, monkeypatch):
         )
     )
 
-    assert response.job_id == "job-123"
+    assert response.job_id
+    assert queued["task_id"] == response.job_id
     assert queued["document_id"] == response.filename
     assert queued["stored_filename"] == response.filename
     assert queued["original_filename"] == "notes.md"
     assert queued["user_id"] == "local-dev"
-    assert fake_jobs.created[0][0] == "job-123"
+    assert fake_jobs.created[0][0] == response.job_id
+
+
+def test_fast_worker_completion_is_not_overwritten(temp_document_service, monkeypatch):
+    events = []
+
+    class FakeJobRepository:
+        def __init__(self):
+            self.rows = {}
+
+        def create(self, job_id, **kwargs):
+            events.append(("create", job_id))
+            self.rows[job_id] = {"status": "PENDING", **kwargs}
+
+        def upsert(self, job_id, **kwargs):
+            events.append(("update", kwargs["status"]))
+            self.rows[job_id].update(kwargs)
+
+    fake_jobs = FakeJobRepository()
+
+    class FakeTask:
+        def apply_async(self, args, task_id):
+            events.append(("publish", task_id))
+            # Simulate a worker that finishes before apply_async returns.
+            fake_jobs.upsert(
+                task_id,
+                user_id=args[3],
+                document_id=args[1],
+                original_filename=args[2],
+                status="SUCCESS",
+                step="Done",
+                progress=100,
+            )
+            return object()
+
+    monkeypatch.setattr(documents.settings, "CELERY_ENABLED", True)
+    monkeypatch.setattr(documents, "process_document", FakeTask())
+    monkeypatch.setattr(documents, "job_repository", fake_jobs)
+
+    response = run(
+        documents.upload_document(
+            BackgroundTasks(),
+            make_upload("fast.md", b"# Fast\n\nWorker finished quickly."),
+        )
+    )
+
+    assert response.job_id
+    assert events[0] == ("create", response.job_id)
+    assert events[1] == ("publish", response.job_id)
+    assert fake_jobs.rows[response.job_id]["status"] == "SUCCESS"
+    assert fake_jobs.rows[response.job_id]["progress"] == 100
+
+
+def test_queue_failure_is_saved_as_failed_job(temp_document_service, monkeypatch):
+    class FakeJobRepository:
+        def __init__(self):
+            self.rows = {}
+
+        def create(self, job_id, **kwargs):
+            self.rows[job_id] = {"status": "PENDING", **kwargs}
+
+        def upsert(self, job_id, **kwargs):
+            self.rows[job_id].update(kwargs)
+
+    class FailingTask:
+        def apply_async(self, args, task_id):
+            raise ConnectionError("broker is unavailable")
+
+    fake_jobs = FakeJobRepository()
+    monkeypatch.setattr(documents.settings, "CELERY_ENABLED", True)
+    monkeypatch.setattr(documents, "process_document", FailingTask())
+    monkeypatch.setattr(documents, "job_repository", fake_jobs)
+
+    with pytest.raises(ProcessingQueueError) as exc:
+        run(
+            documents.upload_document(
+                BackgroundTasks(),
+                make_upload("queue-failure.md", b"# Queue failure"),
+            )
+        )
+
+    job_id = exc.value.details["job_id"]
+    assert fake_jobs.rows[job_id]["status"] == "FAILURE"
+    assert fake_jobs.rows[job_id]["step"] == "Queue failed"
 
 
 def test_list_get_and_delete_document(temp_document_service):

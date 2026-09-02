@@ -58,6 +58,12 @@ class ParseError(AppError):
     message = "Could not parse this file."
 
 
+class ProcessingQueueError(AppError):
+    status_code = 503
+    code = "processing_queue_failed"
+    message = "Could not start document processing."
+
+
 class StorageAccessError(AppError):
     status_code = 403
     code = "stored_file_path_invalid"
