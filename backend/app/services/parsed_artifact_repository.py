@@ -10,13 +10,12 @@ from app.core.database import SessionLocal, db_enabled
 from app.core.workspace import default_workspace_id
 
 try:
-    from sqlalchemy import delete, or_, select, update
+    from sqlalchemy import delete, or_, select
     from app.models.persistence import DocumentRecord, ParsedChunkRecord, ParsedEntityRecord
 except ImportError:  # pragma: no cover - only before DB deps are installed
     delete = None
     or_ = None
     select = None
-    update = None
     DocumentRecord = None  # type: ignore[assignment]
     ParsedChunkRecord = None  # type: ignore[assignment]
     ParsedEntityRecord = None  # type: ignore[assignment]
@@ -43,7 +42,6 @@ class ParsedArtifactRepository:
             and DocumentRecord
             and ParsedChunkRecord
             and ParsedEntityRecord
-            and update
         )
 
     def replace_for_document(
@@ -285,20 +283,17 @@ def _document_is_active(
     workspace_id: Optional[str] = None,
 ) -> bool:
     """Check the delete marker at the point where derived rows are committed."""
-    if update is None:
-        return True
-
-    result = db.execute(
-        update(DocumentRecord)
-        .where(
-            DocumentRecord.id == document_id,
-            DocumentRecord.user_id == user_id,
-            _workspace_condition(DocumentRecord.workspace_id, user_id, workspace_id),
-            DocumentRecord.deleted_at.is_(None),
-        )
-        .values(deleted_at=None)
+    return (
+        db.scalars(
+            select(DocumentRecord.id).where(
+                DocumentRecord.id == document_id,
+                DocumentRecord.user_id == user_id,
+                _workspace_condition(DocumentRecord.workspace_id, user_id, workspace_id),
+                DocumentRecord.deleted_at.is_(None),
+            )
+        ).first()
+        is not None
     )
-    return int(result.rowcount or 0) == 1
 
 
 def _chunk_record(

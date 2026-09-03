@@ -27,6 +27,7 @@ from app.core.errors import (
 from app.core.metrics import record_upload
 from app.core.rate_limit import upload_limit
 from app.services.job_repository import job_repository
+from app.services.medical.repository import medical_repository
 from app.services.pipeline import process_uploaded_document
 from app.tasks.process_document import process_document
 from app.utils.file_validator import UploadValidationError
@@ -223,6 +224,67 @@ async def get_parsed_document(
     return ParsedDocumentSummary(
         **document_summary(filename, parsed, metadata["original_filename"])
     )
+
+
+@router.get("/{identifier}/medical-analysis")
+async def get_medical_analysis(
+    identifier: str,
+    workspace_id: Optional[str] = Query(None),
+    user: UserRecord = Depends(current_user_or_dev),
+) -> dict:
+    """Return the medical profile and source-aware paper sections."""
+    user_id = _user_id(user)
+    workspace_id = normalize_workspace_id(workspace_id)
+    scope = resolve_workspace_id(user_id, workspace_id)
+
+    metadata = document_service.get_document_by_id(
+        identifier, user_id, workspace_id=scope
+    )
+    if not metadata:
+        metadata = document_service.get_document(
+            identifier, user_id, workspace_id=scope
+        )
+    if not metadata:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    analysis = medical_repository.get_analysis(
+        metadata.get("document_id", identifier),
+        user_id=user_id,
+        workspace_id=scope,
+    )
+    if analysis:
+        return analysis
+
+    # A cache-only setup can still serve an analysis that was generated before
+    # database persistence was enabled.
+    parsed = get_cached_parse(metadata["filename"], user_id, scope)
+    if not parsed:
+        try:
+            parsed = parse_document_file(
+                metadata["filename"],
+                metadata["file_path"],
+                metadata["original_filename"],
+                user_id=user_id,
+                document_id=metadata.get("document_id", ""),
+                workspace_id=scope,
+            )
+        except Exception as exc:
+            raise ParseError(
+                details={
+                    "filename": metadata["filename"],
+                    "original_filename": metadata.get("original_filename", ""),
+                    "reason": str(exc),
+                }
+            ) from exc
+
+    analysis = parsed.get("medical_analysis")
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Medical analysis not found")
+    # Cache entries created before DB persistence do not carry the route scope.
+    analysis = dict(analysis)
+    analysis.setdefault("document_id", metadata.get("document_id", identifier))
+    analysis.setdefault("workspace_id", scope)
+    return analysis
 
 
 @router.get("/{filename}/open")

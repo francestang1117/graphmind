@@ -7,6 +7,8 @@ from app.core.workspace import default_workspace_id
 from app.services.document_parser import DocumentParser
 from app.services.entity_extractor import entity_extractor
 from app.services.markdown_parser import MarkdownParser
+from app.services.medical.analyzer import analyze_document
+from app.services.medical.repository import medical_repository
 from app.services.parsed_artifact_repository import parsed_artifact_repository
 
 
@@ -56,6 +58,14 @@ def parse_document_file(
     metadata["document_id"] = document_id or metadata.get("document_id") or filename
     if original_filename:
         metadata["original_filename"] = original_filename
+    analyze_document(
+        result,
+        filename=filename,
+        original_filename=metadata.get("original_filename", ""),
+        document_id=metadata["document_id"],
+        user_id=user_id,
+        workspace_id=metadata["workspace_id"],
+    )
     _parse_cache[cache_key(filename, user_id, workspace_id)] = result
     _persist_parse_artifacts(
         filename,
@@ -87,6 +97,7 @@ def clear_cached_parse(
     if workspace_id is not None:
         arguments["workspace_id"] = workspace_id
     parsed_artifact_repository.delete_for_document(document_id or filename, **arguments)
+    medical_repository.delete_for_document(document_id or filename, **arguments)
 
 
 def markdown_summary(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:

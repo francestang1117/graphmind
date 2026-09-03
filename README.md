@@ -7,9 +7,10 @@ uploaded content.
 
 The project is intentionally honest about its current stage: the upload,
 parsing, entity extraction, graph, search, chat fallback, async jobs,
-observability, safety, and workspace boundary are working MVPs. The medical
-paper study card, sentence-level citations, and GPT/OpenAI answer generation
-are planned upgrades.
+observability, safety, and workspace boundary are working MVPs. The current V2
+branch also adds explainable medical document classification and page-aware
+paper section parsing. Study cards, sentence-level citations, and GPT/OpenAI
+answer generation are still planned upgrades.
 
 ## What Works Today
 
@@ -23,6 +24,9 @@ are planned upgrades.
 - SQLAlchemy-backed workspaces, document metadata, parsed chunks, extracted
   entities, graph nodes/edges, and background job history
 - Unified parser for Markdown, TXT, PDF, DOCX, code, JSON, CSV, and HTML
+- Explainable medical document classification with an `unknown` fallback
+- English, Chinese, and Japanese paper section normalization with page-aware,
+  section-aware chunks
 - Entity extraction with curated technical terms, alias cleanup, relation hints,
   and optional spaCy NER
 - NetworkX-style knowledge graph with SQLAlchemy-backed node/edge persistence
@@ -38,7 +42,9 @@ are planned upgrades.
 - Prometheus-compatible `/metrics`
 - Optional Sentry error tracking with release names based on `VERSION` and
   optional `GIT_SHA`
-- 210+ backend tests covering the current core modules
+- Medical analysis endpoint for document kind, section ranges, missing sections,
+  and parser warnings
+- 236 backend tests covering the current core modules
 
 ## Project Status
 
@@ -53,6 +59,7 @@ are planned upgrades.
 | Async jobs | Working | Redis/Celery path, WebSocket progress, cancel/retry, job history |
 | Persistence | Partial | Workspaces, documents, parsed chunks/entities, graph nodes/edges, users, and jobs |
 | V2 research boundary | PR1 complete | Account-owned workspaces and workspace-scoped document-derived data |
+| V2 medical analysis | PR2 implementation | Explainable classification and page-aware paper sections; study cards are next |
 | Observability | Working MVP | Prometheus metrics and optional Sentry |
 | File storage backend | Working MVP | Local by default; optional S3/MinIO keeps a local parser cache |
 | Authentication | Working MVP | Email/password, optional GitHub OAuth, user-scoped workspaces |
@@ -122,6 +129,7 @@ Base URL: `http://localhost:8000/api/v1`
 - `GET /documents/` lists stored documents.
 - `GET /documents/{filename}` returns metadata for one stored document.
 - `GET /documents/{filename}/parsed` returns a parsed-structure summary.
+- `GET /documents/{filename}/medical-analysis` returns medical classification and paper section ranges.
 - `GET /documents/{filename}/open` safely previews or downloads an uploaded file.
 - `DELETE /documents/{filename}` deletes a stored document.
 - `GET /jobs/` lists recent background jobs.
@@ -148,7 +156,7 @@ GraphMind/
       api/endpoints/       Documents, jobs, graph, search, chat, scraper, auth, workspaces
       core/                Settings, DB, Celery, errors, metrics, rate limits, Sentry, workspace
       models/              SQLAlchemy persistence models
-      services/            Storage, parsing, extraction, graph, search, jobs, QA, workspaces
+      services/            Storage, parsing, extraction, graph, search, jobs, QA, workspaces, medical analysis
       tasks/               Celery document processing and cleanup tasks
       utils/               Upload validation
     tests/                 Backend unit and integration tests
@@ -206,8 +214,8 @@ More testing notes are in [docs/TESTING.md](docs/TESTING.md).
 
 ## Near-Term Roadmap
 
-1. Replace the local vector-search MVP with a real embedding model and vector DB.
-2. Add OpenAI/GPT-backed answer generation behind the existing chat interface.
-3. Add graph migrations and stronger persisted graph queries.
-4. Run the GitHub OAuth and `AUTH_REQUIRED=true` flow behind staging HTTPS.
-5. Expand the jobs panel with filters and a full task detail drawer.
+1. Add study cards with explicit not-found states and source citations.
+2. Add the workspace and paper workflow to the frontend.
+3. Replace the local vector-search MVP with a real embedding model and vector DB.
+4. Add OpenAI/GPT-backed answer generation behind the existing chat interface.
+5. Add graph migrations and stronger persisted graph queries.

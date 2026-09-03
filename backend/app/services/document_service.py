@@ -193,6 +193,7 @@ class DocumentService:
                     self.repository.mark_deleted(filename, user_id)
             from app.services.parsed_artifact_repository import parsed_artifact_repository
             from app.services.graph_repository import graph_repository
+            from app.services.medical.repository import medical_repository
 
             self._cancel_document_jobs(document_id, user_id, workspace_id)
             if workspace_id is not None:
@@ -202,9 +203,15 @@ class DocumentService:
                     workspace_id=workspace_id,
                 )
                 graph_repository.delete_for_document(document_id, user_id, workspace_id)
+                medical_repository.delete_for_document(
+                    document_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
             else:
                 parsed_artifact_repository.delete_for_document(document_id, user_id=user_id)
                 graph_repository.delete_for_document(document_id, user_id)
+                medical_repository.delete_for_document(document_id, user_id=user_id)
         return deleted
 
     def _cancel_document_jobs(

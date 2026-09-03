@@ -1233,6 +1233,42 @@ custom project does not fall back to the default project when a task starts.
 Tests now cover workspace ownership, the same paper in two projects, graph
 isolation, and the worker scope passed into the processing pipeline.
 
+## 2026-09 — V2 PR2: Medical Document Classification and Paper Structure
+
+The next useful step was not to generate medical advice. Before that, the app
+needs to know what kind of document it received and where a later answer came
+from.
+
+I added a small medical analysis layer beside the general parser. It uses
+readable rules to identify research papers, guidelines, lab reports, imaging
+reports, and a few other medical document types. The classifier keeps an
+`unknown` result when the evidence is weak and stores safe signal names rather
+than copying sensitive text into metadata. It also records a basic language
+guess for English, Chinese, and Japanese material.
+
+For research papers, headings are normalized to a shared set of section types.
+The parser keeps the original heading, section order, page range, character
+range, language, and evidence role. Chunks carry the same section and page
+metadata, so a Results passage is not mixed silently with Discussion or
+References. Compound headings such as `Results and Discussion` keep both
+meanings instead of being discarded.
+
+The profile and section rows live in their own tables and use the existing
+user, workspace, and document boundary. Re-running an analysis replaces the
+old rows in one transaction. A worker that finishes after a document is deleted
+cannot write a new medical profile back into the database.
+
+The existing pipeline still owns the upload flow. Ordinary files continue
+through the generic parser, while a classified research paper gets the
+section-aware chunks before entity extraction, graph construction, and search.
+If the medical step fails, the generic chunks are kept. The new analysis
+endpoint exposes the stored classification, missing sections, warnings, and
+source ranges.
+
+This phase deliberately stops before OCR, study cards, sentence-level citation
+records, multi-paper comparison, diagnosis, or treatment recommendations. Those
+features need the source locations from this step first.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:
@@ -1275,22 +1311,26 @@ As of September 2026, GraphMind has a working foundation:
 - Prometheus-compatible `/metrics` endpoint for API and pipeline counters
 - optional Sentry error tracking for production 5xx failures
 - stable API error codes for common upload, parse, and file access failures
+- explainable medical document classification with an `unknown` fallback
+- English, Chinese, and Japanese paper section normalization
+- page-aware paper sections and section-aware chunks with source ranges
+- `medical-analysis` endpoint with missing-section and parser-warning fields
 - Docker Compose for API + frontend
 - tests for the core backend pieces
 
 The project is not yet a full knowledge graph system. The graph, search, and
 chat screens can now use real extracted data, but relation quality, graph query
 depth, and production auth are still early-stage. The V2 medical research
-workflow currently stops after the workspace boundary; paper classification,
-standard section parsing, study cards, and sentence-level citations are not
+workflow now reaches document classification and paper structure parsing; study
+cards, sentence-level citations, and the paper-focused frontend are not
 implemented yet.
 
 ## Next Steps
 
 The next realistic steps are:
 
-1. Add medical document types and identify the main paper sections with page-aware chunks.
-2. Add study cards whose facts carry sentence-level citations and an explicit not-found state.
-3. Add the workspace and paper workflow to the frontend.
+1. Add study cards whose facts carry sentence-level citations and an explicit not-found state.
+2. Add the workspace and paper workflow to the frontend.
+3. Add multi-paper comparison only after single-paper evidence is traceable.
 4. Improve graph quality with better relation extraction and edge weighting.
 5. Test the account flow with `AUTH_REQUIRED=true` behind HTTPS and secure cookies.

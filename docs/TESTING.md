@@ -12,11 +12,8 @@ From the project root:
 PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
 
-The exact count can change as tests are added. The current local result is:
-
-```text
-210 passed, 1 skipped
-```
+The exact count can change as tests are added. The latest local result is
+`236 passed, 1 skipped`.
 
 The skipped test is the PostgreSQL migration check when
 `GRAPHMIND_TEST_POSTGRES_URL` is not set. GitHub Actions supplies PostgreSQL 16
@@ -57,6 +54,11 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 | `backend/tests/unit/test_object_storage.py` | S3/MinIO storage behavior with a fake client |
 | `backend/tests/test_websocket.py` | Celery-style job progress snapshots and WebSocket stream |
 | `backend/tests/test_job_repository.py` | DB-backed job history and cleanup |
+| `backend/tests/test_medical_classifier.py` | Explainable medical document types, signals, language, and unknown fallback |
+| `backend/tests/test_paper_structure_parser.py` | Multilingual paper sections, page ranges, character ranges, tables, figure captions, and missing sections |
+| `backend/tests/test_medical_analyzer.py` | Medical analysis step and fallback to generic parsing |
+| `backend/tests/test_medical_repository.py` | Scoped profile/section replacement, cleanup, and deleted-document guard |
+| `backend/tests/test_medical_api.py` | User/workspace scope on the medical analysis endpoint |
 
 ## Running Specific Tests
 
@@ -140,6 +142,18 @@ Inspect parsed output:
 curl "http://localhost:8000/api/v1/documents/<stored_filename>/parsed"
 ```
 
+For a paper, inspect the classification and source-aware sections:
+
+```bash
+curl "http://localhost:8000/api/v1/documents/<stored_filename>/medical-analysis"
+```
+
+Check `document_kind`, `language`, `missing_sections`, and each section's
+`page_start`, `page_end`, `char_start`, `char_end`, and `chunk_count`. A PDF
+with no extractable text should be reported as `unknown` with an
+`ocr_required` warning. The current phase does not run OCR or generate study
+cards, medical conclusions, or treatment advice.
+
 Check database-backed parsed artifacts:
 
 ```bash
@@ -180,3 +194,5 @@ parsed, open, and delete endpoints with the stored filename.
   In Celery mode, active rows should show `Worker job` and expose cancel.
 - Coverage reporting is useful later, but there is no enforced 80% coverage gate
   in this repo right now.
+- Medical analysis tests use synthetic or public text. Do not add real patient
+  records or identifiable clinical documents to the repository.
