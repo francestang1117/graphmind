@@ -138,6 +138,20 @@ def test_generic_research_language_does_not_make_a_document_medical():
     assert result.document_kind == "unknown"
 
 
+def test_weak_category_words_do_not_classify_ordinary_documents():
+    classifier = MedicalDocumentClassifier()
+
+    lab = classifier.classify(
+        _parsed("The service has 3 units and 2 integration tests.", fmt="txt")
+    )
+    guideline = classifier.classify(
+        _parsed("A recommendation for software architecture.", fmt="txt")
+    )
+
+    assert lab.document_kind == "unknown"
+    assert guideline.document_kind == "unknown"
+
+
 def test_empty_pdf_is_marked_for_ocr_instead_of_being_guessed():
     result = MedicalDocumentClassifier().classify(_parsed("", fmt="pdf"))
 

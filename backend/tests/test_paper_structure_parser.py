@@ -77,6 +77,95 @@ def test_compound_heading_counts_both_section_types():
     assert "discussion" not in result.missing_sections
 
 
+def test_layout_word_hints_do_not_split_a_compound_heading():
+    text = "Results and Discussion\nThe study result needs interpretation."
+    parsed = {
+        "content": text,
+        "metadata": {
+            "format": "pdf",
+            # pdfplumber can return one large-font word per hint even when
+            # the extracted text contains the complete heading.
+            "headings": [
+                {"text": "Results", "page": 1},
+                {"text": "Discussion", "page": 1},
+            ],
+        },
+        "extra": {
+            "sections": [{"title": "Page 1", "level": 0, "content": text}],
+            "tables": [],
+        },
+    }
+
+    result = PaperStructureParser().parse(parsed, _analysis())
+
+    sections = [section for section in result.sections if section.original_title]
+    assert [section.section_type for section in sections] == ["results"]
+    assert sections[0].original_title == "Results and Discussion"
+    assert sections[0].secondary_types == ["discussion"]
+
+
+def test_docx_without_heading_styles_still_finds_body_headings():
+    text = (
+        "Paper title\n\n"
+        "Abstract\nPatients were included.\n\n"
+        "Methods\nThe study enrolled participants.\n\n"
+        "Results\nThe treatment changed the outcome."
+    )
+    parsed = {
+        "content": text,
+        "metadata": {"format": "docx"},
+        "extra": {
+            # This is the generic parser's fallback block when the DOCX uses
+            # bold text or line breaks instead of Word Heading styles.
+            "sections": [{"title": "Introduction", "level": 0, "content": text}],
+            "tables": [],
+        },
+    }
+
+    result = PaperStructureParser().parse(parsed, _analysis())
+    section_types = {section.section_type for section in result.sections}
+
+    assert {"title", "abstract", "methods", "results"} <= section_types
+    assert "introduction" not in section_types
+    assert "abstract" not in result.missing_sections
+    assert "methods" not in result.missing_sections
+    assert "results" not in result.missing_sections
+
+
+def test_chunk_page_range_is_narrower_than_a_multi_page_section():
+    page_one = "Results\n" + ("The intervention improved the primary outcome. " * 8)
+    page_two = ("Follow-up results remained stable. " * 8) + "\n\nDiscussion\nThe authors interpret the findings."
+    text = "\n\n".join((page_one, page_two))
+    parsed = {
+        "content": text,
+        "metadata": {"format": "pdf"},
+        "extra": {
+            "sections": [
+                {"title": "Page 1", "level": 0, "content": page_one},
+                {"title": "Page 2", "level": 0, "content": page_two},
+            ],
+            "tables": [],
+        },
+    }
+
+    result = PaperStructureParser(chunk_size=200, overlap=20).parse(parsed, _analysis())
+    results_section = next(
+        section for section in result.sections if section.section_type == "results"
+    )
+    result_chunks = [
+        chunk for chunk in result.chunks if chunk["section_type"] == "results"
+    ]
+
+    assert results_section.page_start == 1
+    assert results_section.page_end == 2
+    assert any(
+        chunk["page_start"] == chunk["page_end"] == 2
+        for chunk in result_chunks
+    )
+    assert all(chunk["section_page_start"] == 1 for chunk in result_chunks)
+    assert all(chunk["section_page_end"] == 2 for chunk in result_chunks)
+
+
 def test_table_section_keeps_exact_text_location():
     text = "Results\nOutcome\nRecovered\n"
     parsed = {

@@ -23,6 +23,7 @@ class _Heading:
     section_type: str
     secondary_types: tuple[str, ...]
     confidence: float
+    source: str = "text"
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,7 @@ class PaperStructureParser:
             warning = "ocr_required" if self._format(parsed) == "pdf" else "no_extractable_text"
             return PaperStructureResult(warnings=[warning], missing_sections=list(self.REQUIRED_SECTIONS))
 
+        pages = self._page_ranges(parsed, text)
         explicit = self._docx_sections(parsed)
         if explicit:
             sections = self._sections_from_explicit_blocks(explicit, text, analysis.language)
@@ -103,7 +105,7 @@ class PaperStructureParser:
         # Number sections first so the same number is stored on each chunk.
         chunks: list[dict[str, Any]] = []
         for section in sections:
-            section_chunks = self._section_chunks(section, analysis.document_kind)
+            section_chunks = self._section_chunks(section, analysis.document_kind, pages)
             section.chunk_count = len(section_chunks)
             chunks.extend(section_chunks)
         for chunk_index, chunk in enumerate(chunks):
@@ -255,6 +257,7 @@ class PaperStructureParser:
                     normalized.primary,
                     tuple(normalized.secondary),
                     normalized.confidence,
+                    source="markdown",
                 )
             )
 
@@ -276,6 +279,7 @@ class PaperStructureParser:
                     normalized.primary,
                     tuple(normalized.secondary),
                     normalized.confidence,
+                    source="text",
                 )
             )
 
@@ -298,10 +302,19 @@ class PaperStructureParser:
                         normalized.primary,
                         tuple(normalized.secondary),
                         min(normalized.confidence, 0.8),
+                        source="layout",
                     )
                 )
 
-        candidates.sort(key=lambda item: (item.start, item.end))
+        source_priority = {"markdown": 3, "text": 2, "layout": 1}
+        candidates.sort(
+            key=lambda item: (
+                item.start,
+                -(item.end - item.start),
+                -item.confidence,
+                -source_priority.get(item.source, 0),
+            )
+        )
         result: list[_Heading] = []
         seen: set[tuple[int, str]] = set()
         for candidate in candidates:
@@ -309,6 +322,15 @@ class PaperStructureParser:
             if key in seen:
                 continue
             seen.add(key)
+            # A PDF layout hint may be one word from a compound heading.
+            # Keep the complete heading when it covers the same text range.
+            if candidate.source == "layout" and any(
+                accepted.start <= candidate.start
+                and candidate.end <= accepted.end
+                and accepted.source != "layout"
+                for accepted in result
+            ):
+                continue
             if result and candidate.start < result[-1].end:
                 continue
             result.append(candidate)
@@ -318,7 +340,22 @@ class PaperStructureParser:
         if self._format(parsed) != "docx":
             return []
         sections = (parsed.get("extra") or {}).get("sections", [])
-        return [item for item in sections if isinstance(item, dict)]
+        return [
+            item
+            for item in sections
+            if isinstance(item, dict) and self._is_styled_docx_heading(item)
+        ]
+
+    def _is_styled_docx_heading(self, block: dict[str, Any]) -> bool:
+        """Only a real Word heading style should bypass text heading detection."""
+        title = str(block.get("title") or block.get("header") or "").strip()
+        if not title or self._PAGE_TITLE.match(title):
+            return False
+        try:
+            level = int(block.get("level", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+        return level > 0
 
     def _page_ranges(self, parsed: dict[str, Any], text: str) -> list[_PageRange]:
         ranges: list[_PageRange] = []
@@ -412,7 +449,12 @@ class PaperStructureParser:
             },
         )
 
-    def _section_chunks(self, section: StructuredSection, document_kind: str) -> list[dict[str, Any]]:
+    def _section_chunks(
+        self,
+        section: StructuredSection,
+        document_kind: str,
+        pages: list[_PageRange] | None = None,
+    ) -> list[dict[str, Any]]:
         if not section.text.strip():
             return []
         chunks: list[dict[str, Any]] = []
@@ -432,6 +474,15 @@ class PaperStructureParser:
                 else:
                     absolute_start = 0
                     absolute_end = 0
+                chunk_page_start = section.page_start
+                chunk_page_end = section.page_end
+                if location_exact and pages and absolute_end > absolute_start:
+                    located_start, located_end = self._pages_for_range(
+                        absolute_start, absolute_end, pages
+                    )
+                    if located_start is not None:
+                        chunk_page_start = located_start
+                        chunk_page_end = located_end
                 chunks.append({
                     "text": piece,
                     "type": "medical_section",
@@ -442,8 +493,10 @@ class PaperStructureParser:
                     "section_type": section.section_type,
                     "section_title": section.original_title,
                     "section_ordinal": section.ordinal,
-                    "page_start": section.page_start,
-                    "page_end": section.page_end,
+                    "page_start": chunk_page_start,
+                    "page_end": chunk_page_end,
+                    "section_page_start": section.page_start,
+                    "section_page_end": section.page_end,
                     "language": section.language,
                     "document_kind": document_kind,
                     "evidence_role": section.metadata.get("evidence_role", "context"),
@@ -463,6 +516,7 @@ class PaperStructureParser:
     ) -> tuple[list[StructuredSection], list[dict[str, Any]]]:
         sections: list[StructuredSection] = []
         chunks: list[dict[str, Any]] = []
+        pages = self._page_ranges(parsed, text)
         tables = (parsed.get("extra") or {}).get("tables", [])
         for index, table in enumerate(tables, 1):
             if not isinstance(table, dict):
@@ -500,7 +554,7 @@ class PaperStructureParser:
                     "location_exact": start >= 0,
                 },
             )
-            section_chunks = self._section_chunks(section, document_kind)
+            section_chunks = self._section_chunks(section, document_kind, pages)
             section.chunk_count = len(section_chunks)
             sections.append(section)
             chunks.extend(section_chunks)
@@ -545,7 +599,7 @@ class PaperStructureParser:
                 },
             )
             section.chunk_count = len(
-                self._section_chunks(section, document_kind)
+                self._section_chunks(section, document_kind, pages)
             )
             sections.append(section)
         return sections

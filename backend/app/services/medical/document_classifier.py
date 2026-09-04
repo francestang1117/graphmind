@@ -60,6 +60,40 @@ class MedicalDocumentClassifier:
         r"patient history|physical examination)\b|病历|病史|主诉|体格检查",
         re.I,
     )
+    _STRONG_CATEGORY_TERMS = {
+        "found_guideline_terms": re.compile(
+            r"\b(?:clinical practice guideline|evidence[- ]based guideline|"
+            r"consensus statement|expert consensus|guideline development|"
+            r"recommendations? for (?:patients?|treatment|management|care))\b|"
+            r"指南|共识|ガイドライン|勧告",
+            re.I,
+        ),
+        "found_lab_terms": re.compile(
+            r"\b(?:laboratory report|lab report|reference range|normal range|"
+            r"specimen|test result)\b|参考范围|检验|化验|标本",
+            re.I,
+        ),
+        "found_imaging_terms": re.compile(
+            r"\b(?:ct scan|mri|ultrasound|x-ray|radiology|imaging report|"
+            r"imaging findings|impression)\b|影像|超声|核磁|磁共振|放射学",
+            re.I,
+        ),
+        "found_discharge_terms": re.compile(
+            r"\b(?:discharge summary|discharged|hospital course|admission date)\b|"
+            r"出院记录|出院小结|住院经过",
+            re.I,
+        ),
+        "found_prescription_terms": re.compile(
+            r"\b(?:prescription|medication list|dosage|dose|frequency|"
+            r"take .* daily)\b|处方|剂量|用法|用量|每日|药品",
+            re.I,
+        ),
+        "found_clinical_record_terms": re.compile(
+            r"\b(?:medical record|clinical note|chief complaint|medical history|"
+            r"patient history|physical examination)\b|病历|病史|主诉|体格检查",
+            re.I,
+        ),
+    }
     _JAPANESE_MEDICAL_TERMS = re.compile(
         r"患者|臨床|疾患|診断|治療|療法|試験|病院|症状|医学|健康|介入|有害事象",
     )
@@ -88,7 +122,7 @@ class MedicalDocumentClassifier:
         filename: str = "",
         original_filename: str = "",
     ) -> MedicalDocumentAnalysis:
-        """Return a type, confidence, and the signals that led to it."""
+        """Return a type and rule evidence; confidence is not a probability."""
         text = self._text(parsed)
         title = self._title(parsed, filename, original_filename)
         headings = self._headings(parsed)
@@ -176,10 +210,7 @@ class MedicalDocumentClassifier:
             ),
             MedicalDocumentKind.PATIENT_NOTE.value: self._patient_note_score(text),
             MedicalDocumentKind.OTHER_MEDICAL.value: 0.35
-            if any(
-                signal in signal_set
-                for signal in ("found_medical_terms", "found_japanese_medical_terms")
-            )
+            if self._medical_context_count(text) >= 2
             else 0.0,
         }
 
@@ -190,12 +221,24 @@ class MedicalDocumentClassifier:
             ("found_journal_metadata", self._JOURNAL_METADATA.search(text)),
             ("found_medical_terms", self._MEDICAL_TERMS.search(text) or self._MEDICAL_CJK_TERMS.search(text)),
             ("found_japanese_medical_terms", self._JAPANESE_MEDICAL_TERMS.search(text)),
-            ("found_guideline_terms", self._GUIDELINE_TERMS.search(text)),
-            ("found_lab_terms", self._LAB_TERMS.search(text)),
-            ("found_imaging_terms", self._IMAGING_TERMS.search(text)),
-            ("found_discharge_terms", self._DISCHARGE_TERMS.search(text)),
-            ("found_prescription_terms", self._PRESCRIPTION_TERMS.search(text)),
-            ("found_clinical_record_terms", self._CLINICAL_RECORD_TERMS.search(text)),
+            ("found_guideline_terms", self._keyword_score(
+                text, self._GUIDELINE_TERMS, "found_guideline_terms"
+            )),
+            ("found_lab_terms", self._keyword_score(
+                text, self._LAB_TERMS, "found_lab_terms"
+            )),
+            ("found_imaging_terms", self._keyword_score(
+                text, self._IMAGING_TERMS, "found_imaging_terms"
+            )),
+            ("found_discharge_terms", self._keyword_score(
+                text, self._DISCHARGE_TERMS, "found_discharge_terms"
+            )),
+            ("found_prescription_terms", self._keyword_score(
+                text, self._PRESCRIPTION_TERMS, "found_prescription_terms"
+            )),
+            ("found_clinical_record_terms", self._keyword_score(
+                text, self._CLINICAL_RECORD_TERMS, "found_clinical_record_terms"
+            )),
         )
         signals.extend(name for name, matched in checks if matched)
         heading_signals = {
@@ -214,7 +257,25 @@ class MedicalDocumentClassifier:
     def _keyword_score(self, text: str, pattern: re.Pattern[str], signal: str) -> float:
         if not pattern.search(text):
             return 0.0
+        strong_pattern = self._STRONG_CATEGORY_TERMS.get(signal)
+        context_count = self._medical_context_count(text)
+        if strong_pattern and strong_pattern.search(text):
+            # A format phrase such as "reference range" is strong enough on
+            # its own; guideline wording still needs a medical cue.
+            if signal == "found_guideline_terms" and context_count == 0:
+                return 0.0
+            return 0.6 if signal == "found_guideline_terms" else 0.55
+        if context_count < 2:
+            return 0.0
         return 0.6 if signal == "found_guideline_terms" else 0.55
+
+    def _medical_context_count(self, text: str) -> int:
+        """Count domain cues before trusting a broad document label."""
+        return (
+            len(self._MEDICAL_TERMS.findall(text))
+            + len(self._MEDICAL_CJK_TERMS.findall(text))
+            + len(self._JAPANESE_MEDICAL_TERMS.findall(text))
+        )
 
     def _patient_note_score(self, text: str) -> float:
         return 0.5 if re.search(r"\b(?:patient note|progress note)\b|患者记录|病人记录", text, re.I) else 0.0

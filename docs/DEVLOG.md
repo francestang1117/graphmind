@@ -1300,6 +1300,24 @@ The regression tests inject a failure during the later derived-data write and
 verify that the old profile, section, chunk, and entity rows all stay intact.
 They also verify that a failed commit does not add a new cache entry.
 
+## 2026-09 — Tighten Paper Boundaries and Classifier Signals
+
+A few edge cases showed that paper structure could look correct at the section
+level while still losing the evidence location underneath. Layout hints from a
+PDF could split `Results and Discussion`, a DOCX without Heading styles could
+be reduced to the parser's default `Introduction`, and every chunk in a
+multi-page section could inherit the whole section range.
+
+The parser now prefers the complete heading, keeps body-heading detection for
+unstyled DOCX files, and calculates each chunk's own page range while retaining
+the enclosing section range. The classifier also requires medical context or
+a strong document-format signal before accepting broad categories such as
+guideline or lab report. A weak word like `recommendation` or `units` now
+leaves an ordinary document as `unknown`.
+
+Regression tests cover all four cases so later parser changes do not quietly
+bring the old behavior back.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:
