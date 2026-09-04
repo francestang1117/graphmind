@@ -25,6 +25,7 @@ def analyze_document(
     user_id: str = "local-dev",
     workspace_id: Optional[str] = None,
     repository: MedicalRepository = medical_repository,
+    persist: bool = True,
 ) -> dict[str, Any]:
     """Add medical metadata to a generic parser result.
 
@@ -92,7 +93,7 @@ def analyze_document(
     )
     parsed["medical_analysis"] = analysis_dict
 
-    if document_id:
+    if document_id and persist:
         try:
             repository.replace_analysis(
                 document_id,

@@ -20,6 +20,7 @@ from app.core.database import db_enabled
 from app.services.document_service import document_service
 from app.core.errors import (
     ParseError,
+    ParsePersistenceError,
     ProcessingQueueError,
     StorageAccessError,
     StoredFileMissingError,
@@ -108,6 +109,7 @@ class ParsedDocumentSummary(BaseModel):
     inherited_styles_count: int
     word_count: int
     reading_time: int
+    persistence_status: str = "unknown"
     has_code: bool
     languages: List[str]
     imports: List[str]
@@ -203,6 +205,8 @@ async def get_parsed_document(
                 document_id=metadata.get("document_id", ""),
                 workspace_id=workspace_id,
             )
+        except ParsePersistenceError:
+            raise
         except Exception as exc:
             # Parsing can fail for format-specific reasons. Expose a stable
             # code, but keep the original reason in details for debugging.
@@ -273,6 +277,8 @@ async def get_medical_analysis(
                 document_id=metadata.get("document_id", ""),
                 workspace_id=scope,
             )
+        except ParsePersistenceError:
+            raise
         except Exception as exc:
             raise ParseError(
                 details={

@@ -1282,6 +1282,24 @@ of looking through storage. The old storage fallback remains available only for
 cache-only development setups. A regression test covers two workspaces owned by
 the same user, which is the case that exposed the bug.
 
+## 2026-09 — Keep Parse Results in One Snapshot
+
+While reprocessing a document, I found that the medical profile and paper
+sections could be committed before the parsed chunks and entities. If the later
+write failed, the database and the in-memory cache described different versions
+of the same file.
+
+The parser now stages the medical rows, chunks, and entities in one SQLAlchemy
+transaction. The cache is updated only after that transaction commits, so a
+failed reparse keeps the previous cached result instead of publishing a partial
+one. A missing or already-deleted document is reported as `not_persisted` and
+does not create derived rows; when persistence is disabled, the existing
+`cache_only` fallback remains available for local development.
+
+The regression tests inject a failure during the later derived-data write and
+verify that the old profile, section, chunk, and entity rows all stay intact.
+They also verify that a failed commit does not add a new cache entry.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:

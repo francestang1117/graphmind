@@ -1,11 +1,18 @@
 """Parsed artifact repository tests."""
 
+import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
-from app.models.persistence import ParsedChunkRecord, ParsedEntityRecord
+from app.models.persistence import (
+    DocumentSectionRecord,
+    MedicalDocumentProfileRecord,
+    ParsedChunkRecord,
+    ParsedEntityRecord,
+)
+import app.services.parsed_artifact_repository as artifact_module
 from app.services.document_repository import DocumentRepository
 from app.services.parsed_artifact_repository import ParsedArtifactRepository
 
@@ -141,3 +148,69 @@ def test_artifacts_ignore_late_write_after_document_deletion():
     with artifacts.session_factory() as db:
         assert db.scalars(select(ParsedChunkRecord)).all() == []
         assert db.scalars(select(ParsedEntityRecord)).all() == []
+
+
+def test_parse_bundle_rolls_back_all_rows_when_later_write_fails(monkeypatch):
+    docs, artifacts = _repos()
+    docs.save_metadata(_metadata())
+
+    old_analysis = {
+        "document_kind": "research_paper",
+        "language": "en",
+        "confidence": 0.8,
+        "classifier_version": "medical-rules-v1",
+        "signals": [],
+        "warnings": [],
+        "missing_sections": [],
+    }
+    old_sections = [
+        {
+            "section_type": "results",
+            "original_title": "Results",
+            "page_start": 1,
+            "page_end": 1,
+            "text": "Old result",
+            "language": "en",
+            "confidence": 0.8,
+            "metadata": {},
+        }
+    ]
+    assert artifacts.replace_parse_bundle(
+        "hash.md",
+        {"chunks": [{"text": "Old chunk", "type": "section"}]},
+        [{"text": "Old concept", "label": "CONCEPT"}],
+        old_analysis,
+        old_sections,
+        user_id="u1",
+    )
+
+    real_medical_write = artifact_module.replace_analysis_in_session
+
+    def fail_medical_write(*args, **kwargs):
+        assert real_medical_write(*args, **kwargs)
+        raise RuntimeError("simulated later persistence failure")
+
+    monkeypatch.setattr(
+        artifact_module,
+        "replace_analysis_in_session",
+        fail_medical_write,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated later persistence failure"):
+        artifacts.replace_parse_bundle(
+            "hash.md",
+            {"chunks": [{"text": "New chunk", "type": "section"}]},
+            [{"text": "New concept", "label": "CONCEPT"}],
+            {**old_analysis, "confidence": 0.95},
+            [{**old_sections[0], "text": "New result"}],
+            user_id="u1",
+        )
+
+    assert [item["text"] for item in artifacts.list_chunks("hash.md", user_id="u1")] == [
+        "Old chunk"
+    ]
+    with artifacts.session_factory() as db:
+        profile = db.scalars(select(MedicalDocumentProfileRecord)).one()
+        section = db.scalars(select(DocumentSectionRecord)).one()
+        assert profile.confidence == 0.8
+        assert section.text == "Old result"

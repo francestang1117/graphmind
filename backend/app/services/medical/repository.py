@@ -68,88 +68,17 @@ class MedicalRepository:
 
         try:
             with self.session_factory() as db:
-                document = _find_document(
+                saved = replace_analysis_in_session(
                     db,
                     identifier,
-                    user_id,
+                    analysis,
+                    sections,
+                    user_id=user_id,
                     workspace_id=workspace_id,
-                    lock=True,
                 )
-                if not document:
-                    log.info("Skipping medical analysis for missing document %s", identifier)
-                    return False
-
-                scope = document.workspace_id or default_workspace_id(user_id)
-                # Rows from before workspaces were added may still be empty.
-                # Attach those rows to the user's default workspace before
-                # saving the derived medical data.
-                if document.workspace_id is None:
-                    document.workspace_id = scope
-                profile = db.scalars(
-                    select(MedicalDocumentProfileRecord).where(
-                        MedicalDocumentProfileRecord.document_id == document.id,
-                        MedicalDocumentProfileRecord.user_id == user_id,
-                        MedicalDocumentProfileRecord.workspace_id == scope,
-                    )
-                ).first()
-
-                if profile:
-                    db.delete(profile)
-                db.execute(
-                    delete(DocumentSectionRecord).where(
-                        DocumentSectionRecord.document_id == document.id,
-                        DocumentSectionRecord.user_id == user_id,
-                        DocumentSectionRecord.workspace_id == scope,
-                    )
-                )
-                db.flush()
-
-                db.add(
-                    MedicalDocumentProfileRecord(
-                        id=_new_id(),
-                        user_id=user_id,
-                        workspace_id=scope,
-                        document_id=document.id,
-                        document_kind=str(analysis.get("document_kind") or "unknown"),
-                        language=str(analysis.get("language") or "unknown"),
-                        confidence=float(analysis.get("confidence", 0) or 0),
-                        classifier_version=str(
-                            analysis.get("classifier_version") or "medical-rules-v1"
-                        ),
-                        signals_json=_json(analysis.get("signals", [])),
-                        warnings_json=_json(analysis.get("warnings", [])),
-                        missing_sections_json=_json(analysis.get("missing_sections", [])),
-                        created_at=_utc_now(),
-                        updated_at=_utc_now(),
-                    )
-                )
-
-                for index, section in enumerate(sections, start=1):
-                    db.add(
-                        _section_record(
-                            section,
-                            index,
-                            document_id=document.id,
-                            user_id=user_id,
-                            workspace_id=scope,
-                        )
-                    )
-
-                # Keep the common document list useful without duplicating the
-                # full analysis JSON in the documents table.
-                document.document_kind = str(analysis.get("document_kind") or "unknown")
-                document.language = str(analysis.get("language") or "unknown")
-                document.parser_version = str(
-                    analysis.get("parser_version") or "medical-rules-v1"
-                )
-                document.modified_at = _utc_now()
-
-                # A delete can win while parsing is in progress. Do not commit
-                # derived medical rows after the source has been tombstoned.
-                if not _document_is_active(db, document.id, user_id, scope):
+                if not saved:
                     db.rollback()
                     return False
-
                 db.commit()
                 return True
         except (SQLAlchemyError, OSError, RuntimeError, ValueError) as exc:
@@ -259,6 +188,109 @@ class MedicalRepository:
         except (SQLAlchemyError, OSError, RuntimeError) as exc:
             log.warning("Could not delete medical analysis for %s: %s", identifier, exc)
             return False
+
+
+def replace_analysis_in_session(
+    db,
+    identifier: str,
+    analysis: dict[str, Any],
+    sections: list[dict[str, Any]],
+    *,
+    user_id: str = "local-dev",
+    workspace_id: Optional[str] = None,
+    document: Optional["DocumentRecord"] = None,
+) -> bool:
+    """Write medical rows without committing the caller's transaction."""
+    if not all(
+        (
+            delete,
+            or_,
+            select,
+            DocumentRecord,
+            DocumentSectionRecord,
+            MedicalDocumentProfileRecord,
+        )
+    ):
+        return False
+
+    if document is None:
+        document = _find_document(
+            db,
+            identifier,
+            user_id,
+            workspace_id=workspace_id,
+            lock=True,
+        )
+    if not document:
+        log.info("Skipping medical analysis for missing document %s", identifier)
+        return False
+
+    scope = document.workspace_id or default_workspace_id(user_id)
+    # Older rows may not have a workspace yet. Give them the same default
+    # scope used by the rest of the compatibility path.
+    if document.workspace_id is None:
+        document.workspace_id = scope
+
+    profile = db.scalars(
+        select(MedicalDocumentProfileRecord).where(
+            MedicalDocumentProfileRecord.document_id == document.id,
+            MedicalDocumentProfileRecord.user_id == user_id,
+            MedicalDocumentProfileRecord.workspace_id == scope,
+        )
+    ).first()
+    if profile:
+        db.delete(profile)
+    db.execute(
+        delete(DocumentSectionRecord).where(
+            DocumentSectionRecord.document_id == document.id,
+            DocumentSectionRecord.user_id == user_id,
+            DocumentSectionRecord.workspace_id == scope,
+        )
+    )
+    db.flush()
+
+    db.add(
+        MedicalDocumentProfileRecord(
+            id=_new_id(),
+            user_id=user_id,
+            workspace_id=scope,
+            document_id=document.id,
+            document_kind=str(analysis.get("document_kind") or "unknown"),
+            language=str(analysis.get("language") or "unknown"),
+            confidence=float(analysis.get("confidence", 0) or 0),
+            classifier_version=str(
+                analysis.get("classifier_version") or "medical-rules-v1"
+            ),
+            signals_json=_json(analysis.get("signals", [])),
+            warnings_json=_json(analysis.get("warnings", [])),
+            missing_sections_json=_json(analysis.get("missing_sections", [])),
+            created_at=_utc_now(),
+            updated_at=_utc_now(),
+        )
+    )
+
+    for index, section in enumerate(sections, start=1):
+        db.add(
+            _section_record(
+                section,
+                index,
+                document_id=document.id,
+                user_id=user_id,
+                workspace_id=scope,
+            )
+        )
+
+    # The document summary is updated in the same transaction as its details.
+    document.document_kind = str(analysis.get("document_kind") or "unknown")
+    document.language = str(analysis.get("language") or "unknown")
+    document.parser_version = str(
+        analysis.get("parser_version") or "medical-rules-v1"
+    )
+    document.modified_at = _utc_now()
+
+    # A delete can win while parsing is in progress. The caller will roll back
+    # any rows already staged in this session when this check fails.
+    return _document_is_active(db, document.id, user_id, scope)
 
 
 def _find_document(

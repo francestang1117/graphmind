@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from typing import Any, Callable, Optional
 
 from app.core.database import SessionLocal, db_enabled
 from app.core.workspace import default_workspace_id
+from app.services.medical.repository import replace_analysis_in_session
+
+log = logging.getLogger(__name__)
 
 try:
     from sqlalchemy import delete, or_, select
@@ -73,66 +77,156 @@ class ParsedArtifactRepository:
                 # Never create parse rows from an unverified filename. The
                 # document row is the ownership check for everything below it.
                 return
-            document_id = document.id
-            document_workspace_id = document.workspace_id
-
-            # Keep only the latest parse for a document. This avoids stale
-            # chunks hanging around after parser changes.
-            db.execute(
-                delete(ParsedChunkRecord).where(
-                    ParsedChunkRecord.document_id == document_id,
-                    ParsedChunkRecord.user_id == user_id,
-                    _document_workspace_condition(
-                        ParsedChunkRecord.workspace_id,
-                        user_id,
-                        document_workspace_id,
-                    ),
-                )
-            )
-            db.execute(
-                delete(ParsedEntityRecord).where(
-                    ParsedEntityRecord.document_id == document_id,
-                    ParsedEntityRecord.user_id == user_id,
-                    _document_workspace_condition(
-                        ParsedEntityRecord.workspace_id,
-                        user_id,
-                        document_workspace_id,
-                    ),
-                )
-            )
-
-            for index, chunk in enumerate(parsed.get("chunks", [])):
-                row = _chunk_record(
-                    document_id,
-                    user_id,
-                    index,
-                    chunk,
-                    workspace_id=document_workspace_id or default_workspace_id(user_id),
-                )
-                if row:
-                    db.add(row)
-
-            for entity in _dedupe_entities(entities):
-                row = _entity_record(
-                    document_id,
-                    user_id,
-                    entity,
-                    workspace_id=document_workspace_id or default_workspace_id(user_id),
-                )
-                if row:
-                    db.add(row)
-
-            # with_for_update protects PostgreSQL. This conditional write also
-            # keeps SQLite from committing after a delete won the race.
-            if not _document_is_active(
+            if not self._replace_for_document_in_session(
                 db,
-                document_id,
-                user_id,
-                workspace_id=document_workspace_id,
+                parsed,
+                entities,
+                user_id=user_id,
+                document=document,
             ):
                 db.rollback()
                 return
             db.commit()
+
+    def replace_parse_bundle(
+        self,
+        identifier: str,
+        parsed: dict[str, Any],
+        entities: list[Any],
+        analysis: dict[str, Any],
+        sections: list[dict[str, Any]],
+        *,
+        user_id: str = "local-dev",
+        workspace_id: Optional[str] = None,
+    ) -> bool:
+        """Commit parser and medical rows as one database snapshot."""
+        if not self.available():
+            return False
+
+        try:
+            with self.session_factory() as db:
+                document = _find_document(
+                    db,
+                    identifier,
+                    user_id,
+                    workspace_id=workspace_id,
+                    lock=True,
+                )
+                if not document:
+                    log.info("Skipping parse bundle for missing document %s", identifier)
+                    return False
+
+                if not self._replace_for_document_in_session(
+                    db,
+                    parsed,
+                    entities,
+                    user_id=user_id,
+                    document=document,
+                ):
+                    db.rollback()
+                    return False
+
+                if not replace_analysis_in_session(
+                    db,
+                    identifier,
+                    analysis,
+                    sections,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document=document,
+                ):
+                    db.rollback()
+                    return False
+
+                db.commit()
+                return True
+        except Exception:
+            # The session is closed without commit, so SQLAlchemy rolls back
+            # all staged rows before the error reaches the parse task.
+            log.exception("Could not commit parse bundle for %s", identifier)
+            raise
+
+    def _replace_for_document_in_session(
+        self,
+        db,
+        parsed: dict[str, Any],
+        entities: list[Any],
+        *,
+        user_id: str,
+        document: Optional["DocumentRecord"] = None,
+        identifier: str = "",
+        workspace_id: Optional[str] = None,
+    ) -> bool:
+        """Stage chunks and entities without committing the session."""
+        if document is None:
+            document = _find_document(
+                db,
+                identifier,
+                user_id,
+                workspace_id=workspace_id,
+                lock=True,
+            )
+        if not document:
+            return False
+
+        document_id = document.id
+        document_workspace_id = document.workspace_id
+
+        # Keep only the latest parse for a document. This avoids stale chunks
+        # hanging around after parser changes.
+        db.execute(
+            delete(ParsedChunkRecord).where(
+                ParsedChunkRecord.document_id == document_id,
+                ParsedChunkRecord.user_id == user_id,
+                _document_workspace_condition(
+                    ParsedChunkRecord.workspace_id,
+                    user_id,
+                    document_workspace_id,
+                ),
+            )
+        )
+        db.execute(
+            delete(ParsedEntityRecord).where(
+                ParsedEntityRecord.document_id == document_id,
+                ParsedEntityRecord.user_id == user_id,
+                _document_workspace_condition(
+                    ParsedEntityRecord.workspace_id,
+                    user_id,
+                    document_workspace_id,
+                ),
+            )
+        )
+
+        scope = document_workspace_id or default_workspace_id(user_id)
+        for index, chunk in enumerate(parsed.get("chunks", [])):
+            row = _chunk_record(
+                document_id,
+                user_id,
+                index,
+                chunk,
+                workspace_id=scope,
+            )
+            if row:
+                db.add(row)
+
+        for entity in _dedupe_entities(entities):
+            row = _entity_record(
+                document_id,
+                user_id,
+                entity,
+                workspace_id=scope,
+            )
+            if row:
+                db.add(row)
+
+        # with_for_update protects PostgreSQL. This conditional write also
+        # keeps SQLite from committing after a delete won the race.
+        return _document_is_active(
+            db,
+            document_id,
+            user_id,
+            workspace_id=document_workspace_id,
+        )
 
     def delete_for_document(
         self,
