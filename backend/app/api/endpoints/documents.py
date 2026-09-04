@@ -15,8 +15,9 @@ from app.api.endpoints.documents_with_markdown import (
     get_cached_parse,
     parse_document_file,
 )
-from app.services.document_service import document_service
 from app.core.config import settings
+from app.core.database import db_enabled
+from app.services.document_service import document_service
 from app.core.errors import (
     ParseError,
     ProcessingQueueError,
@@ -242,7 +243,11 @@ async def get_medical_analysis(
     )
     if not metadata:
         metadata = document_service.get_document(
-            identifier, user_id, workspace_id=scope
+            identifier,
+            user_id,
+            workspace_id=scope,
+            # A scoped DB miss must not turn into an unscoped storage lookup.
+            allow_storage_fallback=not db_enabled(),
         )
     if not metadata:
         raise HTTPException(status_code=404, detail="File not found")

@@ -1269,6 +1269,19 @@ This phase deliberately stops before OCR, study cards, sentence-level citation
 records, multi-paper comparison, diagnosis, or treatment recommendations. Those
 features need the source locations from this step first.
 
+## 2026-09 — Keep Medical Analysis Inside Its Workspace
+
+While checking the medical analysis route, I found that a missing database row
+could still fall back to the file store. That was fine for the older local-file
+paths, but it meant a document from another workspace could be parsed under the
+workspace in the URL.
+
+The analysis route now keeps the database lookup scoped to the current user and
+workspace. When database persistence is on, a scoped miss returns `404` instead
+of looking through storage. The old storage fallback remains available only for
+cache-only development setups. A regression test covers two workspaces owned by
+the same user, which is the case that exposed the bug.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:

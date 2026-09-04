@@ -119,7 +119,9 @@ class DocumentService:
         filename: str,
         user_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
+        allow_storage_fallback: bool = True,
     ) -> Optional[dict[str, Any]]:
+        """Find a document in the scoped database, then optionally in storage."""
         if self._db_available():
             record = (
                 self.repository.get(filename, user_id, workspace_id)
@@ -133,6 +135,8 @@ class DocumentService:
             )
             if record or has_record:
                 return record
+        if not allow_storage_fallback:
+            return None
         return self.storage.get_file_info(filename, user_id)
 
     def get_document_by_id(

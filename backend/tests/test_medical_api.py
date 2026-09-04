@@ -74,3 +74,42 @@ def test_medical_analysis_route_returns_404_for_missing_analysis(monkeypatch):
         )
 
     assert exc.value.status_code == 404
+
+
+def test_medical_analysis_does_not_fall_back_across_workspaces(monkeypatch):
+    lookups = []
+
+    monkeypatch.setattr(documents, "resolve_workspace_id", lambda *_: "workspace-b")
+    monkeypatch.setattr(documents, "db_enabled", lambda: True)
+    monkeypatch.setattr(
+        documents.document_service,
+        "get_document_by_id",
+        lambda *_args, **_kwargs: None,
+    )
+
+    def scoped_lookup(*_args, **kwargs):
+        lookups.append(kwargs)
+        # This is what the storage-backed service would otherwise return for a
+        # same-user document that belongs to workspace-a.
+        if kwargs.get("allow_storage_fallback") is False:
+            return None
+        return {
+            "document_id": "document-a",
+            "filename": "paper.pdf",
+            "file_path": "/tmp/paper.pdf",
+            "original_filename": "paper.pdf",
+        }
+
+    monkeypatch.setattr(documents.document_service, "get_document", scoped_lookup)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            documents.get_medical_analysis(
+                "paper.pdf",
+                workspace_id="workspace-b",
+                user=SimpleNamespace(id="user-a"),
+            )
+        )
+
+    assert exc.value.status_code == 404
+    assert lookups == [{"workspace_id": "workspace-b", "allow_storage_fallback": False}]
