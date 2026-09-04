@@ -3,12 +3,15 @@
 from app.services.medical.document_classifier import MedicalDocumentClassifier
 
 
-def _parsed(text: str, fmt: str = "pdf") -> dict:
-    return {
+def _parsed(text: str, fmt: str = "pdf", title: str = "") -> dict:
+    parsed = {
         "content": text,
         "metadata": {"format": fmt},
         "extra": {"sections": []},
     }
+    if title:
+        parsed["title"] = title
+    return parsed
 
 
 def test_classifies_an_english_research_paper_from_safe_signals():
@@ -122,11 +125,15 @@ def test_classifies_other_medical_documents_without_calling_them_papers():
     guideline = classifier.classify(_parsed("Clinical practice guideline and recommendations."))
     lab = classifier.classify(_parsed("Laboratory report. Reference range: 4 to 8."))
     imaging = classifier.classify(_parsed("MRI report. Impression: no acute finding."))
+    prescription = classifier.classify(
+        _parsed("Prescription\nMedication: amoxicillin\nDose: 500 mg twice daily.")
+    )
     ordinary = classifier.classify(_parsed("A short note about software modules.", fmt="txt"))
 
     assert guideline.document_kind == "guideline"
     assert lab.document_kind == "lab_report"
     assert imaging.document_kind == "imaging_report"
+    assert prescription.document_kind == "prescription"
     assert ordinary.document_kind == "unknown"
 
 
@@ -150,6 +157,75 @@ def test_weak_category_words_do_not_classify_ordinary_documents():
 
     assert lab.document_kind == "unknown"
     assert guideline.document_kind == "unknown"
+
+
+def test_common_words_need_medical_context_before_becoming_category_signals():
+    classifier = MedicalDocumentClassifier()
+    examples = (
+        "The specimen is an example of this design pattern.",
+        "My impression of the movie was positive.",
+        "The CPU frequency is 3.5 GHz.",
+    )
+
+    for text in examples:
+        result = classifier.classify(_parsed(text, fmt="txt"))
+        assert result.document_kind == "unknown", (text, result.to_dict())
+
+
+def test_published_guideline_title_wins_over_journal_paper_structure():
+    text = """Abstract
+Patients with disease were considered in the recommendations.
+
+Methods
+The panel reviewed clinical evidence.
+
+Results
+The evidence supported the recommendations.
+
+Discussion
+The panel discussed the strength of the evidence.
+
+References
+10.1000/example"""
+
+    result = MedicalDocumentClassifier().classify(
+        _parsed(
+            text,
+            title="Clinical Practice Guideline for Disease Treatment",
+        )
+    )
+
+    assert result.document_kind == "guideline"
+    assert "found_explicit_guideline_title" in result.signals
+
+
+def test_guideline_evaluation_article_can_still_be_a_research_paper():
+    text = """Abstract
+Patients with disease were included.
+
+Introduction
+The guideline was introduced in hospitals.
+
+Methods
+We evaluated implementation across a clinical cohort.
+
+Results
+Treatment outcomes improved after implementation.
+
+Discussion
+The findings support further evaluation.
+
+References
+10.1000/example"""
+
+    result = MedicalDocumentClassifier().classify(
+        _parsed(
+            text,
+            title="Evaluation of a Clinical Practice Guideline for Disease Treatment",
+        )
+    )
+
+    assert result.document_kind == "research_paper"
 
 
 def test_empty_pdf_is_marked_for_ocr_instead_of_being_guessed():

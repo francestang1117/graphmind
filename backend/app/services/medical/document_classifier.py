@@ -14,7 +14,7 @@ from app.services.medical.section_normalizer import clean_heading, normalize_sec
 class MedicalDocumentClassifier:
     """Classify a document from small, inspectable signals."""
 
-    VERSION = "medical-rules-v1"
+    VERSION = "medical-rules-v2"
 
     _MEDICAL_TERMS = re.compile(
         r"\b(?:patient|patients|clinical|disease|diagnos(?:is|es)|treatment|"
@@ -70,12 +70,12 @@ class MedicalDocumentClassifier:
         ),
         "found_lab_terms": re.compile(
             r"\b(?:laboratory report|lab report|reference range|normal range|"
-            r"specimen|test result)\b|参考范围|检验|化验|标本",
+            r"test result)\b|参考范围|检验|化验|标本",
             re.I,
         ),
         "found_imaging_terms": re.compile(
             r"\b(?:ct scan|mri|ultrasound|x-ray|radiology|imaging report|"
-            r"imaging findings|impression)\b|影像|超声|核磁|磁共振|放射学",
+            r"imaging findings)\b|影像|超声|核磁|磁共振|放射学",
             re.I,
         ),
         "found_discharge_terms": re.compile(
@@ -84,7 +84,7 @@ class MedicalDocumentClassifier:
             re.I,
         ),
         "found_prescription_terms": re.compile(
-            r"\b(?:prescription|medication list|dosage|dose|frequency|"
+            r"\b(?:prescription|medication list|dosage|dose|"
             r"take .* daily)\b|处方|剂量|用法|用量|每日|药品",
             re.I,
         ),
@@ -112,6 +112,38 @@ class MedicalDocumentClassifier:
         "conclusion",
         "references",
     }
+    _SPECIMEN_CONTEXT = re.compile(
+        r"\b(?:laboratory|lab|assay|analyte|blood|urine|serum|plasma|"
+        r"test result|lab result|reference range|normal range|units?)\b|"
+        r"检验项目|检测结果|参考范围|单位|标本|样本",
+        re.I,
+    )
+    _IMAGING_CONTEXT = re.compile(
+        r"\b(?:ct|mri|ultrasound|x-ray|radiology|imaging|scan)\b|"
+        r"影像|超声|核磁|磁共振|放射学",
+        re.I,
+    )
+    _PRESCRIPTION_CONTEXT = re.compile(
+        r"\b(?:medication|medicine|drug|prescription|tablet|capsule|"
+        r"dose|dosage|administer(?:ed|ing)?|take|oral|intravenous|"
+        r"injection|route|mg|mcg|milligram(?:s)?)\b|"
+        r"药物|药品|剂量|给药|服用|用药|口服|注射",
+        re.I,
+    )
+    _IMPRESSION_HEADING = re.compile(
+        r"(?im)^\s*impression\s*(?::\s*\S.*)?$"
+    )
+    _EXPLICIT_GUIDELINE_TITLE = re.compile(
+        r"\b(?:clinical practice|evidence[- ]based)\s+guidelines?\b|"
+        r"\b(?:consensus statement|expert consensus)\b|指南|共识|ガイドライン",
+        re.I,
+    )
+    _GUIDELINE_EVALUATION_TITLE = re.compile(
+        r"\b(?:evaluation|evaluate|evaluating|assessment|assess(?:ed|ing)?|"
+        r"impact|effect(?:iveness)?|adherence|compliance|audit|trial|"
+        r"cohort|randomi[sz]ed)\b|评估|评价|效果|影响|依从性|审计",
+        re.I,
+    )
 
     def __init__(self, classifier_version: str = VERSION) -> None:
         self.classifier_version = classifier_version
@@ -135,7 +167,9 @@ class MedicalDocumentClassifier:
             heading_types.update(normalized.secondary)
         haystack = "\n".join(part for part in (title, text) if part)
         language = self._detect_language(haystack)
-        signals = self._signals(haystack, heading_types)
+        signals = self._signals(haystack, heading_types, headings)
+        if self._is_explicit_guideline_title(title):
+            signals.append("found_explicit_guideline_title")
 
         if self._is_empty(parsed, text):
             return MedicalDocumentAnalysis(
@@ -146,8 +180,15 @@ class MedicalDocumentClassifier:
                 warnings=["ocr_required"] if self._format(parsed) == "pdf" else ["no_extractable_text"],
             )
 
-        scores = self._scores(haystack, heading_types, signals)
-        kind, score = max(scores.items(), key=lambda item: item[1])
+        scores = self._scores(haystack, heading_types, signals, headings)
+        if (
+            self._is_explicit_guideline_title(title)
+            and not self._is_guideline_evaluation_title(title)
+        ):
+            kind = MedicalDocumentKind.GUIDELINE.value
+            score = max(scores[MedicalDocumentKind.GUIDELINE.value], 0.9)
+        else:
+            kind, score = max(scores.items(), key=lambda item: item[1])
         if kind == MedicalDocumentKind.RESEARCH_PAPER.value:
             enough_structure = len(heading_types & self._RESEARCH_HEADINGS) >= 2
             has_medical_signal = any(
@@ -175,6 +216,7 @@ class MedicalDocumentClassifier:
         text: str,
         heading_types: set[str],
         signals: list[str],
+        headings: list[str] | None = None,
     ) -> dict[str, float]:
         signal_set = set(signals)
         research_heading_count = len(heading_types & self._RESEARCH_HEADINGS)
@@ -191,22 +233,22 @@ class MedicalDocumentClassifier:
         return {
             MedicalDocumentKind.RESEARCH_PAPER.value: min(paper, 1.0),
             MedicalDocumentKind.GUIDELINE.value: self._keyword_score(
-                text, self._GUIDELINE_TERMS, "found_guideline_terms"
+                text, self._GUIDELINE_TERMS, "found_guideline_terms", headings
             ),
             MedicalDocumentKind.LAB_REPORT.value: self._keyword_score(
-                text, self._LAB_TERMS, "found_lab_terms"
+                text, self._LAB_TERMS, "found_lab_terms", headings
             ),
             MedicalDocumentKind.IMAGING_REPORT.value: self._keyword_score(
-                text, self._IMAGING_TERMS, "found_imaging_terms"
+                text, self._IMAGING_TERMS, "found_imaging_terms", headings
             ),
             MedicalDocumentKind.DISCHARGE_SUMMARY.value: self._keyword_score(
-                text, self._DISCHARGE_TERMS, "found_discharge_terms"
+                text, self._DISCHARGE_TERMS, "found_discharge_terms", headings
             ),
             MedicalDocumentKind.PRESCRIPTION.value: self._keyword_score(
-                text, self._PRESCRIPTION_TERMS, "found_prescription_terms"
+                text, self._PRESCRIPTION_TERMS, "found_prescription_terms", headings
             ),
             MedicalDocumentKind.CLINICAL_REPORT.value: self._keyword_score(
-                text, self._CLINICAL_RECORD_TERMS, "found_clinical_record_terms"
+                text, self._CLINICAL_RECORD_TERMS, "found_clinical_record_terms", headings
             ),
             MedicalDocumentKind.PATIENT_NOTE.value: self._patient_note_score(text),
             MedicalDocumentKind.OTHER_MEDICAL.value: 0.35
@@ -214,7 +256,12 @@ class MedicalDocumentClassifier:
             else 0.0,
         }
 
-    def _signals(self, text: str, heading_types: set[str]) -> list[str]:
+    def _signals(
+        self,
+        text: str,
+        heading_types: set[str],
+        headings: list[str] | None = None,
+    ) -> list[str]:
         signals: list[str] = []
         checks = (
             ("found_doi", self._DOI.search(text)),
@@ -222,22 +269,22 @@ class MedicalDocumentClassifier:
             ("found_medical_terms", self._MEDICAL_TERMS.search(text) or self._MEDICAL_CJK_TERMS.search(text)),
             ("found_japanese_medical_terms", self._JAPANESE_MEDICAL_TERMS.search(text)),
             ("found_guideline_terms", self._keyword_score(
-                text, self._GUIDELINE_TERMS, "found_guideline_terms"
+                text, self._GUIDELINE_TERMS, "found_guideline_terms", headings
             )),
             ("found_lab_terms", self._keyword_score(
-                text, self._LAB_TERMS, "found_lab_terms"
+                text, self._LAB_TERMS, "found_lab_terms", headings
             )),
             ("found_imaging_terms", self._keyword_score(
-                text, self._IMAGING_TERMS, "found_imaging_terms"
+                text, self._IMAGING_TERMS, "found_imaging_terms", headings
             )),
             ("found_discharge_terms", self._keyword_score(
-                text, self._DISCHARGE_TERMS, "found_discharge_terms"
+                text, self._DISCHARGE_TERMS, "found_discharge_terms", headings
             )),
             ("found_prescription_terms", self._keyword_score(
-                text, self._PRESCRIPTION_TERMS, "found_prescription_terms"
+                text, self._PRESCRIPTION_TERMS, "found_prescription_terms", headings
             )),
             ("found_clinical_record_terms", self._keyword_score(
-                text, self._CLINICAL_RECORD_TERMS, "found_clinical_record_terms"
+                text, self._CLINICAL_RECORD_TERMS, "found_clinical_record_terms", headings
             )),
         )
         signals.extend(name for name, matched in checks if matched)
@@ -254,11 +301,48 @@ class MedicalDocumentClassifier:
         )
         return signals
 
-    def _keyword_score(self, text: str, pattern: re.Pattern[str], signal: str) -> float:
-        if not pattern.search(text):
+    def _keyword_score(
+        self,
+        text: str,
+        pattern: re.Pattern[str],
+        signal: str,
+        headings: list[str] | None = None,
+    ) -> float:
+        matched = pattern.search(text)
+        imaging_heading = signal == "found_imaging_terms" and self._has_imaging_heading(
+            text, headings or []
+        )
+        if not matched and not imaging_heading:
             return 0.0
+
+        # These words are common in software, reviews, and ordinary prose.
+        # They only count when the nearby wording looks like the document type.
+        if signal == "found_lab_terms" and re.search(r"\bspecimen\b", text, re.I):
+            if not self._SPECIMEN_CONTEXT.search(text):
+                return 0.0
+        if signal == "found_imaging_terms" and re.search(r"\bimpression\b", text, re.I):
+            if not self._IMAGING_CONTEXT.search(text) and not imaging_heading:
+                return 0.0
+        if signal == "found_prescription_terms" and re.search(r"\bfrequency\b", text, re.I):
+            if not self._PRESCRIPTION_CONTEXT.search(text):
+                return 0.0
+
         strong_pattern = self._STRONG_CATEGORY_TERMS.get(signal)
         context_count = self._medical_context_count(text)
+        if imaging_heading:
+            return 0.55
+        if (
+            signal == "found_lab_terms"
+            and re.search(r"\bspecimen\b", text, re.I)
+            and self._SPECIMEN_CONTEXT.search(text)
+        ):
+            return 0.55
+        if (
+            signal == "found_prescription_terms"
+            and re.search(r"\bfrequency\b", text, re.I)
+            and self._PRESCRIPTION_CONTEXT.search(text)
+        ):
+            return 0.55
         if strong_pattern and strong_pattern.search(text):
             # A format phrase such as "reference range" is strong enough on
             # its own; guideline wording still needs a medical cue.
@@ -268,6 +352,18 @@ class MedicalDocumentClassifier:
         if context_count < 2:
             return 0.0
         return 0.6 if signal == "found_guideline_terms" else 0.55
+
+    def _has_imaging_heading(self, text: str, headings: list[str]) -> bool:
+        """Accept an Impression heading, but not the same word in a sentence."""
+        if any(clean_heading(heading).casefold() == "impression" for heading in headings):
+            return True
+        return bool(self._IMPRESSION_HEADING.search(text))
+
+    def _is_explicit_guideline_title(self, title: str) -> bool:
+        return bool(self._EXPLICIT_GUIDELINE_TITLE.search(title))
+
+    def _is_guideline_evaluation_title(self, title: str) -> bool:
+        return bool(self._GUIDELINE_EVALUATION_TITLE.search(title))
 
     def _medical_context_count(self, text: str) -> int:
         """Count domain cues before trusting a broad document label."""

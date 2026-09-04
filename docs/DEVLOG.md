@@ -1318,6 +1318,25 @@ leaves an ordinary document as `unknown`.
 Regression tests cover all four cases so later parser changes do not quietly
 bring the old behavior back.
 
+## 2026-09 — Narrow Medical Classification Signals
+
+The classifier still trusted a few ordinary words too much. `specimen`,
+`impression`, and `frequency` can appear in software notes or everyday writing,
+so seeing one of them alone is not enough to call a file medical. They now need
+the surrounding wording that belongs to a lab report, imaging report, or
+prescription.
+
+I also found that a published clinical practice guideline could be scored as a
+research paper just because it contained an abstract, methods, results, and
+references. A clear guideline title now takes priority over that structure.
+Titles such as `Evaluation of a Clinical Practice Guideline ...` keep the
+research-paper path because they describe a study about a guideline, not the
+guideline itself.
+
+The classifier version is now `medical-rules-v2`. Tests cover the three ordinary
+English false positives, a journal-published guideline, and a guideline
+evaluation study.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:
