@@ -194,8 +194,14 @@ class MedicalDocumentClassifier:
         re.I,
     )
     _GUIDELINE_EVALUATION_TITLE = re.compile(
-        # The wording must point at the guideline as the study subject. A
-        # phrase such as "guideline for assessment" keeps its guideline type.
+        # The wording must point at the guideline as the study subject. Study
+        # terms can appear before or after the guideline phrase.
+        r"\b(?:clinical\s+practice\s+)?guidelines?\b.{0,60}\b"
+        r"(?:systematic\s+review|scoping\s+review|review\s+and\s+appraisal)\b|"
+        r"\b(?:comparison|comparative\s+analysis|concordance|"
+        r"quality\s+appraisal|overview)\b.{0,60}\b"
+        r"(?:of|between|among)\s+(?:(?:the|a|an)\s+)?"
+        r"(?:clinical\s+practice\s+)?guidelines?\b|"
         r"\b(?:effect|effects|impact|evaluation|evaluate|evaluating|"
         r"assessment|assess(?:ed|ing)?|effectiveness|adherence|compliance|"
         r"audit|analysis|review|study|validation)\b.{0,60}\b"

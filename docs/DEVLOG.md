@@ -1396,6 +1396,13 @@ abstract heading. This keeps wrapped titles such as `Assessment and Treatment of
 Rare Disease` followed by `A Clinical Practice Guideline` available for
 classification.
 
+## 2026-09 — Recognize Guideline Reviews and Comparisons
+
+The classifier version is now `medical-rules-v8`. Guideline titles that describe
+a systematic review, appraisal, comparison, concordance, or overview of
+guidelines are treated as research papers. A guideline whose subject is
+systematic assessment remains a guideline.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:

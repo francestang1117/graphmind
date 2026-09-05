@@ -334,6 +334,41 @@ References
         assert result.document_kind == "research_paper", (title, result.to_dict())
 
 
+def test_guideline_reviews_and_comparisons_are_research_papers():
+    text = """Abstract
+Patients with disease were included.
+
+Methods
+The review compared published clinical evidence.
+
+Results
+The guidelines differed in several recommendations.
+
+Discussion
+The findings support further appraisal.
+
+References
+10.1000/example"""
+    research_titles = (
+        "Clinical Practice Guidelines: A Systematic Review",
+        "Clinical Practice Guidelines for Rare Disease: Review and Appraisal",
+        "Comparison of Clinical Practice Guidelines for Disease Treatment",
+        "Concordance Between Clinical Practice Guidelines for Disease",
+        "Quality Appraisal of Clinical Practice Guidelines",
+        "Overview of Clinical Practice Guidelines",
+    )
+
+    classifier = MedicalDocumentClassifier()
+    for title in research_titles:
+        result = classifier.classify(_parsed(text, title=title))
+        assert result.document_kind == "research_paper", (title, result.to_dict())
+
+    guideline = classifier.classify(
+        _parsed(text, title="Clinical Practice Guideline for Systematic Assessment of Disease")
+    )
+    assert guideline.document_kind == "guideline"
+
+
 def test_wrapped_body_guideline_title_is_joined_before_classification():
     text = """Assessment and Treatment of Rare Disease:
 A Clinical Practice Guideline
