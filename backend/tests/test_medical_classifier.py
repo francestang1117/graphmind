@@ -303,6 +303,68 @@ References
     assert result.document_kind == "research_paper"
 
 
+def test_guideline_effect_and_implementation_studies_are_research_papers():
+    text = """Abstract
+Patients with disease were included.
+
+Introduction
+The guideline was introduced in hospitals.
+
+Methods
+The clinical study enrolled participants.
+
+Results
+Patient outcomes changed after implementation.
+
+Discussion
+The findings explain the observed effect.
+
+References
+10.1000/example"""
+    titles = (
+        "Effect of a Clinical Practice Guideline on Patient Outcomes",
+        "Randomized Controlled Trial of a Clinical Practice Guideline",
+        "Outcomes After Implementing a Clinical Practice Guideline",
+        "Implementing a Clinical Practice Guideline",
+    )
+
+    classifier = MedicalDocumentClassifier()
+    for title in titles:
+        result = classifier.classify(_parsed(text, title=title))
+        assert result.document_kind == "research_paper", (title, result.to_dict())
+
+
+def test_wrapped_body_guideline_title_is_joined_before_classification():
+    text = """Assessment and Treatment of Rare Disease:
+A Clinical Practice Guideline
+Abstract
+Patients with disease were included.
+
+Methods
+The panel reviewed clinical evidence.
+
+Results
+The evidence supported the recommendations.
+
+Discussion
+The panel discussed the evidence.
+
+References
+10.1000/example"""
+
+    classifier = MedicalDocumentClassifier()
+    result = classifier.classify(
+        _parsed(text, title="104d0354f41cbacd"),
+        filename="/uploads/104d0354f41cbacd.pdf",
+        original_filename="clinical-guideline.pdf",
+    )
+
+    assert classifier._body_title_candidate(text) == (
+        "Assessment and Treatment of Rare Disease A Clinical Practice Guideline"
+    )
+    assert result.document_kind == "guideline"
+
+
 def test_guideline_phrase_in_abstract_prose_does_not_become_a_title():
     text = """Abstract
 This study examines a clinical practice guideline for disease treatment.

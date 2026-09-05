@@ -14,7 +14,7 @@ from app.services.medical.section_normalizer import clean_heading, normalize_sec
 class MedicalDocumentClassifier:
     """Classify a document from small, inspectable signals."""
 
-    VERSION = "medical-rules-v6"
+    VERSION = "medical-rules-v7"
 
     _MEDICAL_TERMS = re.compile(
         r"\b(?:patient|patients|clinical|disease|diagnos(?:is|es)|treatment|"
@@ -194,14 +194,27 @@ class MedicalDocumentClassifier:
         re.I,
     )
     _GUIDELINE_EVALUATION_TITLE = re.compile(
-        r"\b(?:evaluation|evaluate|evaluating|assessment|assess(?:ed|ing)?|"
-        r"impact|effectiveness|adherence|compliance|audit|implementation|"
-        r"analysis|review|study|validation)\b.{0,50}\b"
+        # The wording must point at the guideline as the study subject. A
+        # phrase such as "guideline for assessment" keeps its guideline type.
+        r"\b(?:effect|effects|impact|evaluation|evaluate|evaluating|"
+        r"assessment|assess(?:ed|ing)?|effectiveness|adherence|compliance|"
+        r"audit|analysis|review|study|validation)\b.{0,60}\b"
         r"(?:of|on|to|with)\s+(?:(?:the|a|an)\s+)?"
         r"(?:clinical\s+practice\s+)?guidelines?\b|"
-        r"\b(?:clinical\s+practice\s+)?guidelines?\s+"
-        r"(?:evaluation|assessment|implementation|adherence|compliance|"
-        r"audit|analysis|review|study|validation)\b|"
+        r"\b(?:randomi[sz]ed\s+controlled\s+trial|controlled\s+trial|"
+        r"clinical\s+trial)\b.{0,60}\bof\s+"
+        r"(?:(?:the|a|an)\s+)?(?:clinical\s+practice\s+)?guidelines?\b|"
+        r"\b(?:outcomes?|effects?|impact)\b.{0,45}\b"
+        r"(?:after|following)\b.{0,60}\b"
+        r"(?:implementation|implementing|implemented|use|using)\b.{0,40}\b"
+        r"(?:clinical\s+practice\s+)?guidelines?\b|"
+        r"\b(?:implementation|implementing|implemented)\b.{0,60}\b"
+        r"(?:(?:of|for|with)\s+)?(?:(?:the|a|an)\s+)?"
+        r"(?:clinical\s+practice\s+)?guidelines?\b|"
+        r"\b(?:clinical\s+practice\s+)?guidelines?\b.{0,45}\b"
+        r"(?:implementation|implementing|implemented|adherence|compliance|"
+        r"evaluation|assessment)\b.{0,25}\b"
+        r"(?:study|trial|analysis|evaluation)\b|"
         r"(?:指南|共识).{0,12}(?:评估|评价|效果|影响).{0,8}(?:研究|调查|分析)|"
         r"(?:评估|评价|效果|影响).{0,8}(?:研究|调查|分析).{0,12}(?:指南|共识)|"
         r"(?:ガイドライン|指針).{0,16}(?:遵守率|実施状況|評価|検証|効果)"
@@ -657,11 +670,14 @@ class MedicalDocumentClassifier:
         return candidates
 
     def _body_title_candidate(self, text: str) -> str:
-        """Find a title-like line in the short pre-Abstract header area."""
+        """Find and join title lines in the short pre-Abstract header area."""
         inspected = 0
+        title_lines: list[str] = []
         for line in text.splitlines():
             value = clean_heading(line.strip())
             if not value:
+                if title_lines:
+                    break
                 continue
             if self._ABSTRACT_START.match(value):
                 break
@@ -669,12 +685,28 @@ class MedicalDocumentClassifier:
             if inspected > 8:
                 break
             if normalize_section_title(value).primary != "unknown":
+                if title_lines:
+                    break
                 continue
             if self._is_body_title_noise(value):
+                if title_lines:
+                    break
                 continue
-            if self._looks_like_body_title(value):
-                return value
-        return ""
+            if not self._looks_like_body_title(value):
+                if title_lines:
+                    break
+                continue
+            title_lines.append(value)
+            if len(title_lines) == 3:
+                break
+
+        if not title_lines:
+            return ""
+
+        candidate = " ".join(title_lines)
+        if self._is_explicit_guideline_title(candidate):
+            return candidate
+        return candidate if self._looks_like_body_title(candidate) else title_lines[0]
 
     def _is_body_title_noise(self, value: str) -> bool:
         """Skip publication metadata before looking for the paper title."""

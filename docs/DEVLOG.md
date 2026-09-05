@@ -1384,6 +1384,18 @@ institution word such as `hospital`. Laboratory result fields now accept a
 numeric value without a known unit and common scientific notation such as
 `5.2 ×10^9/L` and `mIU/L`.
 
+## 2026-09 — Distinguish Guideline Studies and Wrapped Titles
+
+The classifier version is now `medical-rules-v7`. Guideline evaluation matching
+now requires wording that makes the guideline the subject of a study, trial,
+implementation, or outcome analysis. A guideline whose topic is assessment or
+evaluation remains a guideline.
+
+The PDF body-title fallback now joins up to three title-like lines before the
+abstract heading. This keeps wrapped titles such as `Assessment and Treatment of
+Rare Disease` followed by `A Clinical Practice Guideline` available for
+classification.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:
