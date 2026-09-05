@@ -1372,6 +1372,18 @@ enough to identify the document type. Body title fallback skips publication
 metadata before `Abstract`, and Japanese guideline evaluation matching uses
 specific evaluation phrases instead of bare `研究`.
 
+## 2026-09 — Tighten Guideline Scope and Lab Values
+
+The classifier version is now `medical-rules-v6`. Evaluation words only override
+a guideline title when the title says that the guideline itself is being
+evaluated, implemented, or audited. Phrases such as `Guideline for Assessment`
+and `療效评价指南` remain guidelines.
+
+Body title detection keeps an explicit guideline title even when it contains an
+institution word such as `hospital`. Laboratory result fields now accept a
+numeric value without a known unit and common scientific notation such as
+`5.2 ×10^9/L` and `mIU/L`.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:

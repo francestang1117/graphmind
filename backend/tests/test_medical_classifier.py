@@ -415,6 +415,49 @@ References
     assert result.document_kind == "guideline"
 
 
+def test_guideline_scope_terms_do_not_override_guideline_titles():
+    text = """Abstract
+Patients with disease were considered in the recommendations.
+
+Methods
+The panel reviewed clinical evidence.
+
+Results
+The evidence supported the recommendations.
+
+Discussion
+The panel discussed the strength of the evidence.
+
+References
+10.1000/example"""
+    titles = (
+        "Clinical Practice Guideline for Assessment and Treatment of Disease",
+        "Clinical Practice Guideline for Evaluation of Treatment Effectiveness",
+        "临床疗效评价指南",
+        "治療効果評価ガイドライン",
+        "Clinical Practice Guideline for Hospital Management of Disease",
+    )
+
+    classifier = MedicalDocumentClassifier()
+    for title in titles:
+        result = classifier.classify(_parsed(text, title=title))
+        assert result.document_kind == "guideline", (title, result.to_dict())
+
+
+def test_lab_result_fields_accept_scientific_notation_and_common_units():
+    examples = (
+        "Specimen: Blood\nTest: WBC\nResult: 5.2 ×10^9/L",
+        "样本：血液\n检测项目：白细胞\n检测结果：5.2×10^9/L",
+        "Specimen: Serum\nAnalyte: TSH\nResult: 2.1 mIU/L",
+        "Specimen: Blood\nTest: WBC\nResult: 5.2",
+    )
+
+    classifier = MedicalDocumentClassifier()
+    for text in examples:
+        result = classifier.classify(_parsed(text, fmt="txt"))
+        assert result.document_kind == "lab_report", (text, result.to_dict())
+
+
 def test_keyword_pairs_without_report_structure_stay_unknown():
     classifier = MedicalDocumentClassifier()
 

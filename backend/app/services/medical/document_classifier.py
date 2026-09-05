@@ -14,7 +14,7 @@ from app.services.medical.section_normalizer import clean_heading, normalize_sec
 class MedicalDocumentClassifier:
     """Classify a document from small, inspectable signals."""
 
-    VERSION = "medical-rules-v5"
+    VERSION = "medical-rules-v6"
 
     _MEDICAL_TERMS = re.compile(
         r"\b(?:patient|patients|clinical|disease|diagnos(?:is|es)|treatment|"
@@ -37,7 +37,7 @@ class MedicalDocumentClassifier:
     )
     _LAB_TERMS = re.compile(
         r"\b(?:reference range|specimen|laboratory|lab result|test result|"
-        r"units?|normal range)\b|参考范围|检验|化验|标本",
+        r"units?|normal range)\b|参考范围|检验|化验|检测|标本|样本",
         re.I,
     )
     _IMAGING_TERMS = re.compile(
@@ -70,7 +70,7 @@ class MedicalDocumentClassifier:
         ),
         "found_lab_terms": re.compile(
             r"\b(?:laboratory report|lab report|reference range|normal range|"
-            r"test result)\b|参考范围|检验|化验|标本",
+            r"test result)\b|参考范围|检验|化验|检测|标本|样本",
             re.I,
         ),
         "found_imaging_terms": re.compile(
@@ -118,11 +118,22 @@ class MedicalDocumentClassifier:
         re.I,
     )
     _LAB_MEASUREMENT_CONTEXT = re.compile(
-        r"\b\d+(?:\.\d+)?\s*(?:mg/dl|mmol/l|g/dl|iu/l|u/l|mEq/l|"
-        r"ng/ml|pg/ml|units?|%)\b|"
+        r"\b\d+(?:\.\d+)?\s*(?:[×x*]\s*)?10\s*(?:\^|\*\*)?\s*"
+        r"\d+\s*/\s*[A-Za-zμµ]+\b|"
+        r"\b\d+(?:\.\d+)?\s*(?:mg/dl|mg/l|mmol/l|g/dl|iu/l|u/l|"
+        r"miu/l|[μµu]iu/ml|ng/ml|ng/dl|pg/ml|μmol/l|umol/l|mEq/l|"
+        r"/μl|/µl|/ul|cells/μl|cells/µl|cells/ul|units?|%)\b|"
         r"\b\d+(?:\.\d+)?\s*[-–]\s*\d+(?:\.\d+)?\s*"
-        r"(?:mg/dl|mmol/l|g/dl|iu/l|u/l|mEq/l|ng/ml|pg/ml|units?|%)?\b|"
+        r"(?:mg/dl|mg/l|mmol/l|g/dl|iu/l|u/l|miu/l|[μµu]iu/ml|"
+        r"ng/ml|ng/dl|pg/ml|μmol/l|umol/l|mEq/l|/μl|/µl|/ul|"
+        r"cells/μl|cells/µl|cells/ul|units?|%)?\b|"
         r"参考范围|正常范围",
+        re.I,
+    )
+    _LAB_NUMERIC_VALUE = re.compile(
+        r"(?<![\w.])[-+]?\d+(?:[.,]\d+)?"
+        r"(?:\s*[×x*]\s*10\s*(?:\^|\*\*)?\s*[-+]?\d+)?"
+        r"(?![\w.])",
         re.I,
     )
     _LAB_RESULT_VALUE = re.compile(
@@ -133,15 +144,15 @@ class MedicalDocumentClassifier:
         r"^\s*(?:test|analyte|检验项目|检测项目)\s*(?:[:：]|$)",
         re.I | re.M,
     )
-    _LAB_RESULT_FIELD = re.compile(
-        r"^\s*(?:result|reference\s+range|normal\s+range|检测结果|"
-        r"参考范围|正常范围)\s*(?:[:：]|$)",
+    _LAB_RESULT_VALUE_LINE = re.compile(
+        r"^\s*(?:result|reference\s+range|normal\s+range|结果|检测结果|"
+        r"参考范围|正常范围)\s*(?:[:：]\s*)(?P<value>.+)$",
         re.I | re.M,
     )
     _STRUCTURED_FIELD_LINE = re.compile(
         r"^\s*(?:specimen|sample|test|analyte|result|reference\s+range|"
         r"normal\s+range|medication|medicine|drug|dose|dosage|route|"
-        r"frequency|检验项目|检测项目|检测结果|参考范围|正常范围|样本|"
+        r"frequency|检验项目|检测项目|结果|检测结果|参考范围|正常范围|样本|"
         r"标本|药物|药品|剂量|给药|用法|用量|频率)\s*(?:[:：]|\s|$)",
         re.I,
     )
@@ -184,12 +195,19 @@ class MedicalDocumentClassifier:
     )
     _GUIDELINE_EVALUATION_TITLE = re.compile(
         r"\b(?:evaluation|evaluate|evaluating|assessment|assess(?:ed|ing)?|"
-        r"impact|effect(?:iveness)?|adherence|compliance|audit|trial|"
-        r"cohort|randomi[sz]ed)\b|评估|评价|效果|影响|依从性|审计|"
-        r"(?:評価|検証|影響|効果).{0,8}(?:研究|調査|解析|評価|検証)|"
-        r"遵守率.{0,12}(?:調査|解析|評価|検証)|"
-        r"実施状況.{0,12}(?:調査|解析|評価|検証)|"
-        r"(?:調査|解析).{0,8}研究",
+        r"impact|effectiveness|adherence|compliance|audit|implementation|"
+        r"analysis|review|study|validation)\b.{0,50}\b"
+        r"(?:of|on|to|with)\s+(?:(?:the|a|an)\s+)?"
+        r"(?:clinical\s+practice\s+)?guidelines?\b|"
+        r"\b(?:clinical\s+practice\s+)?guidelines?\s+"
+        r"(?:evaluation|assessment|implementation|adherence|compliance|"
+        r"audit|analysis|review|study|validation)\b|"
+        r"(?:指南|共识).{0,12}(?:评估|评价|效果|影响).{0,8}(?:研究|调查|分析)|"
+        r"(?:评估|评价|效果|影响).{0,8}(?:研究|调查|分析).{0,12}(?:指南|共识)|"
+        r"(?:ガイドライン|指針).{0,16}(?:遵守率|実施状況|評価|検証|効果)"
+        r".{0,8}(?:研究|調査|解析)|"
+        r"(?:評価|検証|影響|効果).{0,8}(?:研究|調査|解析).{0,16}"
+        r"(?:ガイドライン|指針)",
         re.I,
     )
     _ABSTRACT_START = re.compile(r"^(?:abstract|摘要|要旨)\b", re.I)
@@ -531,13 +549,16 @@ class MedicalDocumentClassifier:
                 or self._LAB_TEST_CONTEXT.search(segment)
             )
             has_measurement = bool(self._LAB_MEASUREMENT_CONTEXT.search(segment))
-            has_qualitative_result = bool(
-                self._LAB_RESULT_FIELD.search(segment)
-                and self._LAB_RESULT_VALUE.search(segment)
+            result_values = self._LAB_RESULT_VALUE_LINE.findall(segment)
+            has_numeric_result = any(
+                self._LAB_NUMERIC_VALUE.search(value) for value in result_values
+            )
+            has_qualitative_result = any(
+                self._LAB_RESULT_VALUE.search(value) for value in result_values
             )
             if not has_test:
                 continue
-            if has_measurement or has_qualitative_result:
+            if has_measurement or has_numeric_result or has_qualitative_result:
                 return True
         return False
 
@@ -657,6 +678,8 @@ class MedicalDocumentClassifier:
 
     def _is_body_title_noise(self, value: str) -> bool:
         """Skip publication metadata before looking for the paper title."""
+        if self._is_explicit_guideline_title(value):
+            return False
         if self._PUBLICATION_LINE.search(value):
             return True
         if self._AFFILIATION_LINE.search(value):
