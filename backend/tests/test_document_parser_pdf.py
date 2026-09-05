@@ -7,8 +7,9 @@ from app.services.document_parser import PDFParser
 
 
 class FakePDF:
-    def __init__(self, pages):
+    def __init__(self, pages, metadata=None):
         self.pages = pages
+        self.metadata = metadata or {}
 
     def __enter__(self):
         return self
@@ -72,3 +73,19 @@ def test_pdf_table_normalizer_skips_empty_tables():
 
     assert parser._normalise_table([]) == ([], [])
     assert parser._normalise_table([["", ""], ["", None]]) == ([], [])
+
+
+def test_pdfplumber_parser_preserves_pdf_metadata_title(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "stored-hash.pdf"
+    pdf_path.write_bytes(b"%PDF fake")
+    page = FakePDFPage("Abstract\nPatients were included.")
+
+    fake_pdfplumber = SimpleNamespace(
+        open=lambda _path: FakePDF([page], {"Title": "Clinical Practice Guideline"})
+    )
+    monkeypatch.setitem(sys.modules, "pdfplumber", fake_pdfplumber)
+
+    parsed = PDFParser().parse(pdf_path)
+
+    assert parsed.title == "Clinical Practice Guideline"
+    assert parsed.metadata["title"] == "Clinical Practice Guideline"

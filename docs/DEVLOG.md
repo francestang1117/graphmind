@@ -1233,6 +1233,176 @@ custom project does not fall back to the default project when a task starts.
 Tests now cover workspace ownership, the same paper in two projects, graph
 isolation, and the worker scope passed into the processing pipeline.
 
+## 2026-09 — V2 PR2: Medical Document Classification and Paper Structure
+
+The next useful step was not to generate medical advice. Before that, the app
+needs to know what kind of document it received and where a later answer came
+from.
+
+I added a small medical analysis layer beside the general parser. It uses
+readable rules to identify research papers, guidelines, lab reports, imaging
+reports, and a few other medical document types. The classifier keeps an
+`unknown` result when the evidence is weak and stores safe signal names rather
+than copying sensitive text into metadata. It also records a basic language
+guess for English, Chinese, and Japanese material.
+
+For research papers, headings are normalized to a shared set of section types.
+The parser keeps the original heading, section order, page range, character
+range, language, and evidence role. Chunks carry the same section and page
+metadata, so a Results passage is not mixed silently with Discussion or
+References. Compound headings such as `Results and Discussion` keep both
+meanings instead of being discarded.
+
+The profile and section rows live in their own tables and use the existing
+user, workspace, and document boundary. Re-running an analysis replaces the
+old rows in one transaction. A worker that finishes after a document is deleted
+cannot write a new medical profile back into the database.
+
+The existing pipeline still owns the upload flow. Ordinary files continue
+through the generic parser, while a classified research paper gets the
+section-aware chunks before entity extraction, graph construction, and search.
+If the medical step fails, the generic chunks are kept. The new analysis
+endpoint exposes the stored classification, missing sections, warnings, and
+source ranges.
+
+This phase deliberately stops before OCR, study cards, sentence-level citation
+records, multi-paper comparison, diagnosis, or treatment recommendations. Those
+features need the source locations from this step first.
+
+## 2026-09 — Keep Medical Analysis Inside Its Workspace
+
+While checking the medical analysis route, I found that a missing database row
+could still fall back to the file store. That was fine for the older local-file
+paths, but it meant a document from another workspace could be parsed under the
+workspace in the URL.
+
+The analysis route now keeps the database lookup scoped to the current user and
+workspace. When database persistence is on, a scoped miss returns `404` instead
+of looking through storage. The old storage fallback remains available only for
+cache-only development setups. A regression test covers two workspaces owned by
+the same user, which is the case that exposed the bug.
+
+## 2026-09 — Keep Parse Results in One Snapshot
+
+While reprocessing a document, I found that the medical profile and paper
+sections could be committed before the parsed chunks and entities. If the later
+write failed, the database and the in-memory cache described different versions
+of the same file.
+
+The parser now stages the medical rows, chunks, and entities in one SQLAlchemy
+transaction. The cache is updated only after that transaction commits, so a
+failed reparse keeps the previous cached result instead of publishing a partial
+one. A missing or already-deleted document is reported as `not_persisted` and
+does not create derived rows; when persistence is disabled, the existing
+`cache_only` fallback remains available for local development.
+
+The regression tests inject a failure during the later derived-data write and
+verify that the old profile, section, chunk, and entity rows all stay intact.
+They also verify that a failed commit does not add a new cache entry.
+
+## 2026-09 — Tighten Paper Boundaries and Classifier Signals
+
+A few edge cases showed that paper structure could look correct at the section
+level while still losing the evidence location underneath. Layout hints from a
+PDF could split `Results and Discussion`, a DOCX without Heading styles could
+be reduced to the parser's default `Introduction`, and every chunk in a
+multi-page section could inherit the whole section range.
+
+The parser now prefers the complete heading, keeps body-heading detection for
+unstyled DOCX files, and calculates each chunk's own page range while retaining
+the enclosing section range. The classifier also requires medical context or
+a strong document-format signal before accepting broad categories such as
+guideline or lab report. A weak word like `recommendation` or `units` now
+leaves an ordinary document as `unknown`.
+
+Regression tests cover all four cases so later parser changes do not quietly
+bring the old behavior back.
+
+## 2026-09 — Narrow Medical Classification Signals
+
+The classifier still trusted a few ordinary words too much. `specimen`,
+`impression`, and `frequency` can appear in software notes or everyday writing,
+so seeing one of them alone is not enough to call a file medical. They now need
+the surrounding wording that belongs to a lab report, imaging report, or
+prescription.
+
+I also found that a published clinical practice guideline could be scored as a
+research paper just because it contained an abstract, methods, results, and
+references. A clear guideline title now takes priority over that structure.
+Titles such as `Evaluation of a Clinical Practice Guideline ...` keep the
+research-paper path because they describe a study about a guideline, not the
+guideline itself.
+
+The classifier version is now `medical-rules-v2`. Tests cover the three ordinary
+English false positives, a journal-published guideline, and a guideline
+evaluation study.
+
+## 2026-09 — Use Real Titles and Local Classification Context
+
+The upload path can give the classifier a storage hash instead of the title a
+reader sees. A guideline with a strong paper-like structure was therefore
+sometimes treated as a research paper.
+
+Classification now checks the PDF metadata title, parser title, original
+filename, and a validated first body title before an Abstract heading. It no
+longer treats every opening line as a title. Hash and UUID storage names are
+ignored when deciding whether a title is an explicit guideline title. PDF
+metadata titles are also passed through by both supported PDF parsers.
+
+The classifier version is now `medical-rules-v4`. It no longer treats a lab or
+prescription word as supported just because matching context appears somewhere
+else in the document. `specimen` needs a nearby test and result signal, while
+`frequency` needs medication and dose or administration wording in the same
+short text segment. Single line breaks now end that segment. Japanese guideline
+evaluation terms are handled separately from guideline titles. Tests cover the
+real upload shape, cross-sentence false positives, and valid local context.
+
+## 2026-09 — Keep Structured Medical Forms Together
+
+The local context rule now keeps a short run of labeled fields together. This
+covers common layouts such as `Specimen`, `Test`, `Result`, and `Reference
+range`, as well as `Medication`, `Dose`, `Route`, and `Frequency`. The block is
+limited to six lines and 300 characters, so an entire document is not treated
+as one context window.
+
+The classifier version is now `medical-rules-v5`. A lab result needs a measured
+value or an explicit qualitative result, and a frequency signal needs a dose
+or route value. A clear `Laboratory Report` or `Prescription` heading remains
+enough to identify the document type. Body title fallback skips publication
+metadata before `Abstract`, and Japanese guideline evaluation matching uses
+specific evaluation phrases instead of bare `研究`.
+
+## 2026-09 — Tighten Guideline Scope and Lab Values
+
+The classifier version is now `medical-rules-v6`. Evaluation words only override
+a guideline title when the title says that the guideline itself is being
+evaluated, implemented, or audited. Phrases such as `Guideline for Assessment`
+and `療效评价指南` remain guidelines.
+
+Body title detection keeps an explicit guideline title even when it contains an
+institution word such as `hospital`. Laboratory result fields now accept a
+numeric value without a known unit and common scientific notation such as
+`5.2 ×10^9/L` and `mIU/L`.
+
+## 2026-09 — Distinguish Guideline Studies and Wrapped Titles
+
+The classifier version is now `medical-rules-v7`. Guideline evaluation matching
+now requires wording that makes the guideline the subject of a study, trial,
+implementation, or outcome analysis. A guideline whose topic is assessment or
+evaluation remains a guideline.
+
+The PDF body-title fallback now joins up to three title-like lines before the
+abstract heading. This keeps wrapped titles such as `Assessment and Treatment of
+Rare Disease` followed by `A Clinical Practice Guideline` available for
+classification.
+
+## 2026-09 — Recognize Guideline Reviews and Comparisons
+
+The classifier version is now `medical-rules-v8`. Guideline titles that describe
+a systematic review, appraisal, comparison, concordance, or overview of
+guidelines are treated as research papers. A guideline whose subject is
+systematic assessment remains a guideline.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:
@@ -1275,22 +1445,26 @@ As of September 2026, GraphMind has a working foundation:
 - Prometheus-compatible `/metrics` endpoint for API and pipeline counters
 - optional Sentry error tracking for production 5xx failures
 - stable API error codes for common upload, parse, and file access failures
+- explainable medical document classification with an `unknown` fallback
+- English, Chinese, and Japanese paper section normalization
+- page-aware paper sections and section-aware chunks with source ranges
+- `medical-analysis` endpoint with missing-section and parser-warning fields
 - Docker Compose for API + frontend
 - tests for the core backend pieces
 
 The project is not yet a full knowledge graph system. The graph, search, and
 chat screens can now use real extracted data, but relation quality, graph query
 depth, and production auth are still early-stage. The V2 medical research
-workflow currently stops after the workspace boundary; paper classification,
-standard section parsing, study cards, and sentence-level citations are not
+workflow now reaches document classification and paper structure parsing; study
+cards, sentence-level citations, and the paper-focused frontend are not
 implemented yet.
 
 ## Next Steps
 
 The next realistic steps are:
 
-1. Add medical document types and identify the main paper sections with page-aware chunks.
-2. Add study cards whose facts carry sentence-level citations and an explicit not-found state.
-3. Add the workspace and paper workflow to the frontend.
+1. Add study cards whose facts carry sentence-level citations and an explicit not-found state.
+2. Add the workspace and paper workflow to the frontend.
+3. Add multi-paper comparison only after single-paper evidence is traceable.
 4. Improve graph quality with better relation extraction and edge weighting.
 5. Test the account flow with `AUTH_REQUIRED=true` behind HTTPS and secure cookies.

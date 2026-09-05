@@ -85,6 +85,13 @@ class DocumentRecord(Base):
     file_path: Mapped[str] = mapped_column(Text)
     file_size: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(32), default="uploaded")
+    # Medical fields are nullable so older uploads remain valid after the
+    # migration. The profile table holds the full analysis result.
+    document_kind: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    source_kind: Mapped[str | None] = mapped_column(String(64), nullable=True, default="user_upload")
+    language: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    document_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    parser_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     modified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -227,6 +234,73 @@ class GraphEdgeRecord(Base):
     sources_json: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class MedicalDocumentProfileRecord(Base):
+    """The explainable medical classification for one document."""
+    __tablename__ = "medical_document_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "document_id",
+            name="uq_medical_profiles_user_workspace_document",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(320), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    document_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    document_kind: Mapped[str] = mapped_column(String(64), default="unknown", index=True)
+    language: Mapped[str] = mapped_column(String(16), default="unknown")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    classifier_version: Mapped[str] = mapped_column(String(64), default="medical-rules-v1")
+    signals_json: Mapped[str] = mapped_column(Text, default="[]")
+    warnings_json: Mapped[str] = mapped_column(Text, default="[]")
+    missing_sections_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DocumentSectionRecord(Base):
+    """A paper section with the page and character range it came from."""
+
+    __tablename__ = "document_sections"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "document_id",
+            "ordinal",
+            name="uq_document_sections_user_workspace_document_ordinal",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(320), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    document_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    section_type: Mapped[str] = mapped_column(String(64), default="unknown", index=True)
+    original_title: Mapped[str] = mapped_column(String(255), default="")
+    ordinal: Mapped[int] = mapped_column(Integer)
+    page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    char_start: Mapped[int] = mapped_column(Integer, default=0)
+    char_end: Mapped[int] = mapped_column(Integer, default=0)
+    text: Mapped[str] = mapped_column(Text, default="")
+    language: Mapped[str] = mapped_column(String(16), default="unknown")
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    metadata_json: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class ProcessingJobRecord(Base):

@@ -3,7 +3,7 @@
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.core.errors import ParseError, error_payload
+from app.core.errors import ParseError, ParsePersistenceError, error_payload
 from app.core.errors import UploadRejectedError, register_error_handlers
 
 
@@ -31,4 +31,14 @@ def test_app_error_handler_returns_flat_payload():
     assert response.json() == {
         "detail": "File type .exe is not supported.",
         "code": "upload_validation_failed",
+    }
+
+
+def test_parse_persistence_error_is_a_service_unavailable_error():
+    error = ParsePersistenceError(details={"filename": "paper.pdf"})
+
+    assert error_payload(error) == {
+        "detail": "Could not save the parsed document results.",
+        "code": "parse_persistence_failed",
+        "details": {"filename": "paper.pdf"},
     }

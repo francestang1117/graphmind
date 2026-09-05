@@ -58,6 +58,12 @@ class ParseError(AppError):
     message = "Could not parse this file."
 
 
+class ParsePersistenceError(AppError):
+    status_code = 503
+    code = "parse_persistence_failed"
+    message = "Could not save the parsed document results."
+
+
 class ProcessingQueueError(AppError):
     status_code = 503
     code = "processing_queue_failed"

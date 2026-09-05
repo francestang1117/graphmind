@@ -57,6 +57,14 @@ GraphMind/
 │   │   │   ├── graph_builder_enhanced.py
 │   │   │   ├── job_repository.py
 │   │   │   ├── markdown_parser.py
+│   │   │   ├── medical/
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── analyzer.py
+│   │   │   │   ├── document_classifier.py
+│   │   │   │   ├── models.py
+│   │   │   │   ├── paper_structure_parser.py
+│   │   │   │   ├── repository.py
+│   │   │   │   └── section_normalizer.py
 │   │   │   ├── parsed_artifact_repository.py
 │   │   │   ├── persistence_service.py
 │   │   │   ├── qa_engine.py
@@ -84,7 +92,12 @@ GraphMind/
 │       ├── test_errors.py
 │       ├── test_full_pipeline.py
 │       ├── test_markdown_parser.py
+│       ├── test_medical_analyzer.py
+│       ├── test_medical_api.py
+│       ├── test_medical_classifier.py
+│       ├── test_medical_repository.py
 │       ├── test_parsed_artifact_repository.py
+│       ├── test_paper_structure_parser.py
 │       ├── test_persistence_service.py
 │       ├── test_qa_engine.py
 │       ├── test_rate_limit.py
@@ -145,6 +158,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `documents_with_markdown.py` is still a helper module for cached parsing and
   parsed-structure responses. It is used by document/search/graph/chat code, but
   it is not registered as its own router.
+- `services/medical/` classifies medical documents, normalizes paper headings,
+  builds page-aware sections and chunks, and stores the resulting analysis.
 - `auth.py` handles email/password login, GitHub OAuth, JWT access tokens,
   HttpOnly refresh cookies, and the optional local-dev workspace.
 - `workspaces.py` creates and lists account-owned research projects. The
@@ -186,6 +201,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
   sidecar fallback for local development.
 - `persistence_service.py` and `parsed_artifact_repository.py` persist parsed
   chunks and extracted entities.
+- `medical/repository.py` stores the medical profile and structured paper
+  sections with the same user, workspace, and document boundary.
 - `graph_repository.py` persists graph nodes and edges in relational tables.
   The API reads those rows first and only rebuilds from documents when no
   persisted graph exists yet.
@@ -256,6 +273,8 @@ The backend currently has tests for:
 - application error payloads
 - metrics wiring through the FastAPI app
 - workspace ownership, same-file multi-project support, and graph isolation
+- medical document classification, multilingual section parsing, paper analysis
+  persistence, and the medical analysis API
 
 Run the current backend suite with:
 
@@ -265,22 +284,23 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 
 ## Current Scope
 
-Workspace-scoped persistence is ready for the first V2 research workflow. The
-medical paper workflow itself is still early:
+Workspace-scoped persistence is ready for the first V2 research workflow. This
+branch adds the first medical analysis layer:
 
-- medical document classification and standard paper sections
-- study cards, sentence-level citations, and paper-focused chat
+- explainable medical document classification with an `unknown` fallback
+- English, Chinese, and Japanese paper section normalization
+- page-aware paper sections and section-aware chunks with source ranges
+- study cards, sentence-level citations, and paper-focused chat are still next
 - the frontend workspace picker and research-card pages
 - staging OAuth and `AUTH_REQUIRED=true` checks behind HTTPS and secure cookies
 
 ## Still Early
 
 The project now has real modules for upload, parsing, entity extraction, graph,
-search, chat, auth, rate limiting, persistence, metrics, Celery workers, and
-WebSocket progress. The remaining gaps are:
+search, chat, auth, rate limiting, persistence, metrics, Celery workers,
+WebSocket progress, and the first medical analysis layer. The remaining gaps are:
 
 - deeper graph persistence tooling beyond the current node/edge tables
-- medical document classification and standard paper sections
 - study cards, sentence-level citations, and paper-focused chat
 - the frontend workspace picker and research-card pages
 - staging OAuth and `AUTH_REQUIRED=true` checks behind HTTPS

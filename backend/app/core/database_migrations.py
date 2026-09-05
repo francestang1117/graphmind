@@ -31,6 +31,8 @@ _WORKSPACE_TABLES = (
     "graph_nodes",
     "graph_edges",
     "processing_jobs",
+    "medical_document_profiles",
+    "document_sections",
 )
 
 
@@ -41,9 +43,11 @@ def upgrade_persistence_schema(engine) -> None:
         return
 
     with engine.begin() as connection:
-        changed = _move_legacy_document_ids(connection)
         _ensure_workspace_table(connection)
+        _ensure_medical_document_columns(connection)
+        _ensure_medical_tables(connection)
         _ensure_workspace_columns(connection)
+        changed = _move_legacy_document_ids(connection)
         seeded = _seed_default_workspaces(connection)
         backfilled = _backfill_workspace_ids(connection)
         _ensure_server_constraints(connection)
@@ -66,9 +70,11 @@ def _upgrade_sqlite(engine) -> None:
         connection.commit()
         try:
             with connection.begin():
-                changed = _move_legacy_document_ids(connection)
                 _ensure_workspace_table(connection)
+                _ensure_medical_document_columns(connection)
+                _ensure_medical_tables(connection)
                 _ensure_workspace_columns(connection)
+                changed = _move_legacy_document_ids(connection)
                 seeded = _seed_default_workspaces(connection)
                 backfilled = _backfill_workspace_ids(connection)
                 _clean_sqlite_orphans(connection)
@@ -81,6 +87,8 @@ def _upgrade_sqlite(engine) -> None:
                     ("graph_nodes", _needs_sqlite_nodes_rebuild),
                     ("graph_edges", _needs_sqlite_edges_rebuild),
                     ("processing_jobs", _needs_sqlite_jobs_rebuild),
+                    ("medical_document_profiles", _needs_sqlite_profile_rebuild),
+                    ("document_sections", _needs_sqlite_sections_rebuild),
                 )
                 for table, needs_rebuild in rebuild_checks:
                     if needs_rebuild(connection):
@@ -131,6 +139,110 @@ def _ensure_workspace_table(connection) -> None:
     ):
         connection.exec_driver_sql(
             f"CREATE INDEX IF NOT EXISTS {name} ON workspaces ({column})"
+        )
+
+
+def _ensure_medical_document_columns(connection) -> None:
+    """Add the small amount of medical metadata kept on each document."""
+    if not _has_table(connection, "documents"):
+        return
+
+    columns = (
+        ("document_kind", "VARCHAR(64)"),
+        ("source_kind", "VARCHAR(64)"),
+        ("language", "VARCHAR(16)"),
+        ("document_date", "VARCHAR(32)"),
+        ("parser_version", "VARCHAR(64)"),
+    )
+    for column, column_type in columns:
+        if _has_column(connection, "documents", column):
+            continue
+        connection.exec_driver_sql(
+            f"ALTER TABLE documents ADD COLUMN {column} {column_type}"
+        )
+
+    connection.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_documents_document_kind "
+        "ON documents (document_kind)"
+    )
+
+
+def _ensure_medical_tables(connection) -> None:
+    """Create the profile and section tables for older databases."""
+    if not _has_table(connection, "documents"):
+        return
+
+    timestamp_type = (
+        "DATETIME"
+        if connection.dialect.name == "sqlite"
+        else "TIMESTAMP WITH TIME ZONE"
+    )
+    if not _has_table(connection, "medical_document_profiles"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE medical_document_profiles (
+                id VARCHAR(320) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64),
+                document_id VARCHAR(255) NOT NULL,
+                document_kind VARCHAR(64) NOT NULL,
+                language VARCHAR(16) NOT NULL,
+                confidence FLOAT NOT NULL,
+                classifier_version VARCHAR(64) NOT NULL,
+                signals_json TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                missing_sections_json TEXT NOT NULL,
+                created_at {timestamp_type} NOT NULL,
+                updated_at {timestamp_type} NOT NULL,
+                CONSTRAINT uq_medical_profiles_user_workspace_document
+                    UNIQUE (user_id, workspace_id, document_id),
+                CONSTRAINT fk_medical_profiles_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+    if not _has_table(connection, "document_sections"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE document_sections (
+                id VARCHAR(320) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64),
+                document_id VARCHAR(255) NOT NULL,
+                section_type VARCHAR(64) NOT NULL,
+                original_title VARCHAR(255) NOT NULL,
+                ordinal INTEGER NOT NULL,
+                page_start INTEGER,
+                page_end INTEGER,
+                char_start INTEGER NOT NULL,
+                char_end INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                language VARCHAR(16) NOT NULL,
+                confidence FLOAT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                created_at {timestamp_type} NOT NULL,
+                CONSTRAINT uq_document_sections_user_workspace_document_ordinal
+                    UNIQUE (user_id, workspace_id, document_id, ordinal),
+                CONSTRAINT fk_document_sections_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+    indexes = (
+        ("ix_medical_document_profiles_user_id", "medical_document_profiles", "user_id"),
+        ("ix_medical_document_profiles_workspace_id", "medical_document_profiles", "workspace_id"),
+        ("ix_medical_document_profiles_document_id", "medical_document_profiles", "document_id"),
+        ("ix_medical_document_profiles_document_kind", "medical_document_profiles", "document_kind"),
+        ("ix_document_sections_user_id", "document_sections", "user_id"),
+        ("ix_document_sections_workspace_id", "document_sections", "workspace_id"),
+        ("ix_document_sections_document_id", "document_sections", "document_id"),
+        ("ix_document_sections_section_type", "document_sections", "section_type"),
+    )
+    for name, table, column in indexes:
+        connection.exec_driver_sql(
+            f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"
         )
 
 
@@ -229,6 +341,8 @@ def _backfill_workspace_ids(connection) -> int:
         ("parsed_entities", "document_id"),
         ("graph_edges", "source_document_id"),
         ("processing_jobs", "document_id"),
+        ("medical_document_profiles", "document_id"),
+        ("document_sections", "document_id"),
     ):
         if not _has_table(connection, table) or not _has_column(
             connection, table, document_column
@@ -281,6 +395,8 @@ def _clean_sqlite_orphans(connection) -> None:
         ("parsed_chunks", "document_id"),
         ("parsed_entities", "document_id"),
         ("graph_edges", "source_document_id"),
+        ("medical_document_profiles", "document_id"),
+        ("document_sections", "document_id"),
     ):
         if not _has_table(connection, table) or not _has_column(connection, table, column):
             continue
@@ -343,6 +459,8 @@ def _move_legacy_document_ids(connection) -> int:
         ("parsed_entities", "document_id"),
         ("graph_edges", "source_document_id"),
         ("processing_jobs", "document_id"),
+        ("medical_document_profiles", "document_id"),
+        ("document_sections", "document_id"),
     )
     for old_id, new_id in replacements.items():
         for table, column in references:
@@ -464,6 +582,24 @@ def _needs_sqlite_jobs_rebuild(connection) -> bool:
     return not (has_fk and bool(document_column and document_column.get("nullable")))
 
 
+def _needs_sqlite_profile_rebuild(connection) -> bool:
+    return _needs_sqlite_artifact_rebuild(
+        connection,
+        "medical_document_profiles",
+        ("user_id", "workspace_id", "document_id"),
+        "document_id",
+    )
+
+
+def _needs_sqlite_sections_rebuild(connection) -> bool:
+    return _needs_sqlite_artifact_rebuild(
+        connection,
+        "document_sections",
+        ("user_id", "workspace_id", "document_id", "ordinal"),
+        "document_id",
+    )
+
+
 def _needs_sqlite_artifact_rebuild(
     connection,
     table: str,
@@ -539,6 +675,11 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
                 file_path TEXT NOT NULL,
                 file_size INTEGER NOT NULL,
                 status VARCHAR(32) NOT NULL,
+                document_kind VARCHAR(64),
+                source_kind VARCHAR(64),
+                language VARCHAR(16),
+                document_date VARCHAR(32),
+                parser_version VARCHAR(64),
                 created_at DATETIME NOT NULL,
                 modified_at DATETIME NOT NULL,
                 deleted_at DATETIME,
@@ -548,7 +689,8 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
             """,
             "id, user_id, workspace_id, filename, stored_filename, original_filename, "
             "file_extension, file_type, mime_type, file_hash, file_path, file_size, "
-            "status, created_at, modified_at, deleted_at",
+            "status, document_kind, source_kind, language, document_date, parser_version, "
+            "created_at, modified_at, deleted_at",
         ),
         "parsed_chunks": (
             """
@@ -664,6 +806,61 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
             "job_id, user_id, workspace_id, document_id, original_filename, status, step, "
             "progress, error, created_at, updated_at, finished_at",
         ),
+        "medical_document_profiles": (
+            """
+            CREATE TABLE medical_document_profiles (
+                id VARCHAR(320) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64),
+                document_id VARCHAR(255) NOT NULL,
+                document_kind VARCHAR(64) NOT NULL,
+                language VARCHAR(16) NOT NULL,
+                confidence FLOAT NOT NULL,
+                classifier_version VARCHAR(64) NOT NULL,
+                signals_json TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                missing_sections_json TEXT NOT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                CONSTRAINT uq_medical_profiles_user_workspace_document
+                    UNIQUE (user_id, workspace_id, document_id),
+                CONSTRAINT fk_medical_profiles_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+            )
+            """,
+            "id, user_id, workspace_id, document_id, document_kind, language, confidence, "
+            "classifier_version, signals_json, warnings_json, missing_sections_json, "
+            "created_at, updated_at",
+        ),
+        "document_sections": (
+            """
+            CREATE TABLE document_sections (
+                id VARCHAR(320) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64),
+                document_id VARCHAR(255) NOT NULL,
+                section_type VARCHAR(64) NOT NULL,
+                original_title VARCHAR(255) NOT NULL,
+                ordinal INTEGER NOT NULL,
+                page_start INTEGER,
+                page_end INTEGER,
+                char_start INTEGER NOT NULL,
+                char_end INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                language VARCHAR(16) NOT NULL,
+                confidence FLOAT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                created_at DATETIME NOT NULL,
+                CONSTRAINT uq_document_sections_user_workspace_document_ordinal
+                    UNIQUE (user_id, workspace_id, document_id, ordinal),
+                CONSTRAINT fk_document_sections_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+            )
+            """,
+            "id, user_id, workspace_id, document_id, section_type, original_title, ordinal, "
+            "page_start, page_end, char_start, char_end, text, language, confidence, "
+            "metadata_json, created_at",
+        ),
     }
     try:
         return definitions[table]
@@ -684,6 +881,7 @@ def _sqlite_indexes(table: str) -> tuple[tuple[str, str], ...]:
             ("ix_documents_original_filename", "original_filename"),
             ("ix_documents_file_hash", "file_hash"),
             ("ix_documents_file_extension", "file_extension"),
+            ("ix_documents_document_kind", "document_kind"),
             ("ix_documents_deleted_at", "deleted_at"),
         ),
         "parsed_chunks": common + (("ix_parsed_chunks_document_id", "document_id"),),
@@ -711,6 +909,16 @@ def _sqlite_indexes(table: str) -> tuple[tuple[str, str], ...]:
         + (
             ("ix_processing_jobs_document_id", "document_id"),
             ("ix_processing_jobs_status", "status"),
+        ),
+        "medical_document_profiles": common
+        + (
+            ("ix_medical_document_profiles_document_id", "document_id"),
+            ("ix_medical_document_profiles_document_kind", "document_kind"),
+        ),
+        "document_sections": common
+        + (
+            ("ix_document_sections_document_id", "document_id"),
+            ("ix_document_sections_section_type", "section_type"),
         ),
     }
     return indexes.get(table, ())
@@ -763,6 +971,20 @@ def _ensure_server_constraints(connection) -> None:
         ),
         old_names=("uq_graph_edges_user_relation_doc",),
     )
+    _ensure_unique_constraint(
+        connection,
+        "medical_document_profiles",
+        "uq_medical_profiles_user_workspace_document",
+        ("user_id", "workspace_id", "document_id"),
+        old_names=(),
+    )
+    _ensure_unique_constraint(
+        connection,
+        "document_sections",
+        "uq_document_sections_user_workspace_document_ordinal",
+        ("user_id", "workspace_id", "document_id", "ordinal"),
+        old_names=(),
+    )
 
     _ensure_document_fk(connection, "parsed_chunks", "fk_parsed_chunks_document")
     _ensure_document_fk(connection, "parsed_entities", "fk_parsed_entities_document")
@@ -773,6 +995,16 @@ def _ensure_server_constraints(connection) -> None:
         "fk_processing_jobs_document",
         "document_id",
         ondelete="SET NULL",
+    )
+    _ensure_document_fk(
+        connection,
+        "medical_document_profiles",
+        "fk_medical_profiles_document",
+    )
+    _ensure_document_fk(
+        connection,
+        "document_sections",
+        "fk_document_sections_document",
     )
 
 
@@ -808,6 +1040,8 @@ def _clean_orphan_document_references(connection) -> None:
         ("parsed_entities", "document_id", "delete"),
         ("graph_edges", "source_document_id", "delete"),
         ("processing_jobs", "document_id", "null"),
+        ("medical_document_profiles", "document_id", "delete"),
+        ("document_sections", "document_id", "delete"),
     )
     for table, column, action in references:
         if not _has_table(connection, table) or not _has_column(connection, table, column):

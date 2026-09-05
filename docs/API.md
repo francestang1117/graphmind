@@ -218,6 +218,56 @@ Returns a compact parsed summary for supported formats: Markdown, TXT, PDF, DOCX
 }
 ```
 
+### `GET /documents/{identifier}/medical-analysis`
+
+Returns the medical profile and structured paper sections for a document. The
+identifier can be the stored filename or the document ID. The lookup is scoped
+to the current user and the selected `workspace_id`.
+
+The current classifier uses explainable rules. It can return `unknown` when the
+signals are not strong enough, and it reports `ocr_required` for a PDF with no
+extractable text. Only documents classified as `research_paper` receive the
+standard paper section breakdown; other medical types keep their profile and
+warnings without being forced into an IMRaD structure.
+
+```bash
+curl "http://localhost:8000/api/v1/documents/<stored_filename>/medical-analysis?workspace_id=$WORKSPACE_ID"
+```
+
+```json
+{
+  "document_id": "doc-123",
+  "workspace_id": "workspace-abc",
+  "document_kind": "research_paper",
+  "confidence": 0.94,
+  "language": "en",
+  "classifier_version": "medical-rules-v1",
+  "signals": ["found_abstract_heading", "found_methods_heading"],
+  "missing_sections": ["limitations"],
+  "warnings": [],
+  "sections": [
+    {
+      "section_type": "results",
+      "original_title": "Results",
+      "ordinal": 4,
+      "page_start": 5,
+      "page_end": 6,
+      "char_start": 10320,
+      "char_end": 11680,
+      "chunk_count": 2,
+      "secondary_types": [],
+      "metadata": {"evidence_role": "study_result", "location_exact": true}
+    }
+  ]
+}
+```
+
+Sections retain the original heading and a normalized `section_type`. A
+compound heading such as `Results and Discussion` keeps the primary type and
+lists the other meaning in `secondary_types`. `location_exact=false` means the
+parser kept the extracted content but could not safely align it to a character
+range in the source text, which can happen with PDF tables.
+
 ### `DELETE /documents/{filename}`
 
 Deletes the stored file, soft-deletes the database document record when persistence is enabled, and clears cached parsed artifacts for that file.

@@ -275,12 +275,24 @@ class PDFParser:
             log.warning("pdfplumber not installed — falling back to PyPDF2")
             return self._parse_pypdf2(path)
 
+    @staticmethod
+    def _metadata_title(metadata: Any) -> str:
+        """Read the title field used by either PDF library."""
+        title = getattr(metadata, "title", None) if metadata else None
+        if not title and hasattr(metadata, "get"):
+            for key in ("Title", "title", "/Title"):
+                title = metadata.get(key)
+                if title:
+                    break
+        return str(title or "").strip()
+
     def _parse_pdfplumber(self, path: Path) -> ParsedDocument:
         import pdfplumber
 
         all_text, tables, sections, chunks, headings = [], [], [], [], []
 
         with pdfplumber.open(str(path)) as pdf:
+            pdf_title = self._metadata_title(getattr(pdf, "metadata", None))
             for page_num, page in enumerate(pdf.pages, 1):
                 page_text = page.extract_text() or ""
                 all_text.append(page_text)
@@ -305,21 +317,25 @@ class PDFParser:
         full_text = "\n\n".join(all_text)
         words = len(full_text.split())
 
+        metadata = {
+            "filename": path.name,
+            "pages": len(all_text),
+            "parser": "pdfplumber",
+            "headings": headings,
+            "table_count": len(tables),
+        }
+        if pdf_title:
+            metadata["title"] = pdf_title
+
         return ParsedDocument(
-            title        = path.stem.replace("-", " ").replace("_", " ").title(),
+            title        = pdf_title or path.stem.replace("-", " ").replace("_", " ").title(),
             file_path    = str(path),
             format       = "pdf",
             raw_text     = full_text,
             sections     = sections,
             chunks       = chunks,
             tables       = tables,
-            metadata     = {
-                "filename": path.name,
-                "pages": len(all_text),
-                "parser": "pdfplumber",
-                "headings": headings,
-                "table_count": len(tables),
-            },
+            metadata     = metadata,
             word_count   = words,
             reading_time_min = max(1, words // 250),
         )
@@ -365,6 +381,7 @@ class PDFParser:
     def _parse_pypdf2(self, path: Path) -> ParsedDocument:
         from PyPDF2 import PdfReader
         reader = PdfReader(str(path))
+        pdf_title = self._metadata_title(getattr(reader, "metadata", None))
         pages = [p.extract_text() or "" for p in reader.pages]
         full_text = "\n\n".join(pages)
         sections = [Section(f"Page {i+1}", 0, t) for i, t in enumerate(pages) if t.strip()]
@@ -373,14 +390,22 @@ class PDFParser:
             chunks.extend(_chunk(t, chunk_type="page", meta={"page": i + 1}))
 
         words = len(full_text.split())
+        metadata = {
+            "filename": path.name,
+            "pages": len(pages),
+            "parser": "PyPDF2",
+        }
+        if pdf_title:
+            metadata["title"] = pdf_title
+
         return ParsedDocument(
-            title        = path.stem.replace("-", " ").title(),
+            title        = pdf_title or path.stem.replace("-", " ").title(),
             file_path    = str(path),
             format       = "pdf",
             raw_text     = full_text,
             sections     = sections,
             chunks       = chunks,
-            metadata     = {"filename": path.name, "pages": len(pages), "parser": "PyPDF2"},
+            metadata     = metadata,
             word_count   = words,
             reading_time_min = max(1, words // 250),
         )

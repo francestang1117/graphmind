@@ -1,12 +1,16 @@
 """Parse cache and summary helpers for uploaded documents."""
 
+import inspect
 import logging
 from typing import Any, Optional
 
 from app.core.workspace import default_workspace_id
+from app.core.errors import ParsePersistenceError
 from app.services.document_parser import DocumentParser
 from app.services.entity_extractor import entity_extractor
 from app.services.markdown_parser import MarkdownParser
+from app.services.medical.analyzer import analyze_document
+from app.services.medical.repository import medical_repository
 from app.services.parsed_artifact_repository import parsed_artifact_repository
 
 
@@ -34,7 +38,12 @@ def parse_markdown_bytes(
     """Parse Markdown bytes and store the result in a small local cache."""
     text = _decode_text(data)
     result = MarkdownParser().parse_content(text)
-    result.setdefault("metadata", {})["workspace_id"] = workspace_id or default_workspace_id(user_id)
+    result.setdefault("metadata", {}).update(
+        {
+            "workspace_id": workspace_id or default_workspace_id(user_id),
+            "persistence_status": "cache_only",
+        }
+    )
     _parse_cache[cache_key(filename, user_id, workspace_id)] = result
     return result
 
@@ -50,20 +59,33 @@ def parse_document_file(
     """Parse any supported stored file and cache the normalized parser output."""
     result = DocumentParser().parse(file_path)
     metadata = result.setdefault("metadata", {})
+    scope = workspace_id or default_workspace_id(user_id)
     metadata["stored_filename"] = filename
     metadata["user_id"] = user_id
-    metadata["workspace_id"] = workspace_id or default_workspace_id(user_id)
+    metadata["workspace_id"] = scope
     metadata["document_id"] = document_id or metadata.get("document_id") or filename
     if original_filename:
         metadata["original_filename"] = original_filename
-    _parse_cache[cache_key(filename, user_id, workspace_id)] = result
-    _persist_parse_artifacts(
+    analyze_document(
+        result,
+        filename=filename,
+        original_filename=metadata.get("original_filename", ""),
+        document_id=metadata["document_id"],
+        user_id=user_id,
+        workspace_id=scope,
+        persist=False,
+    )
+    persistence_status = _persist_parse_artifacts(
         filename,
         result,
         user_id=user_id,
         document_id=metadata["document_id"],
-        workspace_id=workspace_id,
+        workspace_id=scope,
     )
+    metadata["persistence_status"] = persistence_status
+    if persistence_status != "not_persisted":
+        # A failed database commit leaves the previous cache entry untouched.
+        _parse_cache[cache_key(filename, user_id, scope)] = result
     return result
 
 
@@ -87,6 +109,7 @@ def clear_cached_parse(
     if workspace_id is not None:
         arguments["workspace_id"] = workspace_id
     parsed_artifact_repository.delete_for_document(document_id or filename, **arguments)
+    medical_repository.delete_for_document(document_id or filename, **arguments)
 
 
 def markdown_summary(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
@@ -102,6 +125,7 @@ def markdown_summary(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:
         "code_blocks_count": len(parsed.get("code_blocks", [])),
         "word_count": metadata.get("word_count", 0),
         "reading_time": metadata.get("reading_time", 1),
+        "persistence_status": metadata.get("persistence_status", "unknown"),
         "has_code": metadata.get("has_code", False),
         "languages": metadata.get("languages", []),
     }
@@ -156,6 +180,7 @@ def document_summary(
         "inherited_styles_count": metadata.get("inherited_styles_count", 0),
         "word_count": metadata.get("word_count", 0),
         "reading_time": metadata.get("reading_time_min", 1),
+        "persistence_status": metadata.get("persistence_status", "unknown"),
         "has_code": bool(code_blocks or imports or functions or classes),
         "languages": languages,
         "imports": imports[:12],
@@ -181,20 +206,58 @@ def _persist_parse_artifacts(
     user_id: str = "local-dev",
     document_id: str = "",
     workspace_id: Optional[str] = None,
-) -> None:
+) -> str:
     try:
         # Parser-level entities catch things like imports; the NER pass catches
         # broader concepts and named entities from the extracted text.
         entities = entity_extractor.extract_from_parsed_document(parsed)
         parser_entities = parsed.get("extra", {}).get("entities", [])
-        arguments = {"user_id": user_id}
-        if workspace_id is not None:
-            arguments["workspace_id"] = workspace_id
+        identifier = document_id or parsed.get("metadata", {}).get("document_id") or filename
+        replace_bundle = getattr(parsed_artifact_repository, "replace_parse_bundle", None)
+        available = getattr(parsed_artifact_repository, "available", None)
+        if callable(available) and not available():
+            return "cache_only"
+
+        if callable(replace_bundle):
+            analysis = parsed.get("medical_analysis") or {}
+            committed = replace_bundle(
+                identifier,
+                parsed,
+                [*parser_entities, *entities],
+                analysis,
+                analysis.get("sections", []),
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+            if not committed:
+                log.info("No active database document for parsed file %s", filename)
+                return "not_persisted"
+            return "persisted"
+
+        # Keep older test doubles and local integrations working while the
+        # database-backed repository is upgraded.
+        legacy_arguments = {"user_id": user_id}
+        parameters = inspect.signature(
+            parsed_artifact_repository.replace_for_document
+        ).parameters.values()
+        accepts_workspace = any(
+            parameter.name == "workspace_id"
+            or parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters
+        )
+        if workspace_id is not None and accepts_workspace:
+            legacy_arguments["workspace_id"] = workspace_id
         parsed_artifact_repository.replace_for_document(
-            document_id or parsed.get("metadata", {}).get("document_id") or filename,
+            identifier,
             parsed,
             [*parser_entities, *entities],
-            **arguments,
+            **legacy_arguments,
         )
+        return "persisted"
+    except ParsePersistenceError:
+        raise
     except Exception as exc:
-        log.warning("Could not persist parsed artifacts for %s: %s", filename, exc)
+        log.exception("Could not persist parsed artifacts for %s", filename)
+        raise ParsePersistenceError(
+            f"Could not persist parsed artifacts for {filename}"
+        ) from exc
