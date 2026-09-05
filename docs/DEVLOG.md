@@ -1344,16 +1344,18 @@ reader sees. A guideline with a strong paper-like structure was therefore
 sometimes treated as a research paper.
 
 Classification now checks the PDF metadata title, parser title, original
-filename, and the first three non-empty body lines. Hash and UUID storage names
-are ignored when deciding whether a title is an explicit guideline title. PDF
+filename, and a validated first body title before an Abstract heading. It no
+longer treats every opening line as a title. Hash and UUID storage names are
+ignored when deciding whether a title is an explicit guideline title. PDF
 metadata titles are also passed through by both supported PDF parsers.
 
-The classifier version is now `medical-rules-v3`. It no longer treats a lab or
+The classifier version is now `medical-rules-v4`. It no longer treats a lab or
 prescription word as supported just because matching context appears somewhere
-else in the document. `specimen` and `frequency` must share a sentence or a
-short unbroken text block with the relevant medical wording. Imaging
-`impression` keeps the report-style paragraph check. Tests cover the real
-upload shape, cross-sentence false positives, and valid local context.
+else in the document. `specimen` needs a nearby test and result signal, while
+`frequency` needs medication and dose or administration wording in the same
+short text segment. Single line breaks now end that segment. Japanese guideline
+evaluation terms are handled separately from guideline titles. Tests cover the
+real upload shape, cross-sentence false positives, and valid local context.
 
 ## Current State
 

@@ -14,7 +14,7 @@ from app.services.medical.section_normalizer import clean_heading, normalize_sec
 class MedicalDocumentClassifier:
     """Classify a document from small, inspectable signals."""
 
-    VERSION = "medical-rules-v3"
+    VERSION = "medical-rules-v4"
 
     _MEDICAL_TERMS = re.compile(
         r"\b(?:patient|patients|clinical|disease|diagnos(?:is|es)|treatment|"
@@ -115,7 +115,18 @@ class MedicalDocumentClassifier:
     _SPECIMEN_CONTEXT = re.compile(
         r"\b(?:laboratory|lab|assay|analyte|blood|urine|serum|plasma|"
         r"test result|lab result|reference range|normal range|units?)\b|"
-        r"检验项目|检测结果|参考范围|单位|标本|样本",
+        r"检验项目|检测项目|检测结果|参考范围|正常范围|单位",
+        re.I,
+    )
+    _LAB_TEST_CONTEXT = re.compile(
+        r"\b(?:laboratory|lab|assay|analyte|blood|urine|serum|plasma|"
+        r"test|marker)\b|检验项目|检测项目|化验|血液|尿液|血清|血浆",
+        re.I,
+    )
+    _LAB_RESULT_CONTEXT = re.compile(
+        r"\b(?:result|value|level|count|positive|negative|detected|"
+        r"reference range|normal range|units?)\b|结果|数值|水平|计数|"
+        r"阳性|阴性|检出|参考范围|正常范围|单位",
         re.I,
     )
     _IMAGING_CONTEXT = re.compile(
@@ -130,10 +141,21 @@ class MedicalDocumentClassifier:
         r"药物|药品|剂量|给药|服用|用药|口服|注射",
         re.I,
     )
+    _PRESCRIPTION_MEDICATION_CONTEXT = re.compile(
+        r"\b(?:medication|medicine|drug|prescription|tablet|capsule)\b|"
+        r"药物|药品|处方|用药",
+        re.I,
+    )
+    _PRESCRIPTION_DOSE_CONTEXT = re.compile(
+        r"\b(?:dose|dosage|administer(?:ed|ing)?|oral|intravenous|"
+        r"injection|route|\d+(?:\.\d+)?\s*(?:mg|mcg|g|ml))\b|"
+        r"剂量|给药|服用|口服|注射|途径",
+        re.I,
+    )
     _SPECIMEN_TRIGGER = re.compile(r"\bspecimen\b|标本|样本", re.I)
     _FREQUENCY_TRIGGER = re.compile(r"\bfrequency\b|频率", re.I)
     _IMPRESSION_TRIGGER = re.compile(r"\bimpression\b", re.I)
-    _LOCAL_CONTEXT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n{2,}")
+    _LOCAL_CONTEXT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+|\n+")
     _PARAGRAPH_SPLIT = re.compile(r"\n{2,}")
     _IMPRESSION_HEADING = re.compile(
         r"(?im)^\s*impression\s*(?::\s*\S.*)?$"
@@ -146,7 +168,15 @@ class MedicalDocumentClassifier:
     _GUIDELINE_EVALUATION_TITLE = re.compile(
         r"\b(?:evaluation|evaluate|evaluating|assessment|assess(?:ed|ing)?|"
         r"impact|effect(?:iveness)?|adherence|compliance|audit|trial|"
-        r"cohort|randomi[sz]ed)\b|评估|评价|效果|影响|依从性|审计",
+        r"cohort|randomi[sz]ed)\b|评估|评价|效果|影响|依从性|审计|"
+        r"評価|検証|影響|効果|遵守率|実施状況|調査|研究|解析",
+        re.I,
+    )
+    _ABSTRACT_START = re.compile(r"^(?:abstract|摘要|要旨)\b", re.I)
+    _ABSTRACT_LIKE_TITLE = re.compile(
+        r"^(?:this\s+study|we\s+(?:examined|evaluated|investigated|"
+        r"assessed|analyzed)|our\s+(?:study|research)|patients?\s+"
+        r"|本研究|本論文|患者)",
         re.I,
     )
     _STORAGE_TITLE = re.compile(
@@ -182,9 +212,10 @@ class MedicalDocumentClassifier:
         haystack = "\n\n".join(part for part in (title, text) if part)
         language = self._detect_language(haystack)
         signals = self._signals(haystack, heading_types, headings)
+        trusted_title_candidates = self._trusted_title_candidates(parsed, text)
         explicit_guideline_titles = [
             candidate
-            for candidate in title_candidates
+            for candidate in trusted_title_candidates
             if not self._is_storage_title(candidate)
             and self._is_explicit_guideline_title(candidate)
         ]
@@ -343,11 +374,9 @@ class MedicalDocumentClassifier:
         # These words are common in software, reviews, and ordinary prose.
         # They only count when the nearby wording looks like the document type.
         has_specimen = bool(self._SPECIMEN_TRIGGER.search(text))
-        specimen_context = self._has_local_context(
-            text, self._SPECIMEN_TRIGGER, self._SPECIMEN_CONTEXT
-        )
+        specimen_structure = self._has_lab_structure(text)
         if signal == "found_lab_terms" and has_specimen:
-            if not specimen_context:
+            if not specimen_structure:
                 return 0.0
         has_impression = bool(self._IMPRESSION_TRIGGER.search(text))
         impression_context = self._has_local_context(
@@ -360,11 +389,9 @@ class MedicalDocumentClassifier:
             if not impression_context and not imaging_heading:
                 return 0.0
         has_frequency = bool(self._FREQUENCY_TRIGGER.search(text))
-        frequency_context = self._has_local_context(
-            text, self._FREQUENCY_TRIGGER, self._PRESCRIPTION_CONTEXT
-        )
+        frequency_structure = self._has_prescription_structure(text)
         if signal == "found_prescription_terms" and has_frequency:
-            if not frequency_context:
+            if not frequency_structure:
                 return 0.0
 
         strong_pattern = self._STRONG_CATEGORY_TERMS.get(signal)
@@ -374,13 +401,13 @@ class MedicalDocumentClassifier:
         if (
             signal == "found_lab_terms"
             and has_specimen
-            and specimen_context
+            and specimen_structure
         ):
             return 0.55
         if (
             signal == "found_prescription_terms"
             and has_frequency
-            and frequency_context
+            and frequency_structure
         ):
             return 0.55
         if strong_pattern and strong_pattern.search(text):
@@ -411,6 +438,30 @@ class MedicalDocumentClassifier:
             trigger.search(segment) and context.search(segment)
             for segment in (splitter or self._LOCAL_CONTEXT_SPLIT).split(text)
         )
+
+    def _has_lab_structure(self, text: str) -> bool:
+        """Require a specimen plus a nearby test and result signal."""
+        for segment in self._LOCAL_CONTEXT_SPLIT.split(text):
+            if not self._SPECIMEN_TRIGGER.search(segment):
+                continue
+            if not self._SPECIMEN_CONTEXT.search(segment):
+                continue
+            if not self._LAB_TEST_CONTEXT.search(segment):
+                continue
+            if self._LAB_RESULT_CONTEXT.search(segment):
+                return True
+        return False
+
+    def _has_prescription_structure(self, text: str) -> bool:
+        """Require medication context and a dose or administration cue."""
+        for segment in self._LOCAL_CONTEXT_SPLIT.split(text):
+            if not self._FREQUENCY_TRIGGER.search(segment):
+                continue
+            if not self._PRESCRIPTION_MEDICATION_CONTEXT.search(segment):
+                continue
+            if self._PRESCRIPTION_DOSE_CONTEXT.search(segment):
+                return True
+        return False
 
     def _is_explicit_guideline_title(self, title: str) -> bool:
         return bool(self._EXPLICIT_GUIDELINE_TITLE.search(title))
@@ -449,12 +500,29 @@ class MedicalDocumentClassifier:
         raw_candidates: list[Any] = [
             metadata.get("title"),
             parsed.get("title"),
+            self._body_title_candidate(text),
             original_filename,
             metadata.get("original_filename"),
         ]
-        content_lines = [line.strip() for line in text.splitlines() if line.strip()]
-        raw_candidates.extend(content_lines[:3])
         raw_candidates.append(Path(filename).stem)
+
+        return self._unique_candidates(raw_candidates)
+
+    def _trusted_title_candidates(
+        self,
+        parsed: dict[str, Any],
+        text: str,
+    ) -> list[str]:
+        """Return titles safe to use for an explicit document-type decision."""
+        metadata = parsed.get("metadata") or {}
+        return self._unique_candidates([
+            metadata.get("title"),
+            parsed.get("title"),
+            self._body_title_candidate(text),
+        ])
+
+    def _unique_candidates(self, raw_candidates: list[Any]) -> list[str]:
+        """Keep the first spelling of each candidate."""
 
         candidates: list[str] = []
         seen: set[str] = set()
@@ -465,6 +533,33 @@ class MedicalDocumentClassifier:
                 candidates.append(value)
                 seen.add(key)
         return candidates
+
+    def _body_title_candidate(self, text: str) -> str:
+        """Use only a title-like first line before an Abstract heading."""
+        for line in text.splitlines():
+            value = clean_heading(line.strip())
+            if not value:
+                continue
+            if self._ABSTRACT_START.match(value):
+                return ""
+            if normalize_section_title(value).primary != "unknown":
+                return ""
+            return value if self._looks_like_body_title(value) else ""
+        return ""
+
+    def _looks_like_body_title(self, value: str) -> bool:
+        """Reject prose, identifiers, and section labels as fallback titles."""
+        if len(value) < 5 or len(value) > 180:
+            return False
+        if len(value.split()) > 24:
+            return False
+        if value.endswith((".", "!", "?", "。", "！", "？")):
+            return False
+        if self._DOI.fullmatch(value) or self._ABSTRACT_LIKE_TITLE.match(value):
+            return False
+        if self._is_storage_title(value):
+            return False
+        return True
 
     def _title(self, candidates: list[str]) -> str:
         """Prefer a human title over a content-hash or UUID filename."""

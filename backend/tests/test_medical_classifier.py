@@ -163,10 +163,13 @@ def test_common_words_need_medical_context_before_becoming_category_signals():
     classifier = MedicalDocumentClassifier()
     examples = (
         "The specimen is an example of this design pattern.",
+        "The specimen is stored near the lab.",
+        "这个昆虫标本很漂亮。",
         "My impression of the movie was positive.",
         "The CPU frequency is 3.5 GHz.",
         "The specimen is an example of this design pattern. Each unit has tests.",
         "The CPU frequency is configurable.\nThe software stores drug research papers.",
+        "The CPU frequency is configurable\nDrug research notes are stored here.",
     )
 
     for text in examples:
@@ -270,6 +273,67 @@ References
     )
 
     assert result.document_kind == "research_paper"
+
+
+def test_guideline_phrase_in_abstract_prose_does_not_become_a_title():
+    text = """Abstract
+This study examines a clinical practice guideline for disease treatment.
+Patients with disease were included.
+
+Introduction
+The guideline was introduced in hospitals.
+
+Methods
+We evaluated implementation across a clinical cohort.
+
+Results
+Treatment outcomes improved after implementation.
+
+Discussion
+The findings support further evaluation.
+
+References
+10.1000/example"""
+
+    result = MedicalDocumentClassifier().classify(
+        _parsed(text, title="25130c2a7c0e9b4d"),
+        filename="/uploads/25130c2a7c0e9b4d.pdf",
+        original_filename="guideline-study.pdf",
+    )
+
+    assert result.document_kind == "research_paper"
+    assert "found_explicit_guideline_title" not in result.signals
+
+
+def test_japanese_guideline_and_guideline_evaluation_paper_are_distinguished():
+    text = """要旨
+患者を対象とした医学研究です。
+
+序論
+疾患に対する診療方針を説明します。
+
+方法
+研究では治療の実施状況を調査しました。
+
+結果
+治療の効果を解析しました。
+
+考察
+結果を検証し、影響を評価しました。
+
+参考文献
+10.1000/example"""
+    classifier = MedicalDocumentClassifier()
+
+    guideline = classifier.classify(
+        _parsed(text, title="診療ガイドライン 疾患治療")
+    )
+    evaluation = classifier.classify(
+        _parsed(text, title="診療ガイドライン遵守率の評価研究")
+    )
+
+    assert guideline.document_kind == "guideline"
+    assert evaluation.document_kind == "research_paper"
 
 
 def test_empty_pdf_is_marked_for_ocr_instead_of_being_guessed():
