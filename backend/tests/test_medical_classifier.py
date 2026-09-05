@@ -165,11 +165,27 @@ def test_common_words_need_medical_context_before_becoming_category_signals():
         "The specimen is an example of this design pattern.",
         "My impression of the movie was positive.",
         "The CPU frequency is 3.5 GHz.",
+        "The specimen is an example of this design pattern. Each unit has tests.",
+        "The CPU frequency is configurable.\nThe software stores drug research papers.",
     )
 
     for text in examples:
         result = classifier.classify(_parsed(text, fmt="txt"))
         assert result.document_kind == "unknown", (text, result.to_dict())
+
+
+def test_local_medical_context_still_supports_lab_and_prescription_documents():
+    classifier = MedicalDocumentClassifier()
+
+    lab = classifier.classify(
+        _parsed("The specimen blood test result was 4 units within the reference range.", fmt="txt")
+    )
+    prescription = classifier.classify(
+        _parsed("The medication frequency is twice daily at a dose of 500 mg.", fmt="txt")
+    )
+
+    assert lab.document_kind == "lab_report"
+    assert prescription.document_kind == "prescription"
 
 
 def test_published_guideline_title_wins_over_journal_paper_structure():
@@ -193,6 +209,34 @@ References
             text,
             title="Clinical Practice Guideline for Disease Treatment",
         )
+    )
+
+    assert result.document_kind == "guideline"
+    assert "found_explicit_guideline_title" in result.signals
+
+
+def test_body_guideline_title_is_used_when_upload_title_is_a_storage_hash():
+    text = """Clinical Practice Guideline for Disease Treatment
+
+Abstract
+Patients with disease were considered in the recommendations.
+
+Methods
+The panel reviewed clinical evidence.
+
+Results
+The evidence supported the recommendations.
+
+Discussion
+The panel discussed the strength of the evidence.
+
+References
+10.1000/example"""
+
+    result = MedicalDocumentClassifier().classify(
+        _parsed(text, title="5911a89b06929ffe"),
+        filename="/uploads/5911a89b06929ffe.pdf",
+        original_filename="clinical-guideline.pdf",
     )
 
     assert result.document_kind == "guideline"

@@ -1337,6 +1337,24 @@ The classifier version is now `medical-rules-v2`. Tests cover the three ordinary
 English false positives, a journal-published guideline, and a guideline
 evaluation study.
 
+## 2026-09 — Use Real Titles and Local Classification Context
+
+The upload path can give the classifier a storage hash instead of the title a
+reader sees. A guideline with a strong paper-like structure was therefore
+sometimes treated as a research paper.
+
+Classification now checks the PDF metadata title, parser title, original
+filename, and the first three non-empty body lines. Hash and UUID storage names
+are ignored when deciding whether a title is an explicit guideline title. PDF
+metadata titles are also passed through by both supported PDF parsers.
+
+The classifier version is now `medical-rules-v3`. It no longer treats a lab or
+prescription word as supported just because matching context appears somewhere
+else in the document. `specimen` and `frequency` must share a sentence or a
+short unbroken text block with the relevant medical wording. Imaging
+`impression` keeps the report-style paragraph check. Tests cover the real
+upload shape, cross-sentence false positives, and valid local context.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:
