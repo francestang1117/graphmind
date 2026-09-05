@@ -1357,6 +1357,21 @@ short text segment. Single line breaks now end that segment. Japanese guideline
 evaluation terms are handled separately from guideline titles. Tests cover the
 real upload shape, cross-sentence false positives, and valid local context.
 
+## 2026-09 — Keep Structured Medical Forms Together
+
+The local context rule now keeps a short run of labeled fields together. This
+covers common layouts such as `Specimen`, `Test`, `Result`, and `Reference
+range`, as well as `Medication`, `Dose`, `Route`, and `Frequency`. The block is
+limited to six lines and 300 characters, so an entire document is not treated
+as one context window.
+
+The classifier version is now `medical-rules-v5`. A lab result needs a measured
+value or an explicit qualitative result, and a frequency signal needs a dose
+or route value. A clear `Laboratory Report` or `Prescription` heading remains
+enough to identify the document type. Body title fallback skips publication
+metadata before `Abstract`, and Japanese guideline evaluation matching uses
+specific evaluation phrases instead of bare `研究`.
+
 ## Current State
 
 As of September 2026, GraphMind has a working foundation:

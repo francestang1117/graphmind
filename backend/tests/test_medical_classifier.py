@@ -191,6 +191,34 @@ def test_local_medical_context_still_supports_lab_and_prescription_documents():
     assert prescription.document_kind == "prescription"
 
 
+def test_multiline_lab_and_prescription_fields_are_kept_as_structured_blocks():
+    classifier = MedicalDocumentClassifier()
+
+    lab = classifier.classify(
+        _parsed(
+            """Laboratory Report
+Specimen: Blood
+Test: Hemoglobin
+Result: 13.5 g/dL
+Reference range: 12-16 g/dL""",
+            fmt="txt",
+        )
+    )
+    prescription = classifier.classify(
+        _parsed(
+            """Prescription
+Medication: Amoxicillin
+Dose: 500 mg
+Route: Oral
+Frequency: twice daily""",
+            fmt="txt",
+        )
+    )
+
+    assert lab.document_kind == "lab_report"
+    assert prescription.document_kind == "prescription"
+
+
 def test_published_guideline_title_wins_over_journal_paper_structure():
     text = """Abstract
 Patients with disease were considered in the recommendations.
@@ -334,6 +362,74 @@ def test_japanese_guideline_and_guideline_evaluation_paper_are_distinguished():
 
     assert guideline.document_kind == "guideline"
     assert evaluation.document_kind == "research_paper"
+
+
+def test_japanese_research_group_in_a_guideline_title_is_not_evaluation():
+    text = """要旨
+患者の診療方針を示します。
+
+方法
+医学的根拠を整理しました。
+
+結果
+推奨内容をまとめました。
+
+考察
+診療での使用方法を説明します。
+
+参考文献
+10.1000/example"""
+
+    result = MedicalDocumentClassifier().classify(
+        _parsed(text, title="厚生労働省研究班 診療ガイドライン")
+    )
+
+    assert result.document_kind == "guideline"
+
+
+def test_journal_name_before_body_guideline_title_is_skipped():
+    text = """Journal of Rare Diseases
+Jane Doe, John Smith
+Clinical Practice Guideline for Disease Treatment
+Abstract
+Patients with disease were considered in the recommendations.
+
+Methods
+The panel reviewed clinical evidence.
+
+Results
+The evidence supported the recommendations.
+
+Discussion
+The panel discussed the strength of the evidence.
+
+References
+10.1000/example"""
+
+    result = MedicalDocumentClassifier().classify(
+        _parsed(text, title="25130c2a7c0e9b4d"),
+        filename="/uploads/25130c2a7c0e9b4d.pdf",
+        original_filename="clinical-guideline.pdf",
+    )
+
+    assert result.document_kind == "guideline"
+
+
+def test_keyword_pairs_without_report_structure_stay_unknown():
+    classifier = MedicalDocumentClassifier()
+
+    lab = classifier.classify(
+        _parsed("This specimen module has a unit test", fmt="txt")
+    )
+    prescription = classifier.classify(
+        _parsed(
+            "The CPU frequency and medication dose are stored in the same table.",
+            fmt="txt",
+        )
+    )
+
+    assert lab.document_kind == "unknown"
+    assert prescription.document_kind == "unknown"
 
 
 def test_empty_pdf_is_marked_for_ocr_instead_of_being_guessed():
