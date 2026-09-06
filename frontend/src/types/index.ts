@@ -7,6 +7,9 @@ export interface UploadResponse {
   file_hash: string;
   status: string;
   job_id?: string | null;
+  document_id?: string | null;
+  workspace_id?: string | null;
+  document_kind?: string | null;
 }
 
 export interface GraphNode {

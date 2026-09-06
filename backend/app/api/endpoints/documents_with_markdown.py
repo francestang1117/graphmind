@@ -11,6 +11,7 @@ from app.services.entity_extractor import entity_extractor
 from app.services.markdown_parser import MarkdownParser
 from app.services.medical.analyzer import analyze_document
 from app.services.medical.repository import medical_repository
+from app.services.medical.ai.analysis_repository import medical_analysis_repository
 from app.services.parsed_artifact_repository import parsed_artifact_repository
 
 
@@ -110,6 +111,7 @@ def clear_cached_parse(
         arguments["workspace_id"] = workspace_id
     parsed_artifact_repository.delete_for_document(document_id or filename, **arguments)
     medical_repository.delete_for_document(document_id or filename, **arguments)
+    medical_analysis_repository.delete_for_document(document_id or filename, **arguments)
 
 
 def markdown_summary(filename: str, parsed: dict[str, Any]) -> dict[str, Any]:

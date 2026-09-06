@@ -550,7 +550,8 @@ button {
 .documents-panel > .dropzone,
 .documents-panel > .document-overview,
 .documents-panel > .job-history,
-.documents-panel > .parsed-viewer {
+.documents-panel > .parsed-viewer,
+.documents-panel > .medical-insight-panel {
   flex: 0 0 auto;
 }
 
@@ -1372,6 +1373,11 @@ button {
     rgba(255, 255, 255, 0.055);
 }
 
+.insight-action:hover {
+  color: #67e8f9;
+  background: rgba(34, 211, 238, 0.1);
+}
+
 .parsed-viewer {
   margin-top: 14px;
   padding: 12px;
@@ -1380,6 +1386,328 @@ button {
   background:
     linear-gradient(135deg, rgba(139, 92, 246, 0.045), transparent 32%),
     rgba(18, 19, 17, 0.26);
+}
+
+.medical-insight-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid rgba(139, 92, 246, 0.32);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(139, 92, 246, 0.08), transparent 34%),
+    rgba(18, 19, 17, 0.32);
+}
+
+.medical-insight-header,
+.insight-header-actions,
+.insight-meta,
+.insight-finding-heading,
+.insight-section-heading,
+.insight-status,
+.insight-warning,
+.insight-evidence-detail > div:first-child {
+  display: flex;
+  align-items: center;
+}
+
+.medical-insight-header {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.medical-insight-header > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.medical-insight-header .section-heading {
+  margin: 0;
+  font-size: 9px;
+}
+
+.medical-insight-header strong {
+  color: var(--text);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.insight-header-actions {
+  flex: 0 0 auto;
+  gap: 4px;
+}
+
+.insight-meta {
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.insight-meta span,
+.insight-type,
+.insight-evidence-button,
+.insight-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 720;
+}
+
+.insight-meta span {
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.insight-meta svg {
+  color: #34d399;
+}
+
+.insight-report {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.insight-report-section {
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.insight-report-section h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.insight-report-section p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.insight-section-heading {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.insight-type {
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  color: var(--violet-2);
+  border-color: rgba(167, 139, 250, 0.25);
+  background: rgba(139, 92, 246, 0.08);
+  text-transform: capitalize;
+}
+
+.insight-finding-list,
+.insight-term-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.insight-finding,
+.insight-term {
+  padding: 9px 10px;
+  border-left: 2px solid rgba(139, 92, 246, 0.6);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.insight-finding-heading {
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.insight-finding-heading strong,
+.insight-term strong {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.insight-finding p,
+.insight-term p {
+  margin-top: 5px;
+}
+
+.insight-evidence-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.insight-evidence-button {
+  padding: 4px 7px;
+  color: #c4b5fd;
+  border-color: rgba(167, 139, 250, 0.25);
+  background: rgba(139, 92, 246, 0.08);
+  cursor: pointer;
+}
+
+.insight-evidence-button:hover {
+  color: var(--text);
+  border-color: rgba(167, 139, 250, 0.5);
+  background: rgba(139, 92, 246, 0.16);
+}
+
+.insight-no-evidence {
+  margin-top: 8px;
+  color: #fbbf24;
+  font-size: 10px;
+}
+
+.insight-questions ul {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.insight-status,
+.insight-empty,
+.insight-warning,
+.insight-evidence-detail {
+  gap: 9px;
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.insight-status > div,
+.insight-empty,
+.insight-warning > div {
+  min-width: 0;
+}
+
+.insight-status strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.insight-status p,
+.insight-empty p,
+.insight-warning p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.insight-status.error,
+.insight-warning {
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.22);
+  background: rgba(248, 113, 113, 0.07);
+}
+
+.insight-status.error strong,
+.insight-status.error p {
+  color: #fca5a5;
+}
+
+.insight-empty {
+  display: grid;
+  justify-items: start;
+  color: var(--muted);
+}
+
+.insight-primary-action,
+.insight-retry {
+  cursor: pointer;
+}
+
+.insight-primary-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  margin-top: 5px;
+  padding: 0 10px;
+  border: 1px solid rgba(167, 139, 250, 0.35);
+  border-radius: 8px;
+  background: rgba(139, 92, 246, 0.16);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.insight-primary-action:hover {
+  background: rgba(139, 92, 246, 0.28);
+}
+
+.insight-retry {
+  margin-top: 8px;
+  padding: 5px 8px;
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.3);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.insight-warning {
+  align-items: flex-start;
+}
+
+.insight-warning > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.insight-evidence-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  border-color: rgba(96, 165, 250, 0.28);
+  background: rgba(96, 165, 250, 0.06);
+}
+
+.insight-evidence-detail > div:first-child {
+  min-width: 0;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.insight-evidence-detail .section-heading {
+  margin: 0;
+  font-size: 9px;
+}
+
+.insight-evidence-detail strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.insight-evidence-detail blockquote {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  padding: 9px 10px;
+  border-left: 2px solid rgba(96, 165, 250, 0.5);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.insight-disclaimer {
+  margin: 10px 2px 0;
+  color: var(--soft);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .parsed-viewer header,

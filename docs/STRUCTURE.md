@@ -35,6 +35,7 @@ GraphMind/
 │   │   │       ├── scraper.py
 │   │   │       ├── search.py
 │   │   │       ├── websocket.py
+│   │   │       ├── medical_insights.py
 │   │   │       └── workspaces.py
 │   │   ├── core/
 │   │   │   ├── celery_app.py
@@ -64,7 +65,18 @@ GraphMind/
 │   │   │   │   ├── models.py
 │   │   │   │   ├── paper_structure_parser.py
 │   │   │   │   ├── repository.py
-│   │   │   │   └── section_normalizer.py
+│   │   │   │   ├── section_normalizer.py
+│   │   │   │   └── ai/
+│   │   │   │       ├── __init__.py
+│   │   │   │       ├── analyzer.py
+│   │   │   │       ├── analysis_repository.py
+│   │   │   │       ├── citation_validator.py
+│   │   │   │       ├── context_builder.py
+│   │   │   │       ├── exceptions.py
+│   │   │   │       ├── models.py
+│   │   │   │       ├── prompt_builder.py
+│   │   │   │       ├── provider.py
+│   │   │   │       └── safety_validator.py
 │   │   │   ├── parsed_artifact_repository.py
 │   │   │   ├── persistence_service.py
 │   │   │   ├── qa_engine.py
@@ -75,6 +87,7 @@ GraphMind/
 │   │   │   └── workspace_repository.py
 │   │   ├── tasks/
 │   │   │   ├── __init__.py
+│   │   │   ├── medical_analysis.py
 │   │   │   └── process_document.py
 │   │   └── utils/
 │   │       └── file_validator.py
@@ -96,6 +109,7 @@ GraphMind/
 │       ├── test_medical_api.py
 │       ├── test_medical_classifier.py
 │       ├── test_medical_repository.py
+│       ├── test_medical_ai_insights.py
 │       ├── test_parsed_artifact_repository.py
 │       ├── test_paper_structure_parser.py
 │       ├── test_persistence_service.py
@@ -126,7 +140,8 @@ GraphMind/
         │       ├── FileIcon.tsx
         │       ├── JobHistory.tsx
         │       ├── UploadDropzone.tsx
-        │       └── UploadRow.tsx
+        │       ├── UploadRow.tsx
+        │       └── MedicalInsightPanel.tsx
         ├── hooks/
         │   ├── useGraph.ts
         │   ├── useJobs.ts
@@ -151,7 +166,7 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `main.py` wires the FastAPI app, CORS, lifespan startup, rate limiting, API
   error handlers, `/api/v1/*` routes, and the WebSocket router.
 - `api/__init__.py` registers the active REST routers: auth, documents, graph,
-  search, chat, scraper, jobs, and workspaces.
+  search, chat, scraper, jobs, workspaces, and medical insights.
 - `documents.py` is the active upload/list/detail/delete/open-file API. It uses
   validation, optional virus scanning, content-hash deduplication, storage, parse
   caching, user scoping, and stable application error codes.
@@ -159,7 +174,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
   parsed-structure responses. It is used by document/search/graph/chat code, but
   it is not registered as its own router.
 - `services/medical/` classifies medical documents, normalizes paper headings,
-  builds page-aware sections and chunks, and stores the resulting analysis.
+  builds page-aware sections and chunks, stores the resulting analysis, and
+  provides the evidence-backed insight modules under `services/medical/ai/`.
 - `auth.py` handles email/password login, GitHub OAuth, JWT access tokens,
   HttpOnly refresh cookies, and the optional local-dev workspace.
 - `workspaces.py` creates and lists account-owned research projects. The
@@ -229,6 +245,10 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `vector_store.py` is the local vector-search MVP over parsed chunks.
 - `qa_engine.py` answers chat questions from search/graph context and has a
   visible local fallback while the GPT provider is not configured.
+- `medical/ai/` builds bounded source context, calls the configured provider,
+  validates citations and safety, and stores only successful versioned reports.
+- `tasks/medical_analysis.py` runs one scoped insight job through Celery or the
+  local background fallback. A failed insight does not fail the source document.
 - `web_scraper.py` fetches public web pages, strips noisy HTML, and stores the
   readable result as a normal Markdown document.
 - `virus_scanner.py` is the ClamAV integration wrapper. Scanning is optional and
@@ -251,6 +271,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `hooks/useJobs.ts` and `components/upload/JobHistory.tsx` show recent
   processing jobs in the Documents panel, including status, step, progress,
   errors, and cancel controls for active worker jobs.
+- `components/upload/MedicalInsightPanel.tsx` starts and polls a paper/guideline
+  insight run, then shows the report and its page/section/chunk evidence.
 
 ## Test Coverage
 
@@ -275,6 +297,8 @@ The backend currently has tests for:
 - workspace ownership, same-file multi-project support, and graph isolation
 - medical document classification, multilingual section parsing, paper analysis
   persistence, and the medical analysis API
+- bounded medical insight context, citation validation, safety checks, versioned
+  results, and stale-source handling
 
 Run the current backend suite with:
 
@@ -285,24 +309,30 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ## Current Scope
 
 Workspace-scoped persistence is ready for the first V2 research workflow. This
-branch adds the first medical analysis layer:
+branch adds the first medical research workflow layers:
 
 - explainable medical document classification with an `unknown` fallback
 - English, Chinese, and Japanese paper section normalization
 - page-aware paper sections and section-aware chunks with source ranges
-- study cards, sentence-level citations, and paper-focused chat are still next
-- the frontend workspace picker and research-card pages
+- evidence-backed single-document insight runs with page/chunk citations
+- deterministic local provider, PII redaction, and medical-safety warnings
+- the frontend document-level insight panel with source evidence details
+- study cards, GPT-backed analysis, and paper-focused chat are still next
+- the frontend workspace picker and dedicated research-card pages
 - staging OAuth and `AUTH_REQUIRED=true` checks behind HTTPS and secure cookies
 
 ## Still Early
 
 The project now has real modules for upload, parsing, entity extraction, graph,
 search, chat, auth, rate limiting, persistence, metrics, Celery workers,
-WebSocket progress, and the first medical analysis layer. The remaining gaps are:
+WebSocket progress, paper structure parsing, and evidence-backed medical
+insights. The remaining gaps are:
 
 - deeper graph persistence tooling beyond the current node/edge tables
-- study cards, sentence-level citations, and paper-focused chat
-- the frontend workspace picker and research-card pages
+- study cards and a dedicated research-card page
+- GPT-backed analysis and paper-focused chat
+- embedded PDF page navigation from an evidence citation
+- the frontend workspace picker and full paper workflow
 - staging OAuth and `AUTH_REQUIRED=true` checks behind HTTPS
 - GPT-backed answer generation
 - richer relation extraction and graph quality tuning

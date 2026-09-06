@@ -1468,3 +1468,63 @@ The next realistic steps are:
 3. Add multi-paper comparison only after single-paper evidence is traceable.
 4. Improve graph quality with better relation extraction and edge weighting.
 5. Test the account flow with `AUTH_REQUIRED=true` behind HTTPS and secure cookies.
+
+## 2026-09 — V2 PR4: Evidence-Backed Medical Insights
+
+The next step after classification and paper section parsing was a bounded
+single-document explanation. The first version should make its sources clear
+before it tries to behave like a general medical chatbot.
+
+I added a versioned medical insight run with three persistence tables: the run
+status, the validated report, and the source evidence rows. A run is scoped to
+the user, workspace, document, and current file hash. Starting the same version
+again reuses the existing queued, running, or successful run. A changed source
+hash leaves the old report available as outdated until a new run succeeds.
+
+The analysis path now selects page-aware chunks from the medical sections. Each
+selected chunk receives an `EVIDENCE_###` ID before it is sent to the provider.
+The report schema requires those IDs on the overview, findings, limitations,
+plain-language interpretation, and boundary statements. The citation validator
+rejects unknown IDs and references-only citations. It also checks that the
+saved evidence belongs to the same document version.
+
+The default provider is a deterministic local extractive provider. It gives the
+feature a working path without requiring a GPT key or sending medical text over
+the network. The provider interface and repair prompt leave room for a future
+GPT/OpenAI adapter, but that adapter is not claimed as part of this change.
+
+Before analysis, the context builder applies a token limit and basic PII
+redaction for values such as email addresses, phone numbers, patient IDs, and
+addresses. If the context is shortened, the run keeps a `context_truncated`
+warning. Provider output is parsed with strict Pydantic models, gets one repair
+attempt when its JSON or citations are invalid, and is discarded if validation
+still fails. Logs keep error codes and field paths, not prompts, source text, or
+raw provider output. A safety check adds the medical disclaimer and rejects
+personal diagnosis or direct medication instructions.
+
+The API is available under the existing `/api/v1` prefix. It supports starting,
+polling, retrieving the latest successful run, and explicitly reanalyzing a
+paper or guideline. The document list now exposes the medical kind so the UI
+does not offer this action for an unknown or ordinary PDF. The document panel
+shows the report and lets the user open each citation's page, section, chunk,
+character range, and quote. It does not yet embed a PDF viewer or jump the
+browser to a page.
+
+The original upload and parsing records are unchanged when an insight fails.
+Document deletion also removes the related insight rows. The backend suite is
+now `266 passed, 1 skipped`; the remaining skip is the PostgreSQL migration
+test when no test database URL is configured.
+
+## Current V2 State
+
+The V2 path now covers workspace-scoped document classification, multilingual
+paper structure, and a traceable single-document insight report. Study cards,
+an external GPT provider, multi-paper comparison, OCR, and medical advice remain
+outside this phase.
+
+## Next Steps
+
+1. Add study cards with explicit `not_found` states and citations.
+2. Add a separately configured GPT/OpenAI provider with a clear external-data setting.
+3. Add workspace and paper-detail navigation to the frontend.
+4. Add multi-paper evidence comparison only after single-paper citations remain stable.

@@ -486,6 +486,7 @@ def _dedupe_entities(entities: list[Any]) -> list[Any]:
 
 def _chunk_to_dict(row: "ParsedChunkRecord") -> dict[str, Any]:
     return {
+        "id": row.id,
         "document_id": row.document_id,
         "user_id": row.user_id,
         "workspace_id": row.workspace_id,

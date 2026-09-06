@@ -78,6 +78,81 @@ export interface UploadResponse {
   file_hash: string;
   status: string;
   job_id?: string | null;
+  document_id?: string | null;
+  workspace_id?: string | null;
+  document_kind?: string | null;
+}
+
+export interface MedicalInsightEvidence {
+  id: string;
+  evidence_id: string;
+  finding_id: string;
+  chunk_id: string;
+  section_id?: string | null;
+  section_type?: string | null;
+  section_title?: string | null;
+  page_start?: number | null;
+  page_end?: number | null;
+  quote: string;
+  character_start?: number | null;
+  character_end?: number | null;
+}
+
+export interface MedicalInsightFinding {
+  id: string;
+  statement: string;
+  plain_explanation: string;
+  evidence_ids: string[];
+  evidence_level: string;
+  interpretation_type: "direct_statement" | "summary" | "inference" | "uncertain" | string;
+}
+
+export interface MedicalInsightReport {
+  schema_version: string;
+  document_kind: string;
+  language: string;
+  overview: {
+    title: string;
+    summary: string;
+    study_type: string;
+    evidence_ids: string[];
+  };
+  key_findings: MedicalInsightFinding[];
+  limitations: MedicalInsightFinding[];
+  medical_terms: Array<{
+    term: string;
+    explanation: string;
+    evidence_ids: string[];
+  }>;
+  what_it_means: MedicalInsightFinding[];
+  what_it_does_not_mean: MedicalInsightFinding[];
+  questions_for_professional: string[];
+  warnings: string[];
+}
+
+export interface MedicalInsightRun {
+  run_id: string;
+  document_id: string;
+  workspace_id: string;
+  status: "queued" | "running" | "succeeded" | "failed" | string;
+  source_hash: string;
+  provider: string;
+  model_name: string;
+  prompt_version: string;
+  schema_version: string;
+  error_code?: string;
+  error_message?: string;
+  is_current?: boolean;
+  outdated?: boolean;
+  created_at?: string;
+  started_at?: string;
+  completed_at?: string;
+  updated_at?: string;
+  report?: MedicalInsightReport;
+  citation_coverage?: number;
+  validation_status?: string;
+  warnings?: string[];
+  evidence?: MedicalInsightEvidence[];
 }
 
 export interface JobProgress {
@@ -268,17 +343,70 @@ export const cancelJob = (jobId: string): Promise<JobProgress> =>
 export const listJobs = (limit = 50): Promise<JobHistoryItem[]> =>
   http.get("/jobs/", { params: { limit } }).then((r) => r.data.jobs ?? []);
 
-export const listDocuments = (): Promise<FileInfo[]> =>
-  http.get("/documents/").then((r) => r.data.files ?? []);
+export const listDocuments = (workspaceId?: string | null): Promise<FileInfo[]> =>
+  http.get("/documents/", workspaceParams(workspaceId)).then((r) => r.data.files ?? []);
 
-export const deleteDocument = (filename: string) =>
-  http.delete(`/documents/${encodeURIComponent(filename)}`);
+export const deleteDocument = (filename: string, workspaceId?: string | null) =>
+  http.delete(`/documents/${encodeURIComponent(filename)}`, workspaceParams(workspaceId));
 
-export const getParsedDocument = (filename: string): Promise<ParsedDocumentSummary> =>
-  http.get(`/documents/${encodeURIComponent(filename)}/parsed`).then((r) => r.data);
+export const getParsedDocument = (
+  filename: string,
+  workspaceId?: string | null,
+): Promise<ParsedDocumentSummary> =>
+  http
+    .get(`/documents/${encodeURIComponent(filename)}/parsed`, workspaceParams(workspaceId))
+    .then((r) => r.data);
 
-export const getDocumentOpenUrl = (filename: string) =>
-  `${API_BASE}/api/v1/documents/${encodeURIComponent(filename)}/open`;
+export const getDocumentOpenUrl = (filename: string, workspaceId?: string | null) => {
+  const query = workspaceId ? `?workspace_id=${encodeURIComponent(workspaceId)}` : "";
+  return `${API_BASE}/api/v1/documents/${encodeURIComponent(filename)}/open${query}`;
+};
+
+export const startMedicalInsights = (
+  documentId: string,
+  workspaceId?: string | null,
+): Promise<MedicalInsightRun> =>
+  http
+    .post<MedicalInsightRun>(
+      `/documents/${encodeURIComponent(documentId)}/medical-insights`,
+      {},
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const reanalyzeMedicalInsights = (
+  documentId: string,
+  workspaceId?: string | null,
+): Promise<MedicalInsightRun> =>
+  http
+    .post<MedicalInsightRun>(
+      `/documents/${encodeURIComponent(documentId)}/medical-insights/reanalyze`,
+      {},
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const getMedicalInsightRun = (
+  runId: string,
+  workspaceId?: string | null,
+): Promise<MedicalInsightRun> =>
+  http
+    .get<MedicalInsightRun>(
+      `/medical-analysis-runs/${encodeURIComponent(runId)}`,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const getLatestMedicalInsights = (
+  documentId: string,
+  workspaceId?: string | null,
+): Promise<MedicalInsightRun> =>
+  http
+    .get<MedicalInsightRun>(
+      `/documents/${encodeURIComponent(documentId)}/medical-insights/latest`,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
 
 export const fetchGraph = (): Promise<GraphData> =>
   http.get("/graph").then((r) => normalizeGraph(r.data));
@@ -326,6 +454,10 @@ function normalizeGraph(data: unknown): GraphData {
 }
 
 export default http;
+
+function workspaceParams(workspaceId?: string | null) {
+  return workspaceId ? { params: { workspace_id: workspaceId } } : undefined;
+}
 
 function toWsBase(baseUrl: string) {
   const url = new URL(baseUrl);
