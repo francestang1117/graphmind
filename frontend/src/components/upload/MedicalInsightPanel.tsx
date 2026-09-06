@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { AlertCircle, CheckCircle2, FileSearch, Loader2, RefreshCw, X } from "lucide-react";
 import {
-  getLatestMedicalInsights,
+  getCurrentMedicalInsights,
   getMedicalInsightRun,
   reanalyzeMedicalInsights,
   startMedicalInsights,
@@ -214,14 +214,14 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
   useEffect(() => {
     let active = true;
 
-    getLatestMedicalInsights(documentId, workspaceId)
+    getCurrentMedicalInsights(documentId, workspaceId)
       .then((result) => {
         if (active) setRun(result);
       })
       .catch((requestError: unknown) => {
         if (!active) return;
         if (!axios.isAxiosError(requestError) || requestError.response?.status !== 404) {
-          setError("Could not load the latest medical insight.");
+          setError("Could not load the current medical insight.");
         }
       })
       .finally(() => {
@@ -360,7 +360,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
       {run?.status === "succeeded" && report && (
         <>
           <div className="insight-meta">
-            <span><CheckCircle2 size={13} /> Validated citations</span>
+            <span><CheckCircle2 size={13} /> Source citations checked</span>
             <span>{readable(report.document_kind)}</span>
             <span>{report.language}</span>
             {typeof run.citation_coverage === "number" && (

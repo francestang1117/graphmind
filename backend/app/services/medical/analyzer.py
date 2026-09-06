@@ -30,7 +30,9 @@ def analyze_document(
     """Add medical metadata to a generic parser result.
 
     The generic parser remains the source of truth for ordinary files. Medical
-    parsing only replaces chunks when the document looks like a paper.
+    parsing only replaces chunks when the document has a supported structured
+    medical format. Other medical and ordinary documents keep their generic
+    parser output.
     """
     metadata = parsed.setdefault("metadata", {})
     parser_version = str(
@@ -58,7 +60,10 @@ def analyze_document(
     analysis_dict = analysis.to_dict()
     structured_sections: list[dict[str, Any]] = []
 
-    if analysis.document_kind == MedicalDocumentKind.RESEARCH_PAPER.value:
+    if analysis.document_kind in {
+        MedicalDocumentKind.RESEARCH_PAPER.value,
+        MedicalDocumentKind.GUIDELINE.value,
+    }:
         try:
             structure = _paper_parser.parse(parsed, analysis)
             structured_sections = [section.to_dict() for section in structure.sections]

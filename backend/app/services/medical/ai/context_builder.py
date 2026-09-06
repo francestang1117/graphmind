@@ -61,16 +61,21 @@ class ContextBuilder:
     PRIORITY = {
         "results": 0,
         "recommendations": 0,
+        "evidence": 0,
+        "contraindications": 0,
         "limitations": 1,
         "adverse_events": 1,
+        "monitoring": 1,
         "conclusion": 2,
         "abstract": 3,
+        "scope": 3,
         "population": 4,
         "intervention": 4,
         "comparator": 4,
         "outcomes": 4,
         "methods": 5,
         "discussion": 6,
+        "implementation": 5,
         "introduction": 7,
         "title": 8,
         "unknown": 9,
@@ -98,6 +103,11 @@ class ContextBuilder:
         candidates: list[tuple[int, int, dict[str, Any]]] = []
         seen: set[tuple[str, str]] = set()
 
+        safe_title = title or "Untitled medical document"
+        title_redacted = False
+        if redact_pii:
+            safe_title, title_redacted = redact_sensitive_fields(safe_title)
+
         for index, raw_chunk in enumerate(chunks):
             if not isinstance(raw_chunk, dict):
                 continue
@@ -107,6 +117,14 @@ class ContextBuilder:
             metadata = raw_chunk.get("metadata")
             metadata = metadata if isinstance(metadata, dict) else {}
             section_type = self._section_type(raw_chunk, metadata)
+            section = self._section_for(raw_chunk, metadata, section_type, section_map)
+            if section_type == "unknown":
+                # Some older rows only keep the section id. The section row
+                # still has enough information to restore its label here.
+                section_type = self._section_type(
+                    section,
+                    section.get("metadata") if isinstance(section.get("metadata"), dict) else {},
+                )
             chunk_id = str(raw_chunk.get("id") or f"chunk:{index}")
             dedupe_key = (chunk_id, text)
             if dedupe_key in seen:
@@ -117,7 +135,7 @@ class ContextBuilder:
                 "metadata": metadata,
                 "text": text,
                 "section_type": section_type,
-                "section": self._section_for(raw_chunk, metadata, section_type, section_map),
+                "section": section,
                 "index": index,
             }
             candidates.append((self.PRIORITY.get(section_type, 10), index, normalized))
@@ -126,7 +144,7 @@ class ContextBuilder:
         budget = max(1, int(max_input_tokens or 1))
         selected: list[EvidenceItem] = []
         warnings: list[str] = []
-        redacted = False
+        redacted = title_redacted
         truncated = False
         skipped = False
         remaining = budget
@@ -155,6 +173,16 @@ class ContextBuilder:
             raw = candidate["raw"]
             metadata = candidate["metadata"]
             section = candidate["section"]
+            section_title = str(
+                raw.get("section_title")
+                or metadata.get("section_title")
+                or metadata.get("section")
+                or section.get("original_title")
+                or ""
+            )
+            if redact_pii:
+                section_title, changed = redact_sensitive_fields(section_title)
+                redacted = redacted or changed
             selected.append(
                 EvidenceItem(
                     evidence_id=f"EVIDENCE_{len(selected) + 1:03d}",
@@ -163,36 +191,40 @@ class ContextBuilder:
                         raw.get("section_id") or metadata.get("section_id") or section.get("id")
                     ),
                     section_type=candidate["section_type"],
-                    section_title=str(
-                        raw.get("section_title")
-                        or metadata.get("section_title")
-                        or metadata.get("section")
-                        or section.get("original_title")
-                        or ""
-                    ),
+                    section_title=section_title,
                     page_start=_as_int(
-                        raw.get("page_start")
-                        if raw.get("page_start") is not None
-                        else metadata.get("page_start")
-                        if metadata.get("page_start") is not None
-                        else section.get("page_start")
+                        _first_present(
+                            raw.get("page_start"),
+                            metadata.get("page_start"),
+                            raw.get("page"),
+                            metadata.get("page"),
+                            section.get("page_start"),
+                        )
                     ),
                     page_end=_as_int(
-                        raw.get("page_end")
-                        if raw.get("page_end") is not None
-                        else metadata.get("page_end")
-                        if metadata.get("page_end") is not None
-                        else section.get("page_end")
+                        _first_present(
+                            raw.get("page_end"),
+                            metadata.get("page_end"),
+                            raw.get("page"),
+                            metadata.get("page"),
+                            section.get("page_end"),
+                        )
                     ),
                     character_start=_as_int(
-                        raw.get("char_start")
-                        if raw.get("char_start") is not None
-                        else metadata.get("char_start")
+                        _first_present(
+                            raw.get("char_start"),
+                            metadata.get("char_start"),
+                            raw.get("start"),
+                            metadata.get("start"),
+                        )
                     ),
                     character_end=_as_int(
-                        raw.get("char_end")
-                        if raw.get("char_end") is not None
-                        else metadata.get("char_end")
+                        _first_present(
+                            raw.get("char_end"),
+                            metadata.get("char_end"),
+                            raw.get("end"),
+                            metadata.get("end"),
+                        )
                     ),
                     text=text,
                     token_count=token_count,
@@ -229,7 +261,7 @@ class ContextBuilder:
         if truncated or skipped or len(selected) < len(candidates):
             warnings.append("context_truncated")
         return AnalysisContext(
-            title=title or "Untitled medical document",
+            title=safe_title,
             document_kind=document_kind or "unknown",
             language=language or "unknown",
             evidence=selected,
@@ -261,22 +293,42 @@ class ContextBuilder:
         return section_map.get(str(key), {"section_type": section_type})
 
     def _section_type(self, chunk: dict[str, Any], metadata: dict[str, Any]) -> str:
-        value = (
-            chunk.get("section_type")
-            or metadata.get("section_type")
-            or metadata.get("section")
-            or chunk.get("section")
-            or "unknown"
+        # Older parsers stored generic values such as `page` in `type` or
+        # `chunk_type`. Keep looking until a real medical section is found.
+        values = (
+            chunk.get("section_type"),
+            metadata.get("section_type"),
+            metadata.get("type"),
+            metadata.get("section"),
+            chunk.get("section"),
+            chunk.get("chunk_type"),
         )
-        value = str(value).strip().lower()
-        if value.startswith("medicalsectiontype."):
-            value = value.split(".", 1)[1]
-        value = value.replace(" ", "_").replace("-", "_")
-        if "recommend" in value:
-            return "recommendations"
-        if value in {"figure", "figurecaption", "figure_caption"}:
-            return "figure_caption"
-        return value or "unknown"
+        generic = {
+            "",
+            "page",
+            "paragraph",
+            "text",
+            "sample",
+            "section",
+            "medical_section",
+            "json",
+            "csv",
+        }
+        for candidate in values:
+            value = str(candidate or "").strip().lower()
+            if value.startswith("medicalsectiontype."):
+                value = value.split(".", 1)[1]
+            value = value.replace(" ", "_").replace("-", "_")
+            if value in generic:
+                continue
+            if "recommend" in value or value in {"recommendation", "推荐", "建议"}:
+                return "recommendations"
+            if "contraindicat" in value or value in {"禁忌", "禁忌证"}:
+                return "contraindications"
+            if value in {"figure", "figurecaption", "figure_caption"}:
+                return "figure_caption"
+            return value
+        return "unknown"
 
 
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
@@ -286,7 +338,8 @@ _IDENTIFIER = re.compile(
     r"\s*[:#：]?\s*[A-Z0-9][A-Z0-9-]{2,}\b"
 )
 _NAMED_FIELD = re.compile(
-    r"(?im)^\s*(?:patient\s+name|name|患者姓名|姓名|address|地址)\s*[:：].*$"
+    r"(?im)^(?P<prefix>\s*(?:patient\s+name|name|患者姓名|姓名|address|地址)\s*[:：])"
+    r"\s*(?P<value>.+?)\s*$"
 )
 
 
@@ -295,7 +348,10 @@ def redact_sensitive_fields(text: str) -> tuple[str, bool]:
     changed_text = _EMAIL.sub("[REDACTED_EMAIL]", text)
     changed_text = _PHONE.sub("[REDACTED_PHONE]", changed_text)
     changed_text = _IDENTIFIER.sub("[REDACTED_IDENTIFIER]", changed_text)
-    changed_text = _NAMED_FIELD.sub(lambda match: match.group(0).split(":", 1)[0] + ": [REDACTED]", changed_text)
+    changed_text = _NAMED_FIELD.sub(
+        lambda match: f"{match.group('prefix')} [REDACTED]",
+        changed_text,
+    )
     return changed_text, changed_text != text
 
 
@@ -339,3 +395,10 @@ def _as_optional_str(value: Any) -> str | None:
     if value in (None, ""):
         return None
     return str(value)
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None

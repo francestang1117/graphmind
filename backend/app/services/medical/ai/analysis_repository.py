@@ -6,10 +6,11 @@ import hashlib
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
 from app.core.database import SessionLocal, db_enabled
+from app.core.config import settings
 from app.core.workspace import default_workspace_id
 from app.services.medical.ai.citation_validator import evidence_rows
 from app.services.medical.ai.exceptions import MedicalInsightError
@@ -72,6 +73,9 @@ class AnalysisRepository:
             and MedicalAnalysisRunRecord
             and MedicalAnalysisResultRecord
             and MedicalAnalysisEvidenceRecord
+            and MedicalDocumentProfileRecord
+            and DocumentSectionRecord
+            and ParsedChunkRecord
         )
 
     def create_or_reuse(
@@ -86,19 +90,19 @@ class AnalysisRepository:
         model_name: str,
         prompt_version: str,
         schema_version: str,
+        parsed_source_hash: str | None = None,
+        redact_pii: bool = True,
+        max_input_tokens: int = 12000,
         force: bool = False,
     ) -> tuple[dict[str, Any], bool]:
-        """Create one queued run, or return the active/successful same version."""
+        """Create one run for the current parsed source, or reuse it.
+
+        The file hash alone is not enough here. A parser or classifier change
+        can produce different sections from the same bytes, so the key also
+        includes a snapshot of the persisted analysis input.
+        """
         self._require_available()
-        key = _analysis_key(
-            document_id,
-            source_hash,
-            provider,
-            model_name,
-            prompt_version,
-            schema_version,
-            force=force,
-        )
+        key = ""
         now = _utc_now()
 
         try:
@@ -109,6 +113,29 @@ class AnalysisRepository:
                         "Medical document was not found.",
                         code="document_not_found",
                     )
+
+                profile, sections, chunks = self._source_records(
+                    db, document, user_id, workspace_id
+                )
+                current_snapshot = _source_snapshot_hash(
+                    document, profile, sections, chunks
+                )
+                # Recompute from the database when possible. The optional
+                # argument keeps direct callers and older integrations working.
+                snapshot_hash = current_snapshot or parsed_source_hash or ""
+                effective_source_hash = str(document.file_hash or source_hash or "")
+                key = _analysis_key(
+                    document_id,
+                    effective_source_hash,
+                    snapshot_hash,
+                    provider,
+                    model_name,
+                    prompt_version,
+                    schema_version,
+                    redact_pii=redact_pii,
+                    max_input_tokens=max_input_tokens,
+                    force=force,
+                )
 
                 row = db.scalars(
                     select(MedicalAnalysisRunRecord)
@@ -121,19 +148,31 @@ class AnalysisRepository:
                     .with_for_update()
                 ).first()
                 if row:
-                    if row.status in {QUEUED, RUNNING, SUCCEEDED}:
+                    if row.status == SUCCEEDED:
                         return _run_dict(row), False
+                    if row.status in {QUEUED, RUNNING} and not _lease_expired(row, now):
+                        return _run_dict(row), False
+                    if row.status in {QUEUED, RUNNING}:
+                        log.info("Re-queueing stale medical insight run %s", row.id)
                     # A failed attempt can be retried without leaving a second
-                    # row for the same source and prompt version.
+                    # row for the same source and prompt version. A lease that
+                    # expired before this request is treated the same way.
                     _clear_run_payload(db, row.id)
                     row.status = QUEUED
                     row.requested_by = requested_by
                     row.error_code = ""
                     row.error_message = ""
                     row.is_current = False
+                    row.parsed_source_hash = snapshot_hash
+                    row.redact_pii = bool(redact_pii)
+                    row.max_input_tokens = max(1, int(max_input_tokens or 1))
                     row.created_at = now
                     row.started_at = None
                     row.completed_at = None
+                    row.last_heartbeat_at = None
+                    row.lease_expires_at = now + timedelta(
+                        seconds=_queue_lease_seconds()
+                    )
                     row.updated_at = now
                     db.commit()
                     return _run_dict(row), True
@@ -145,12 +184,18 @@ class AnalysisRepository:
                     document_id=document.id,
                     requested_by=requested_by,
                     status=QUEUED,
-                    source_hash=source_hash,
+                    source_hash=effective_source_hash,
+                    parsed_source_hash=snapshot_hash,
                     analysis_key=key,
                     provider=provider,
                     model_name=model_name,
                     prompt_version=prompt_version,
                     schema_version=schema_version,
+                    redact_pii=bool(redact_pii),
+                    max_input_tokens=max(1, int(max_input_tokens or 1)),
+                    attempt_count=0,
+                    last_heartbeat_at=None,
+                    lease_expires_at=now + timedelta(seconds=_queue_lease_seconds()),
                     error_code="",
                     error_message="",
                     is_current=False,
@@ -188,7 +233,7 @@ class AnalysisRepository:
             ) from exc
 
     def mark_running(self, run_id: str) -> dict[str, Any] | None:
-        """Claim a queued run so a duplicate delivery cannot run it twice."""
+        """Claim a queued run and give the worker a lease."""
         self._require_available()
         now = _utc_now()
         with self.session_factory() as db:
@@ -203,9 +248,32 @@ class AnalysisRepository:
                 return None
             row.status = RUNNING
             row.started_at = row.started_at or now
+            row.attempt_count = (row.attempt_count or 0) + 1
+            row.last_heartbeat_at = now
+            row.lease_expires_at = now + timedelta(seconds=_running_lease_seconds())
             row.updated_at = now
             db.commit()
             return _run_dict(row)
+
+    def heartbeat(self, run_id: str, *, attempt_count: int | None = None) -> bool:
+        """Extend a running lease; a missing run is no longer recoverable."""
+        self._require_available()
+        now = _utc_now()
+        with self.session_factory() as db:
+            row = db.scalars(
+                select(MedicalAnalysisRunRecord)
+                .where(MedicalAnalysisRunRecord.id == run_id)
+                .with_for_update()
+            ).first()
+            if not row or row.status != RUNNING:
+                return False
+            if attempt_count is not None and row.attempt_count != attempt_count:
+                return False
+            row.last_heartbeat_at = now
+            row.lease_expires_at = now + timedelta(seconds=_running_lease_seconds())
+            row.updated_at = now
+            db.commit()
+            return True
 
     def get_worker_run(self, run_id: str) -> dict[str, Any] | None:
         """Load the run metadata used by a worker; no user input reaches this path."""
@@ -216,7 +284,13 @@ class AnalysisRepository:
             ).first()
             return _run_dict(row) if row else None
 
-    def save_success(self, run_id: str, output: Any) -> dict[str, Any]:
+    def save_success(
+        self,
+        run_id: str,
+        output: Any,
+        *,
+        attempt_count: int | None = None,
+    ) -> dict[str, Any]:
         """Atomically save a validated report, citations, and current pointer."""
         self._require_available()
         if not output.citations.valid or not output.safety.valid:
@@ -248,7 +322,21 @@ class AnalysisRepository:
                         "Medical insight run is no longer active.",
                         code="analysis_not_active",
                     )
-                document = self._document(db, row.document_id, row.user_id, row.workspace_id)
+                if attempt_count is not None and row.attempt_count != attempt_count:
+                    raise MedicalInsightError(
+                        "This analysis attempt is no longer active.",
+                        code="analysis_stale",
+                    )
+                if _lease_expired(row, now):
+                    raise MedicalInsightError(
+                        "Medical insight analysis lease expired.",
+                        code="analysis_stalled",
+                    )
+                # Lock the document while moving the current pointer. Two
+                # successful reruns for one document then finish in order.
+                document = self._document(
+                    db, row.document_id, row.user_id, row.workspace_id, lock=True
+                )
                 if not document:
                     raise MedicalInsightError(
                         "The document was deleted before analysis finished.",
@@ -257,6 +345,17 @@ class AnalysisRepository:
                 if document.file_hash != row.source_hash:
                     raise MedicalInsightError(
                         "The document changed before analysis finished.",
+                        code="source_changed",
+                    )
+                profile, sections, chunks = self._source_records(
+                    db, document, row.user_id, row.workspace_id
+                )
+                current_snapshot = _source_snapshot_hash(
+                    document, profile, sections, chunks
+                )
+                if not row.parsed_source_hash or row.parsed_source_hash != current_snapshot:
+                    raise MedicalInsightError(
+                        "The parsed document changed before analysis finished.",
                         code="source_changed",
                     )
 
@@ -312,6 +411,8 @@ class AnalysisRepository:
                 row.error_code = ""
                 row.error_message = ""
                 row.completed_at = now
+                row.last_heartbeat_at = now
+                row.lease_expires_at = None
                 row.updated_at = now
                 db.commit()
                 return _run_payload(db, row)
@@ -324,7 +425,14 @@ class AnalysisRepository:
                 code="analysis_storage_failed",
             ) from exc
 
-    def save_failure(self, run_id: str, code: str, message: str) -> None:
+    def save_failure(
+        self,
+        run_id: str,
+        code: str,
+        message: str,
+        *,
+        attempt_count: int | None = None,
+    ) -> None:
         """Record an analysis failure without changing the source document."""
         if not self.available():
             return
@@ -338,10 +446,14 @@ class AnalysisRepository:
                 ).first()
                 if not row or row.status == SUCCEEDED:
                     return
+                if attempt_count is not None and row.attempt_count != attempt_count:
+                    return
                 row.status = FAILED
                 row.error_code = str(code or "analysis_failed")[:80]
                 row.error_message = str(message or "Medical insight analysis failed.")[:1000]
                 row.completed_at = now
+                row.last_heartbeat_at = now
+                row.lease_expires_at = None
                 row.updated_at = now
                 db.commit()
         except (SQLAlchemyError, OSError, RuntimeError):
@@ -360,11 +472,36 @@ class AnalysisRepository:
             ).first()
             if not row:
                 return None
+            # A soft-deleted document is outside the readable scope. Check it
+            # before returning a stale or failed run from the run table.
             document = self._document(db, row.document_id, user_id, workspace_id)
             if not document:
                 return None
+
+            now = _utc_now()
+            if row.status in {QUEUED, RUNNING} and _lease_expired(row, now):
+                _mark_stalled(row, now)
+                db.commit()
+                log.warning("Medical insight run %s exceeded its lease", row.id)
+                return _run_payload(db, row)
             payload = _run_payload(db, row)
-            if row.source_hash != document.file_hash:
+            profile, sections, chunks = self._source_records(
+                db, document, user_id, workspace_id
+            )
+            current_snapshot = _source_snapshot_hash(
+                document, profile, sections, chunks
+            )
+            if (
+                row.source_hash != document.file_hash
+                or not row.parsed_source_hash
+                or row.parsed_source_hash != current_snapshot
+            ):
+                if row.is_current:
+                    # Keep the database pointer aligned with the source. The
+                    # next request can then create a run for the new snapshot.
+                    row.is_current = False
+                    row.updated_at = now
+                    db.commit()
                 payload["outdated"] = True
                 payload["is_current"] = False
             return payload
@@ -376,6 +513,12 @@ class AnalysisRepository:
             document = self._document(db, document_id, user_id, workspace_id)
             if not document:
                 return None
+            profile, sections, chunks = self._source_records(
+                db, document, user_id, workspace_id
+            )
+            current_snapshot = _source_snapshot_hash(
+                document, profile, sections, chunks
+            )
             row = db.scalars(
                 select(MedicalAnalysisRunRecord)
                 .where(
@@ -383,12 +526,69 @@ class AnalysisRepository:
                     MedicalAnalysisRunRecord.user_id == user_id,
                     MedicalAnalysisRunRecord.workspace_id == workspace_id,
                     MedicalAnalysisRunRecord.source_hash == document.file_hash,
+                    MedicalAnalysisRunRecord.parsed_source_hash == current_snapshot,
                     MedicalAnalysisRunRecord.status == SUCCEEDED,
                     MedicalAnalysisRunRecord.is_current.is_(True),
                 )
                 .order_by(MedicalAnalysisRunRecord.completed_at.desc())
             ).first()
             return _run_payload(db, row) if row else None
+
+    def get_current(
+        self,
+        document_id: str,
+        user_id: str,
+        workspace_id: str,
+    ) -> dict[str, Any] | None:
+        """Return the current run, including queued and failed states.
+
+        A stale active run is changed to a visible failure instead of being
+        reused forever after a worker or broker crash.
+        """
+        self._require_available()
+        now = _utc_now()
+        with self.session_factory() as db:
+            document = self._document(db, document_id, user_id, workspace_id)
+            if not document:
+                return None
+            profile, sections, chunks = self._source_records(
+                db, document, user_id, workspace_id
+            )
+            current_snapshot = _source_snapshot_hash(
+                document, profile, sections, chunks
+            )
+            rows = db.scalars(
+                select(MedicalAnalysisRunRecord)
+                .where(
+                    MedicalAnalysisRunRecord.document_id == document.id,
+                    MedicalAnalysisRunRecord.user_id == user_id,
+                    MedicalAnalysisRunRecord.workspace_id == workspace_id,
+                    MedicalAnalysisRunRecord.source_hash == document.file_hash,
+                    MedicalAnalysisRunRecord.parsed_source_hash == current_snapshot,
+                )
+                .order_by(
+                    MedicalAnalysisRunRecord.created_at.desc(),
+                    MedicalAnalysisRunRecord.updated_at.desc(),
+                )
+            ).all()
+
+            for row in rows:
+                if row.status not in {QUEUED, RUNNING}:
+                    continue
+                if _lease_expired(row, now):
+                    _mark_stalled(row, now)
+                    db.commit()
+                    log.warning("Medical insight run %s exceeded its lease", row.id)
+                    return _run_payload(db, row)
+                return _run_payload(db, row)
+
+            for row in rows:
+                if row.status == SUCCEEDED:
+                    return _run_payload(db, row)
+            for row in rows:
+                if row.status == FAILED:
+                    return _run_payload(db, row)
+            return None
 
     def get_source(
         self,
@@ -403,36 +603,17 @@ class AnalysisRepository:
             if not document:
                 return None
 
-            profile = db.scalars(
-                select(MedicalDocumentProfileRecord).where(
-                    MedicalDocumentProfileRecord.document_id == document.id,
-                    MedicalDocumentProfileRecord.user_id == user_id,
-                    MedicalDocumentProfileRecord.workspace_id == workspace_id,
-                )
-            ).first()
-            sections = db.scalars(
-                select(DocumentSectionRecord)
-                .where(
-                    DocumentSectionRecord.document_id == document.id,
-                    DocumentSectionRecord.user_id == user_id,
-                    DocumentSectionRecord.workspace_id == workspace_id,
-                )
-                .order_by(DocumentSectionRecord.ordinal)
-            ).all()
-            chunks = db.scalars(
-                select(ParsedChunkRecord)
-                .where(
-                    ParsedChunkRecord.document_id == document.id,
-                    ParsedChunkRecord.user_id == user_id,
-                    ParsedChunkRecord.workspace_id == workspace_id,
-                )
-                .order_by(ParsedChunkRecord.chunk_index)
-            ).all()
+            profile, sections, chunks = self._source_records(
+                db, document, user_id, workspace_id
+            )
 
             return {
                 "document_id": document.id,
                 "workspace_id": workspace_id,
                 "source_hash": document.file_hash,
+                "parsed_source_hash": _source_snapshot_hash(
+                    document, profile, sections, chunks
+                ),
                 "title": document.original_filename,
                 "document_kind": (
                     profile.document_kind
@@ -509,15 +690,53 @@ class AnalysisRepository:
                 )
             db.commit()
 
-    def _document(self, db, document_id: str, user_id: str, workspace_id: str):
-        return db.scalars(
-            select(DocumentRecord).where(
+    def _document(
+        self,
+        db,
+        document_id: str,
+        user_id: str,
+        workspace_id: str,
+        *,
+        lock: bool = False,
+    ):
+        query = select(DocumentRecord).where(
                 DocumentRecord.id == document_id,
                 DocumentRecord.user_id == user_id,
                 DocumentRecord.workspace_id == workspace_id,
                 DocumentRecord.deleted_at.is_(None),
             )
+        if lock:
+            query = query.with_for_update()
+        return db.scalars(query).first()
+
+    def _source_records(self, db, document, user_id: str, workspace_id: str):
+        """Read one consistent set of profile, sections, and chunks."""
+        profile = db.scalars(
+            select(MedicalDocumentProfileRecord).where(
+                MedicalDocumentProfileRecord.document_id == document.id,
+                MedicalDocumentProfileRecord.user_id == user_id,
+                MedicalDocumentProfileRecord.workspace_id == workspace_id,
+            )
         ).first()
+        sections = db.scalars(
+            select(DocumentSectionRecord)
+            .where(
+                DocumentSectionRecord.document_id == document.id,
+                DocumentSectionRecord.user_id == user_id,
+                DocumentSectionRecord.workspace_id == workspace_id,
+            )
+            .order_by(DocumentSectionRecord.ordinal, DocumentSectionRecord.id)
+        ).all()
+        chunks = db.scalars(
+            select(ParsedChunkRecord)
+            .where(
+                ParsedChunkRecord.document_id == document.id,
+                ParsedChunkRecord.user_id == user_id,
+                ParsedChunkRecord.workspace_id == workspace_id,
+            )
+            .order_by(ParsedChunkRecord.chunk_index, ParsedChunkRecord.id)
+        ).all()
+        return profile, sections, chunks
 
     def _require_available(self) -> None:
         if not self.available():
@@ -530,21 +749,27 @@ class AnalysisRepository:
 def _analysis_key(
     document_id: str,
     source_hash: str,
+    parsed_source_hash: str,
     provider: str,
     model_name: str,
     prompt_version: str,
     schema_version: str,
     *,
+    redact_pii: bool = True,
+    max_input_tokens: int = 12000,
     force: bool,
 ) -> str:
     values = [
         ANALYSIS_TYPE,
         document_id,
         source_hash,
+        parsed_source_hash,
         provider,
         model_name,
         prompt_version,
         schema_version,
+        str(bool(redact_pii)),
+        str(max(1, int(max_input_tokens or 1))),
     ]
     if force:
         values.append(uuid.uuid4().hex)
@@ -607,10 +832,16 @@ def _run_dict(row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
         "requested_by": row.requested_by,
         "status": row.status,
         "source_hash": row.source_hash,
+        "parsed_source_hash": row.parsed_source_hash or "",
         "provider": row.provider,
         "model_name": row.model_name,
         "prompt_version": row.prompt_version,
         "schema_version": row.schema_version,
+        "redact_pii": bool(row.redact_pii),
+        "max_input_tokens": row.max_input_tokens,
+        "attempt_count": row.attempt_count or 0,
+        "last_heartbeat_at": _iso(row.last_heartbeat_at),
+        "lease_expires_at": _iso(row.lease_expires_at),
         "error_code": row.error_code or "",
         "error_message": row.error_message or "",
         "is_current": bool(row.is_current),
@@ -639,6 +870,98 @@ def _iso(value: Optional[datetime]) -> str:
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _source_snapshot_hash(document, profile, sections, chunks) -> str:
+    """Hash the exact persisted input that an insight run is meant to explain."""
+    payload = {
+        "document": {
+            "id": document.id,
+            "file_hash": document.file_hash,
+            "document_kind": document.document_kind or "",
+            "language": document.language or "",
+            "parser_version": document.parser_version or "",
+        },
+        "profile": (
+            {
+                "id": profile.id,
+                "document_kind": profile.document_kind,
+                "language": profile.language,
+                "confidence": profile.confidence,
+                "classifier_version": profile.classifier_version,
+                "signals": _loads_json(profile.signals_json, []),
+                "warnings": _loads_json(profile.warnings_json, []),
+                "missing_sections": _loads_json(profile.missing_sections_json, []),
+            }
+            if profile
+            else None
+        ),
+        "sections": [
+            {
+                "id": item.id,
+                "section_type": item.section_type,
+                "original_title": item.original_title,
+                "ordinal": item.ordinal,
+                "page_start": item.page_start,
+                "page_end": item.page_end,
+                "char_start": item.char_start,
+                "char_end": item.char_end,
+                "text": item.text,
+                "language": item.language,
+                "confidence": item.confidence,
+                "metadata": _loads_json(item.metadata_json, {}),
+            }
+            for item in sections
+        ],
+        "chunks": [
+            {
+                "id": item.id,
+                "chunk_index": item.chunk_index,
+                "chunk_type": item.chunk_type,
+                "text": item.text,
+                "metadata": _loads_json(item.metadata_json, {}),
+            }
+            for item in chunks
+        ],
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _lease_expired(row: "MedicalAnalysisRunRecord", now: datetime) -> bool:
+    """Treat an active row without a lease as a worker that needs recovery."""
+    if row.status not in {QUEUED, RUNNING}:
+        return False
+    expires = row.lease_expires_at
+    if expires is None:
+        return True
+    if expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    return expires <= now
+
+
+def _mark_stalled(row: "MedicalAnalysisRunRecord", now: datetime) -> None:
+    row.status = FAILED
+    row.error_code = "analysis_stalled"
+    row.error_message = "The analysis worker did not finish before its lease expired."
+    row.completed_at = now
+    row.last_heartbeat_at = now
+    row.lease_expires_at = None
+    row.is_current = False
+    row.updated_at = now
+
+
+def _queue_lease_seconds() -> int:
+    return max(60, int(getattr(settings, "MEDICAL_AI_QUEUE_LEASE_SECONDS", 300)))
+
+
+def _running_lease_seconds() -> int:
+    return max(60, int(getattr(settings, "MEDICAL_AI_RUNNING_LEASE_SECONDS", 900)))
 
 
 medical_analysis_repository = AnalysisRepository()

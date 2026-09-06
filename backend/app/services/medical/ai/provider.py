@@ -35,8 +35,10 @@ class ExtractiveMedicalAIProvider:
         overview_item = _first_of(
             evidence,
             "abstract",
-            "results",
+            "scope",
             "recommendations",
+            "evidence",
+            "results",
             "conclusion",
             "introduction",
         ) or (evidence[0] if evidence else None)
@@ -47,7 +49,15 @@ class ExtractiveMedicalAIProvider:
         findings = []
         for item in _take_distinct(
             evidence,
-            {"results", "recommendations", "conclusion", "abstract"},
+            {
+                "results",
+                "recommendations",
+                "evidence",
+                "contraindications",
+                "scope",
+                "conclusion",
+                "abstract",
+            },
             limit=3,
         ):
             statement = _summary(item.text)
@@ -89,7 +99,13 @@ class ExtractiveMedicalAIProvider:
             if _summary(item.text)
         ]
 
-        meaning_item = _first_of(evidence, "results", "recommendations", "conclusion")
+        meaning_item = _first_of(
+            evidence,
+            "recommendations",
+            "results",
+            "evidence",
+            "conclusion",
+        )
         meanings = []
         if meaning_item:
             meanings.append(

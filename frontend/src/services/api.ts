@@ -136,10 +136,16 @@ export interface MedicalInsightRun {
   workspace_id: string;
   status: "queued" | "running" | "succeeded" | "failed" | string;
   source_hash: string;
+  parsed_source_hash?: string;
   provider: string;
   model_name: string;
   prompt_version: string;
   schema_version: string;
+  redact_pii?: boolean;
+  max_input_tokens?: number;
+  attempt_count?: number;
+  last_heartbeat_at?: string;
+  lease_expires_at?: string;
   error_code?: string;
   error_message?: string;
   is_current?: boolean;
@@ -404,6 +410,17 @@ export const getLatestMedicalInsights = (
   http
     .get<MedicalInsightRun>(
       `/documents/${encodeURIComponent(documentId)}/medical-insights/latest`,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const getCurrentMedicalInsights = (
+  documentId: string,
+  workspaceId?: string | null,
+): Promise<MedicalInsightRun> =>
+  http
+    .get<MedicalInsightRun>(
+      `/documents/${encodeURIComponent(documentId)}/medical-insights/current`,
       workspaceParams(workspaceId),
     )
     .then((r) => r.data);

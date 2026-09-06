@@ -269,11 +269,17 @@ def _ensure_medical_ai_tables(connection) -> None:
                 requested_by VARCHAR(64) NOT NULL,
                 status VARCHAR(32) NOT NULL,
                 source_hash VARCHAR(64) NOT NULL,
+                parsed_source_hash VARCHAR(64),
                 analysis_key VARCHAR(255) NOT NULL,
                 provider VARCHAR(64) NOT NULL,
                 model_name VARCHAR(128) NOT NULL,
                 prompt_version VARCHAR(64) NOT NULL,
                 schema_version VARCHAR(64) NOT NULL,
+                redact_pii BOOLEAN NOT NULL DEFAULT TRUE,
+                max_input_tokens INTEGER NOT NULL DEFAULT 12000,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                last_heartbeat_at {timestamp_type},
+                lease_expires_at {timestamp_type},
                 error_code VARCHAR(80) NOT NULL,
                 error_message TEXT NOT NULL,
                 is_current BOOLEAN NOT NULL,
@@ -288,6 +294,23 @@ def _ensure_medical_ai_tables(connection) -> None:
             )
             """
         )
+
+    # These columns were added after the first PR4 schema. ADD COLUMN keeps
+    # existing local and PostgreSQL databases upgradeable without recreating
+    # the report tables.
+    missing_columns = (
+        ("parsed_source_hash", "VARCHAR(64)"),
+        ("redact_pii", "BOOLEAN NOT NULL DEFAULT TRUE"),
+        ("max_input_tokens", "INTEGER NOT NULL DEFAULT 12000"),
+        ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_heartbeat_at", timestamp_type),
+        ("lease_expires_at", timestamp_type),
+    )
+    for column, definition in missing_columns:
+        if not _has_column(connection, "medical_analysis_runs", column):
+            connection.exec_driver_sql(
+                f"ALTER TABLE medical_analysis_runs ADD COLUMN {column} {definition}"
+            )
 
     if not _has_table(connection, "medical_analysis_results"):
         connection.exec_driver_sql(
@@ -354,6 +377,8 @@ def _ensure_medical_ai_tables(connection) -> None:
         ("ix_medical_analysis_runs_status", "medical_analysis_runs", "status"),
         ("ix_medical_analysis_runs_analysis_key", "medical_analysis_runs", "analysis_key"),
         ("ix_medical_analysis_runs_is_current", "medical_analysis_runs", "is_current"),
+        ("ix_medical_analysis_runs_parsed_source_hash", "medical_analysis_runs", "parsed_source_hash"),
+        ("ix_medical_analysis_runs_lease_expires_at", "medical_analysis_runs", "lease_expires_at"),
         ("ix_medical_analysis_results_run_id", "medical_analysis_results", "run_id"),
         ("ix_medical_analysis_evidence_run_id", "medical_analysis_evidence", "run_id"),
         ("ix_medical_analysis_evidence_evidence_id", "medical_analysis_evidence", "evidence_id"),

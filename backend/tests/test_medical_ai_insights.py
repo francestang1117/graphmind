@@ -1,6 +1,6 @@
 """Tests for evidence-backed medical document insights."""
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, select
@@ -19,7 +19,12 @@ from app.models.persistence import (
 from app.services.medical.ai.analysis_repository import AnalysisRepository
 from app.services.medical.ai.analyzer import MedicalInsightAnalyzer
 from app.services.medical.ai.citation_validator import evidence_rows, validate_citations
-from app.services.medical.ai.context_builder import AnalysisContext, EvidenceItem
+from app.services.medical.ai.context_builder import (
+    AnalysisContext,
+    ContextBuilder,
+    EvidenceItem,
+    redact_sensitive_fields,
+)
 from app.services.medical.ai.exceptions import MedicalInsightValidationError
 from app.services.medical.ai.models import MedicalInsightReport
 from app.services.medical.ai.provider import ExtractiveMedicalAIProvider, FakeMedicalAIProvider
@@ -116,6 +121,99 @@ def test_safety_validator_rejects_personal_treatment_instructions():
     validation = validate_safety(report)
     assert not validation.valid
     assert "treatment" in validation.errors[0]
+
+
+def test_safety_validator_checks_questions_and_chinese_diagnosis_text():
+    payload = _report("EVIDENCE_001").model_dump()
+    payload["questions_for_professional"] = ["你应该停药吗？"]
+    report = MedicalInsightReport.model_validate(payload)
+
+    validation = validate_safety(report)
+
+    assert not validation.valid
+    assert any("treatment" in error for error in validation.errors)
+
+    payload["questions_for_professional"] = []
+    payload["medical_terms"] = [
+        {
+            "term": "你可能患有糖尿病",
+            "explanation": "This text must not be shown as a confirmed diagnosis.",
+            "evidence_ids": [],
+        }
+    ]
+    report = MedicalInsightReport.model_validate(payload)
+
+    assert not validate_safety(report).valid
+
+
+def test_safety_validator_allows_descriptive_medical_language():
+    payload = _report("EVIDENCE_001").model_dump()
+    payload["overview"]["summary"] = "The paper describes medication use and treatment outcomes."
+    payload["questions_for_professional"] = [
+        "What medication and treatment outcomes did the authors report?"
+    ]
+
+    assert validate_safety(MedicalInsightReport.model_validate(payload)).valid
+
+
+def test_context_builder_reads_legacy_page_metadata_for_guidelines():
+    context = ContextBuilder().build(
+        [
+            {
+                "id": "chunk-1",
+                "text": "The guideline recommends shared decision-making.",
+                "chunk_type": "page",
+                "metadata": {
+                    "type": "page",
+                    "page": 4,
+                    "section_type": "recommendations",
+                    "section_title": "Recommendations",
+                },
+            }
+        ],
+        title="Clinical guideline",
+        document_kind="guideline",
+        language="en",
+    )
+
+    evidence = context.evidence[0]
+    assert evidence.section_type == "recommendations"
+    assert evidence.section_title == "Recommendations"
+    assert evidence.page_start == evidence.page_end == 4
+
+
+def test_redact_sensitive_fields_removes_chinese_and_english_names():
+    redacted, changed = redact_sensitive_fields(
+        "姓名：张三\n患者姓名 : 李四\nName: Alice\naddress: 1 Main Street"
+    )
+
+    assert changed
+    assert "张三" not in redacted
+    assert "李四" not in redacted
+    assert "Alice" not in redacted
+    assert "1 Main Street" not in redacted
+    assert "[REDACTED]" in redacted
+
+
+def test_context_builder_redacts_title_and_section_title():
+    context = ContextBuilder().build(
+        [
+            {
+                "id": "chunk-1",
+                "text": "The study reports the observed outcome.",
+                "section_type": "results",
+                "section_title": "患者姓名：李四",
+                "page": 2,
+            }
+        ],
+        title="姓名：张三的检查报告",
+        document_kind="research_paper",
+        language="zh",
+    )
+
+    assert "张三" not in context.title
+    assert "李四" not in context.evidence[0].section_title
+    assert "pii_redacted" in context.warnings
 
 
 def test_analyzer_repairs_one_invalid_provider_response():
@@ -271,7 +369,146 @@ def test_repository_persists_citations_and_filters_stale_source_versions():
         assert stale["is_current"] is False
 
         with sessions() as db:
+            assert db.get(MedicalAnalysisRunRecord, run["run_id"]).is_current is False
+
+        with sessions() as db:
             assert len(db.scalars(select(MedicalAnalysisRunRecord)).all()) == 1
             assert len(db.scalars(select(MedicalAnalysisEvidenceRecord)).all()) >= 1
+    finally:
+        engine.dispose()
+
+
+def test_repository_invalidates_report_when_parsed_chunks_change():
+    engine, sessions, repository = _repository()
+    try:
+        _paper_rows(sessions)
+        run, created = repository.create_or_reuse(
+            document_id="document-1",
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_hash="a" * 64,
+            requested_by="user-1",
+            provider="extractive",
+            model_name="extractive-v1",
+            prompt_version="medical-insights-v1",
+            schema_version="medical-insights-v1",
+        )
+        assert created
+        claimed = repository.mark_running(run["run_id"])
+        assert claimed and claimed["attempt_count"] == 1
+        output = MedicalInsightAnalyzer(provider=ExtractiveMedicalAIProvider()).run(
+            [
+                {
+                    "id": "chunk-1",
+                    "text": "The result was reported.",
+                    "metadata": {
+                        "section_type": "results",
+                        "section_title": "Results",
+                        "page_start": 2,
+                        "page_end": 2,
+                        "section_id": "section-1",
+                    },
+                }
+            ],
+            sections=[
+                {
+                    "id": "section-1",
+                    "section_type": "results",
+                    "original_title": "Results",
+                    "page_start": 2,
+                    "page_end": 2,
+                }
+            ],
+            title="paper.pdf",
+            document_kind="research_paper",
+            language="en",
+        )
+        repository.save_success(
+            run["run_id"], output, attempt_count=claimed["attempt_count"]
+        )
+
+        with sessions() as db:
+            chunk = db.get(ParsedChunkRecord, "chunk-1")
+            chunk.text = "The updated result was reported."
+            db.commit()
+
+        assert repository.get_latest("document-1", "user-1", "workspace-1") is None
+        current = repository.get_run(run["run_id"], "user-1", "workspace-1")
+        assert current["outdated"] is True
+        assert current["is_current"] is False
+    finally:
+        engine.dispose()
+
+
+def test_repository_exposes_expired_run_as_failed_and_allows_retry():
+    engine, sessions, repository = _repository()
+    try:
+        _paper_rows(sessions)
+        run, created = repository.create_or_reuse(
+            document_id="document-1",
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_hash="a" * 64,
+            requested_by="user-1",
+            provider="extractive",
+            model_name="extractive-v1",
+            prompt_version="medical-insights-v1",
+            schema_version="medical-insights-v1",
+        )
+        assert created
+
+        with sessions() as db:
+            row = db.get(MedicalAnalysisRunRecord, run["run_id"])
+            row.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            db.commit()
+
+        stalled = repository.get_current("document-1", "user-1", "workspace-1")
+        assert stalled["status"] == "failed"
+        assert stalled["error_code"] == "analysis_stalled"
+
+        retried, created = repository.create_or_reuse(
+            document_id="document-1",
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_hash="a" * 64,
+            requested_by="user-1",
+            provider="extractive",
+            model_name="extractive-v1",
+            prompt_version="medical-insights-v1",
+            schema_version="medical-insights-v1",
+        )
+        assert created
+        assert retried["run_id"] == run["run_id"]
+        assert retried["status"] == "queued"
+    finally:
+        engine.dispose()
+
+
+def test_repository_hides_expired_run_when_document_was_deleted():
+    engine, sessions, repository = _repository()
+    try:
+        _paper_rows(sessions)
+        run, created = repository.create_or_reuse(
+            document_id="document-1",
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_hash="a" * 64,
+            requested_by="user-1",
+            provider="extractive",
+            model_name="extractive-v1",
+            prompt_version="medical-insights-v1",
+            schema_version="medical-insights-v1",
+        )
+        assert created
+
+        with sessions() as db:
+            row = db.get(MedicalAnalysisRunRecord, run["run_id"])
+            row.lease_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            document = db.get(DocumentRecord, "document-1")
+            document.deleted_at = datetime.now(timezone.utc)
+            db.commit()
+
+        assert repository.get_run(run["run_id"], "user-1", "workspace-1") is None
+        assert repository.get_current("document-1", "user-1", "workspace-1") is None
     finally:
         engine.dispose()

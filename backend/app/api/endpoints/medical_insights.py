@@ -97,6 +97,23 @@ async def get_latest_medical_insights(
     return report
 
 
+@router.get("/documents/{document_id}/medical-insights/current")
+async def get_current_medical_insights(
+    document_id: str,
+    workspace_id: str | None = Query(None),
+    user: UserRecord = Depends(current_user_or_dev),
+) -> dict[str, Any]:
+    """Return the latest run state so the UI can recover after a refresh."""
+    user_id = _user_id(user)
+    scope = resolve_workspace_id(user_id, normalize_workspace_id(workspace_id))
+    _get_scoped_document(document_id, user_id, scope)
+    _require_repository()
+    run = medical_analysis_repository.get_current(document_id, user_id, scope)
+    if not run:
+        raise HTTPException(status_code=404, detail="No medical insight run found")
+    return run
+
+
 async def _start_analysis(
     document_id: str,
     background_tasks: BackgroundTasks,
@@ -162,6 +179,9 @@ async def _start_analysis(
             model_name=settings.MEDICAL_AI_MODEL,
             prompt_version=settings.MEDICAL_AI_PROMPT_VERSION,
             schema_version=settings.MEDICAL_AI_SCHEMA_VERSION,
+            parsed_source_hash=source.get("parsed_source_hash"),
+            redact_pii=settings.MEDICAL_AI_REDACT_PII,
+            max_input_tokens=settings.MEDICAL_AI_MAX_INPUT_TOKENS,
             force=force,
         )
     except MedicalInsightError as exc:

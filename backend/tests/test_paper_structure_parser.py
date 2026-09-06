@@ -4,9 +4,12 @@ from app.services.medical.models import MedicalDocumentAnalysis
 from app.services.medical.paper_structure_parser import PaperStructureParser
 
 
-def _analysis(language: str = "en") -> MedicalDocumentAnalysis:
+def _analysis(
+    language: str = "en",
+    document_kind: str = "research_paper",
+) -> MedicalDocumentAnalysis:
     return MedicalDocumentAnalysis(
-        document_kind="research_paper",
+        document_kind=document_kind,
         confidence=0.9,
         language=language,
         classifier_version="medical-rules-v1",
@@ -75,6 +78,39 @@ def test_compound_heading_counts_both_section_types():
     assert section.secondary_types == ["discussion"]
     assert "results" not in result.missing_sections
     assert "discussion" not in result.missing_sections
+
+
+def test_guideline_sections_keep_recommendation_and_evidence_roles():
+    text = (
+        "Clinical guideline\n\n"
+        "Scope\nThis guideline covers adults with the condition.\n\n"
+        "Recommendations\nClinicians should discuss treatment options.\n\n"
+        "Population\nThe target population is adults.\n\n"
+        "Evidence\nThe recommendation is based on moderate certainty evidence.\n\n"
+        "Contraindications\nThe intervention is not for this population."
+    )
+    parsed = {
+        "content": text,
+        "metadata": {"format": "pdf"},
+        "extra": {"sections": [], "tables": []},
+    }
+
+    result = PaperStructureParser(chunk_size=200, overlap=20).parse(
+        parsed,
+        _analysis(document_kind="guideline"),
+    )
+
+    by_type = {section.section_type: section for section in result.sections}
+    assert {"scope", "recommendations", "population", "evidence", "contraindications"} <= by_type.keys()
+    assert result.missing_sections == []
+    assert by_type["recommendations"].metadata["evidence_role"] == "guideline_recommendation"
+    assert by_type["evidence"].metadata["evidence_role"] == "guideline_evidence"
+    assert by_type["contraindications"].metadata["evidence_role"] == "guideline_contraindication"
+    recommendation_chunk = next(
+        chunk for chunk in result.chunks if chunk["section_type"] == "recommendations"
+    )
+    assert recommendation_chunk["page_start"] is None
+    assert recommendation_chunk["evidence_role"] == "guideline_recommendation"
 
 
 def test_layout_word_hints_do_not_split_a_compound_heading():

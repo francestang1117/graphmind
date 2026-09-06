@@ -38,27 +38,47 @@ def run_medical_analysis_once(run_id: str) -> dict[str, Any]:
         current = repository.get_worker_run(run_id)
         return current or {"run_id": run_id, "status": "not_found"}
 
-    owner_id = run.get("user_id") or run.get("requested_by") or "local-dev"
+    attempt_count = claimed.get("attempt_count")
+    owner_id = claimed.get("user_id") or claimed.get("requested_by") or "local-dev"
     try:
+        if not repository.heartbeat(run_id, attempt_count=attempt_count):
+            raise MedicalInsightError(
+                "This analysis attempt is no longer active.",
+                code="analysis_stale",
+            )
+
         source = repository.get_source(
-            run["document_id"],
+            claimed["document_id"],
             owner_id,
-            run["workspace_id"],
+            claimed["workspace_id"],
         )
         if not source:
             raise MedicalInsightError(
                 "The document was deleted before analysis started.",
                 code="document_deleted",
             )
+        if (
+            source.get("source_hash") != claimed.get("source_hash")
+            or source.get("parsed_source_hash") != claimed.get("parsed_source_hash")
+        ):
+            raise MedicalInsightError(
+                "The parsed document changed before analysis started.",
+                code="source_changed",
+            )
 
-        provider = get_provider(run["provider"], run["model_name"])
+        provider = get_provider(claimed["provider"], claimed["model_name"])
         analyzer = MedicalInsightAnalyzer(
             provider=provider,
-            max_input_tokens=settings.MEDICAL_AI_MAX_INPUT_TOKENS,
+            max_input_tokens=int(
+                claimed.get("max_input_tokens")
+                or settings.MEDICAL_AI_MAX_INPUT_TOKENS
+            ),
             timeout_seconds=settings.MEDICAL_AI_TIMEOUT_SECONDS,
-            redact_pii=settings.MEDICAL_AI_REDACT_PII,
-            schema_version=run["schema_version"],
-            prompt_version=run["prompt_version"],
+            redact_pii=bool(
+                claimed.get("redact_pii", settings.MEDICAL_AI_REDACT_PII)
+            ),
+            schema_version=claimed["schema_version"],
+            prompt_version=claimed["prompt_version"],
         )
         output = analyzer.run(
             source["chunks"],
@@ -67,9 +87,23 @@ def run_medical_analysis_once(run_id: str) -> dict[str, Any]:
             document_kind=source["document_kind"],
             language=source["language"],
         )
-        return repository.save_success(run_id, output)
+        if not repository.heartbeat(run_id, attempt_count=attempt_count):
+            raise MedicalInsightError(
+                "This analysis attempt is no longer active.",
+                code="analysis_stale",
+            )
+        return repository.save_success(
+            run_id,
+            output,
+            attempt_count=attempt_count,
+        )
     except MedicalInsightError as exc:
-        repository.save_failure(run_id, exc.code, str(exc))
+        repository.save_failure(
+            run_id,
+            exc.code,
+            str(exc),
+            attempt_count=attempt_count,
+        )
         log.warning("Medical insight run %s failed: %s", run_id, exc.code)
         return {
             "run_id": run_id,
@@ -85,6 +119,7 @@ def run_medical_analysis_once(run_id: str) -> dict[str, Any]:
             run_id,
             "analysis_failed",
             "Medical insight analysis failed.",
+            attempt_count=attempt_count,
         )
         return {
             "run_id": run_id,
