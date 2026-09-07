@@ -288,6 +288,16 @@ def replace_analysis_in_session(
     )
     document.modified_at = _utc_now()
 
+    # The chunk rows are already staged by the caller when this is part of a
+    # parse bundle, so the snapshot covers the complete new source version.
+    from app.services.medical.ai.analysis_repository import (
+        refresh_document_parsed_source_hash_in_session,
+    )
+
+    refresh_document_parsed_source_hash_in_session(
+        db, document, user_id, scope
+    )
+
     # A delete can win while parsing is in progress. The caller will roll back
     # any rows already staged in this session when this check fails.
     return _document_is_active(db, document.id, user_id, scope)

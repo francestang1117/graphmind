@@ -23,6 +23,8 @@ from app.services.medical.ai.context_builder import (
     AnalysisContext,
     ContextBuilder,
     EvidenceItem,
+    _estimate_tokens,
+    _truncate_text,
     redact_sensitive_fields,
 )
 from app.services.medical.ai.exceptions import MedicalInsightValidationError
@@ -180,6 +182,27 @@ def test_context_builder_reads_legacy_page_metadata_for_guidelines():
     assert evidence.section_type == "recommendations"
     assert evidence.section_title == "Recommendations"
     assert evidence.page_start == evidence.page_end == 4
+
+
+def test_context_builder_counts_and_truncates_cjk_text_without_rebuilding_it():
+    source = "中文医学论文内容" * 200
+
+    assert _estimate_tokens(source) > 100
+
+    truncated = _truncate_text(source, 100)
+
+    assert _estimate_tokens(truncated) <= 100
+    assert truncated.startswith("中文医学")
+    assert truncated.endswith(" …")
+
+    context = ContextBuilder().build(
+        [{"id": "chunk-1", "text": source, "section_type": "results"}],
+        title="中文论文",
+        document_kind="research_paper",
+        language="zh",
+        max_input_tokens=100,
+    )
+    assert context.evidence[0].token_count <= 100
 
 
 def test_redact_sensitive_fields_removes_chinese_and_english_names():
@@ -358,6 +381,22 @@ def test_repository_persists_citations_and_filters_stale_source_versions():
         assert saved["evidence"][0]["section_type"] == "results"
         assert saved["evidence"][0]["section_title"] == "Results"
 
+        reused, created = repository.create_or_reuse(
+            document_id="document-1",
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_hash="a" * 64,
+            requested_by="user-1",
+            provider="extractive",
+            model_name="extractive-v1",
+            prompt_version="medical-insights-v1",
+            schema_version="medical-insights-v1",
+        )
+        assert not created
+        assert reused["status"] == "succeeded"
+        assert "report" in reused
+        assert reused["evidence"]
+
         with sessions() as db:
             document = db.get(DocumentRecord, "document-1")
             document.file_hash = "b" * 64
@@ -432,10 +471,90 @@ def test_repository_invalidates_report_when_parsed_chunks_change():
             chunk.text = "The updated result was reported."
             db.commit()
 
+        repository.refresh_parsed_source_hash(
+            "document-1", "user-1", "workspace-1"
+        )
+
         assert repository.get_latest("document-1", "user-1", "workspace-1") is None
         current = repository.get_run(run["run_id"], "user-1", "workspace-1")
         assert current["outdated"] is True
         assert current["is_current"] is False
+    finally:
+        engine.dispose()
+
+
+def test_current_returns_the_newest_failed_reanalysis():
+    engine, sessions, repository = _repository()
+    try:
+        _paper_rows(sessions)
+        first, created = repository.create_or_reuse(
+            document_id="document-1",
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_hash="a" * 64,
+            requested_by="user-1",
+            provider="extractive",
+            model_name="extractive-v1",
+            prompt_version="medical-insights-v1",
+            schema_version="medical-insights-v1",
+        )
+        assert created
+        repository.mark_running(first["run_id"])
+        output = MedicalInsightAnalyzer(provider=ExtractiveMedicalAIProvider()).run(
+            [{"id": "chunk-1", "text": "The result was reported.", "metadata": {"section_type": "results"}}],
+            title="paper.pdf",
+            document_kind="research_paper",
+            language="en",
+        )
+        repository.save_success(first["run_id"], output)
+
+        second, created = repository.create_or_reuse(
+            document_id="document-1",
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_hash="a" * 64,
+            requested_by="user-1",
+            provider="extractive",
+            model_name="extractive-v1",
+            prompt_version="medical-insights-v1",
+            schema_version="medical-insights-v1",
+            force=True,
+        )
+        assert created
+        repository.save_failure(second["run_id"], "provider_failed", "provider failed")
+
+        current = repository.get_current("document-1", "user-1", "workspace-1")
+        assert current["run_id"] == second["run_id"]
+        assert current["status"] == "failed"
+    finally:
+        engine.dispose()
+
+
+def test_status_reads_document_snapshot_instead_of_rehashing_source(monkeypatch):
+    engine, sessions, repository = _repository()
+    try:
+        _paper_rows(sessions)
+        run, created = repository.create_or_reuse(
+            document_id="document-1",
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_hash="a" * 64,
+            requested_by="user-1",
+            provider="extractive",
+            model_name="extractive-v1",
+            prompt_version="medical-insights-v1",
+            schema_version="medical-insights-v1",
+        )
+        assert created
+
+        import app.services.medical.ai.analysis_repository as repository_module
+
+        def fail_if_rehashed(*_args, **_kwargs):
+            raise AssertionError("status polling should use the stored snapshot")
+
+        monkeypatch.setattr(repository_module, "_source_snapshot_hash", fail_if_rehashed)
+        assert repository.get_current("document-1", "user-1", "workspace-1")["status"] == "queued"
+        assert repository.get_run(run["run_id"], "user-1", "workspace-1")["status"] == "queued"
     finally:
         engine.dispose()
 

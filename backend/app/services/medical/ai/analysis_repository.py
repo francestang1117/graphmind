@@ -124,6 +124,9 @@ class AnalysisRepository:
                 # argument keeps direct callers and older integrations working.
                 snapshot_hash = current_snapshot or parsed_source_hash or ""
                 effective_source_hash = str(document.file_hash or source_hash or "")
+                # The parser updates this once per committed source snapshot.
+                # Analysis status requests can then compare one scalar value.
+                document.parsed_source_hash = snapshot_hash
                 key = _analysis_key(
                     document_id,
                     effective_source_hash,
@@ -149,9 +152,11 @@ class AnalysisRepository:
                 ).first()
                 if row:
                     if row.status == SUCCEEDED:
-                        return _run_dict(row), False
+                        db.commit()
+                        return _run_payload(db, row), False
                     if row.status in {QUEUED, RUNNING} and not _lease_expired(row, now):
-                        return _run_dict(row), False
+                        db.commit()
+                        return _run_payload(db, row), False
                     if row.status in {QUEUED, RUNNING}:
                         log.info("Re-queueing stale medical insight run %s", row.id)
                     # A failed attempt can be retried without leaving a second
@@ -218,7 +223,7 @@ class AnalysisRepository:
                     )
                 ).first()
                 if row:
-                    return _run_dict(row), False
+                    return _run_payload(db, row), False
             raise MedicalInsightError(
                 "Could not create the medical insight run.",
                 code="analysis_storage_failed",
@@ -347,12 +352,7 @@ class AnalysisRepository:
                         "The document changed before analysis finished.",
                         code="source_changed",
                     )
-                profile, sections, chunks = self._source_records(
-                    db, document, row.user_id, row.workspace_id
-                )
-                current_snapshot = _source_snapshot_hash(
-                    document, profile, sections, chunks
-                )
+                current_snapshot = document.parsed_source_hash or ""
                 if not row.parsed_source_hash or row.parsed_source_hash != current_snapshot:
                     raise MedicalInsightError(
                         "The parsed document changed before analysis finished.",
@@ -485,12 +485,7 @@ class AnalysisRepository:
                 log.warning("Medical insight run %s exceeded its lease", row.id)
                 return _run_payload(db, row)
             payload = _run_payload(db, row)
-            profile, sections, chunks = self._source_records(
-                db, document, user_id, workspace_id
-            )
-            current_snapshot = _source_snapshot_hash(
-                document, profile, sections, chunks
-            )
+            current_snapshot = document.parsed_source_hash or ""
             if (
                 row.source_hash != document.file_hash
                 or not row.parsed_source_hash
@@ -513,12 +508,9 @@ class AnalysisRepository:
             document = self._document(db, document_id, user_id, workspace_id)
             if not document:
                 return None
-            profile, sections, chunks = self._source_records(
-                db, document, user_id, workspace_id
-            )
-            current_snapshot = _source_snapshot_hash(
-                document, profile, sections, chunks
-            )
+            current_snapshot = document.parsed_source_hash
+            if not current_snapshot:
+                return None
             row = db.scalars(
                 select(MedicalAnalysisRunRecord)
                 .where(
@@ -551,12 +543,9 @@ class AnalysisRepository:
             document = self._document(db, document_id, user_id, workspace_id)
             if not document:
                 return None
-            profile, sections, chunks = self._source_records(
-                db, document, user_id, workspace_id
-            )
-            current_snapshot = _source_snapshot_hash(
-                document, profile, sections, chunks
-            )
+            current_snapshot = document.parsed_source_hash
+            if not current_snapshot:
+                return None
             rows = db.scalars(
                 select(MedicalAnalysisRunRecord)
                 .where(
@@ -572,23 +561,17 @@ class AnalysisRepository:
                 )
             ).all()
 
-            for row in rows:
-                if row.status not in {QUEUED, RUNNING}:
-                    continue
-                if _lease_expired(row, now):
-                    _mark_stalled(row, now)
-                    db.commit()
-                    log.warning("Medical insight run %s exceeded its lease", row.id)
-                    return _run_payload(db, row)
-                return _run_payload(db, row)
+            if not rows:
+                return None
 
-            for row in rows:
-                if row.status == SUCCEEDED:
-                    return _run_payload(db, row)
-            for row in rows:
-                if row.status == FAILED:
-                    return _run_payload(db, row)
-            return None
+            # The newest attempt is the one the UI should show. In particular,
+            # a failed re-analysis must not be hidden by an older success.
+            row = rows[0]
+            if row.status in {QUEUED, RUNNING} and _lease_expired(row, now):
+                _mark_stalled(row, now)
+                db.commit()
+                log.warning("Medical insight run %s exceeded its lease", row.id)
+            return _run_payload(db, row)
 
     def get_source(
         self,
@@ -607,13 +590,18 @@ class AnalysisRepository:
                 db, document, user_id, workspace_id
             )
 
+            current_snapshot = document.parsed_source_hash
+            if not current_snapshot:
+                current_snapshot = refresh_document_parsed_source_hash_in_session(
+                    db, document, user_id, workspace_id
+                )
+                db.commit()
+
             return {
                 "document_id": document.id,
                 "workspace_id": workspace_id,
                 "source_hash": document.file_hash,
-                "parsed_source_hash": _source_snapshot_hash(
-                    document, profile, sections, chunks
-                ),
+                "parsed_source_hash": current_snapshot,
                 "title": document.original_filename,
                 "document_kind": (
                     profile.document_kind
@@ -711,32 +699,25 @@ class AnalysisRepository:
 
     def _source_records(self, db, document, user_id: str, workspace_id: str):
         """Read one consistent set of profile, sections, and chunks."""
-        profile = db.scalars(
-            select(MedicalDocumentProfileRecord).where(
-                MedicalDocumentProfileRecord.document_id == document.id,
-                MedicalDocumentProfileRecord.user_id == user_id,
-                MedicalDocumentProfileRecord.workspace_id == workspace_id,
+        return _load_source_records(db, document, user_id, workspace_id)
+
+    def refresh_parsed_source_hash(
+        self,
+        document_id: str,
+        user_id: str,
+        workspace_id: str,
+    ) -> str | None:
+        """Refresh the document snapshot after a parser write completes."""
+        self._require_available()
+        with self.session_factory() as db:
+            document = self._document(db, document_id, user_id, workspace_id, lock=True)
+            if not document:
+                return None
+            snapshot = refresh_document_parsed_source_hash_in_session(
+                db, document, user_id, workspace_id
             )
-        ).first()
-        sections = db.scalars(
-            select(DocumentSectionRecord)
-            .where(
-                DocumentSectionRecord.document_id == document.id,
-                DocumentSectionRecord.user_id == user_id,
-                DocumentSectionRecord.workspace_id == workspace_id,
-            )
-            .order_by(DocumentSectionRecord.ordinal, DocumentSectionRecord.id)
-        ).all()
-        chunks = db.scalars(
-            select(ParsedChunkRecord)
-            .where(
-                ParsedChunkRecord.document_id == document.id,
-                ParsedChunkRecord.user_id == user_id,
-                ParsedChunkRecord.workspace_id == workspace_id,
-            )
-            .order_by(ParsedChunkRecord.chunk_index, ParsedChunkRecord.id)
-        ).all()
-        return profile, sections, chunks
+            db.commit()
+            return snapshot
 
     def _require_available(self) -> None:
         if not self.available():
@@ -931,6 +912,51 @@ def _source_snapshot_hash(document, profile, sections, chunks) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _load_source_records(db, document, user_id: str, workspace_id: str):
+    profile = db.scalars(
+        select(MedicalDocumentProfileRecord).where(
+            MedicalDocumentProfileRecord.document_id == document.id,
+            MedicalDocumentProfileRecord.user_id == user_id,
+            MedicalDocumentProfileRecord.workspace_id == workspace_id,
+        )
+    ).first()
+    sections = db.scalars(
+        select(DocumentSectionRecord)
+        .where(
+            DocumentSectionRecord.document_id == document.id,
+            DocumentSectionRecord.user_id == user_id,
+            DocumentSectionRecord.workspace_id == workspace_id,
+        )
+        .order_by(DocumentSectionRecord.ordinal, DocumentSectionRecord.id)
+    ).all()
+    chunks = db.scalars(
+        select(ParsedChunkRecord)
+        .where(
+            ParsedChunkRecord.document_id == document.id,
+            ParsedChunkRecord.user_id == user_id,
+            ParsedChunkRecord.workspace_id == workspace_id,
+        )
+        .order_by(ParsedChunkRecord.chunk_index, ParsedChunkRecord.id)
+    ).all()
+    return profile, sections, chunks
+
+
+def refresh_document_parsed_source_hash_in_session(
+    db,
+    document,
+    user_id: str,
+    workspace_id: str,
+) -> str:
+    """Store the hash for the profile, sections, and chunks in this session."""
+    db.flush()
+    profile, sections, chunks = _load_source_records(
+        db, document, user_id, workspace_id
+    )
+    snapshot = _source_snapshot_hash(document, profile, sections, chunks)
+    document.parsed_source_hash = snapshot
+    return snapshot
 
 
 def _lease_expired(row: "MedicalAnalysisRunRecord", now: datetime) -> bool:

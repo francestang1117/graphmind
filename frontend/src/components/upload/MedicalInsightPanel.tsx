@@ -239,19 +239,30 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     if (!runId || (runStatus !== "queued" && runStatus !== "running")) return undefined;
 
     let active = true;
-    const poller = window.setInterval(() => {
-      getMedicalInsightRun(runId, workspaceId)
-        .then((nextRun) => {
-          if (active) setRun(nextRun);
-        })
-        .catch(() => {
-          if (active) setError("Could not refresh the medical insight status.");
-        });
-    }, 1000);
+    let timeoutId: number | undefined;
+    let delay = 1000;
+
+    const poll = async () => {
+      try {
+        const nextRun = await getMedicalInsightRun(runId, workspaceId);
+        if (!active) return;
+        setRun(nextRun);
+        if (nextRun.status !== "queued" && nextRun.status !== "running") return;
+      } catch {
+        if (!active) return;
+        setError("Could not refresh the medical insight status.");
+      }
+
+      if (!active) return;
+      timeoutId = window.setTimeout(poll, delay);
+      delay = delay === 1000 ? 2000 : 5000;
+    };
+
+    timeoutId = window.setTimeout(poll, delay);
 
     return () => {
       active = false;
-      window.clearInterval(poller);
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, [run?.run_id, run?.status, workspaceId]);
 

@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.models.persistence import (
+    DocumentRecord,
     DocumentSectionRecord,
     MedicalDocumentProfileRecord,
     ParsedChunkRecord,
@@ -77,6 +78,9 @@ def test_artifacts_replace_chunks_and_entities_for_document():
     assert chunks[0]["metadata"]["section"] == "Intro"
     assert {entity["normalized"] for entity in entities} == {"Python", "FastAPI"}
     assert all(entity["user_id"] == "u1" for entity in entities)
+    with artifacts.session_factory() as db:
+        document = db.scalars(select(DocumentRecord)).one()
+        assert document.parsed_source_hash
 
 
 def test_artifacts_delete_for_document():

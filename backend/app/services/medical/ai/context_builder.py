@@ -356,20 +356,36 @@ def redact_sensitive_fields(text: str) -> tuple[str, bool]:
 
 
 def _estimate_tokens(text: str) -> int:
-    # A rough count keeps the provider independent of tokenizer packages.
-    return max(1, len(re.findall(r"\w+|[^\w\s]", text, re.UNICODE)))
+    # Keep CJK characters separate. Treating a whole Chinese paragraph as one
+    # word makes the context limit meaningless for papers without spaces.
+    return max(1, len(_token_matches(text)))
 
 
 def _truncate_text(text: str, token_budget: int) -> str:
     if token_budget <= 0:
         return ""
-    tokens = re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
-    if len(tokens) <= token_budget:
+    matches = _token_matches(text)
+    if len(matches) <= token_budget:
         return text
-    # Word boundaries are preferable for English; the token fallback still
-    # keeps Chinese text usable when there are no spaces.
-    candidate = " ".join(tokens[:token_budget]).strip()
-    return f"{candidate} …" if candidate else ""
+    if token_budget == 1:
+        return "…"
+
+    # Slice the original text so CJK punctuation and spacing stay intact.
+    end = matches[token_budget - 2].end()
+    candidate = text[:end].rstrip()
+    return f"{candidate} …" if candidate else "…"
+
+
+_TOKEN_PATTERN = re.compile(
+    r"[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]"
+    r"|[A-Za-z0-9_]+|[^\w\s]",
+    re.UNICODE,
+)
+
+
+def _token_matches(text: str) -> list[re.Match[str]]:
+    """Return token spans without rebuilding the source text."""
+    return list(_TOKEN_PATTERN.finditer(text))
 
 
 def _page_label(start: int | None, end: int | None) -> str:

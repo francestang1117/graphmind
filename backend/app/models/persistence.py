@@ -92,6 +92,11 @@ class DocumentRecord(Base):
     language: Mapped[str | None] = mapped_column(String(16), nullable=True)
     document_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     parser_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Updated when parsing commits a new profile, sections, and chunk set.
+    # Analysis status checks this scalar instead of hashing the whole document.
+    parsed_source_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     modified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
