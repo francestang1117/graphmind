@@ -317,13 +317,40 @@ class AnalysisRepository:
                 code="failed_validation",
             )
 
-        now = _utc_now()
         try:
             with self.session_factory() as db:
+                # Read only the owner here. Both creation and completion must
+                # lock the document before the run, or they can deadlock.
+                owner = db.execute(
+                    select(
+                        MedicalAnalysisRunRecord.document_id,
+                        MedicalAnalysisRunRecord.user_id,
+                        MedicalAnalysisRunRecord.workspace_id,
+                    ).where(MedicalAnalysisRunRecord.id == run_id)
+                ).first()
+                if not owner:
+                    raise MedicalInsightError(
+                        "Medical insight run was not found.",
+                        code="analysis_not_found",
+                    )
+                document = self._document(
+                    db, owner.document_id, owner.user_id, owner.workspace_id, lock=True
+                )
+                if not document:
+                    raise MedicalInsightError(
+                        "The document was deleted before analysis finished.",
+                        code="document_deleted",
+                    )
                 row = db.scalars(
                     select(MedicalAnalysisRunRecord)
-                    .where(MedicalAnalysisRunRecord.id == run_id)
+                    .where(
+                        MedicalAnalysisRunRecord.id == run_id,
+                        MedicalAnalysisRunRecord.document_id == document.id,
+                        MedicalAnalysisRunRecord.user_id == owner.user_id,
+                        MedicalAnalysisRunRecord.workspace_id == owner.workspace_id,
+                    )
                     .with_for_update()
+                    .execution_options(populate_existing=True)
                 ).first()
                 if not row:
                     raise MedicalInsightError(
@@ -345,20 +372,12 @@ class AnalysisRepository:
                         "This analysis attempt is no longer active.",
                         code="analysis_stale",
                     )
+                # Waiting for another transaction also consumes the lease.
+                now = _utc_now()
                 if _lease_expired(row, now):
                     raise MedicalInsightError(
                         "Medical insight analysis lease expired.",
                         code="analysis_stalled",
-                    )
-                # Lock the document while moving the current pointer. Two
-                # successful reruns for one document then finish in order.
-                document = self._document(
-                    db, row.document_id, row.user_id, row.workspace_id, lock=True
-                )
-                if not document:
-                    raise MedicalInsightError(
-                        "The document was deleted before analysis finished.",
-                        code="document_deleted",
                     )
                 if document.file_hash != row.source_hash:
                     raise MedicalInsightError(

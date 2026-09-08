@@ -1,9 +1,13 @@
 """Tests for evidence-backed medical document insights."""
 
 from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
+import os
+import threading
+import uuid
 
 import pytest
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -348,6 +352,108 @@ def _paper_rows(sessions):
             )
         )
         db.commit()
+
+
+@pytest.mark.parametrize("first_operation", ["create", "save"])
+def test_postgres_create_and_save_use_the_same_lock_order(monkeypatch, first_operation):
+    url = (
+        os.getenv("GRAPHMIND_TEST_POSTGRES_URL")
+        or os.getenv("TEST_POSTGRES_URL")
+        or os.getenv("POSTGRES_TEST_DATABASE_URL")
+    )
+    if not url or not url.startswith("postgresql"):
+        pytest.skip("set GRAPHMIND_TEST_POSTGRES_URL to test PostgreSQL row locks")
+
+    schema = f"insight_locks_{uuid.uuid4().hex}"
+    admin = create_engine(url)
+    with admin.begin() as connection:
+        connection.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
+    engine = create_engine(
+        url,
+        connect_args={"options": f"-csearch_path={schema} -clock_timeout=5000 -cstatement_timeout=10000"},
+    )
+    sessions = sessionmaker(bind=engine, autoflush=False)
+    repository = AnalysisRepository(sessions, enabled=lambda: True)
+    try:
+        Base.metadata.create_all(engine)
+        # Insert the parent first because this test uses real foreign keys.
+        with sessions() as db:
+            db.add(DocumentRecord(
+                id="document-1", user_id="user-1", workspace_id="workspace-1",
+                filename="paper.pdf", stored_filename="paper.pdf",
+                original_filename="paper.pdf", file_hash="a" * 64,
+                file_path="/tmp/paper.pdf",
+                parsed_source_hash="b" * 64,
+            ))
+            db.commit()
+        arguments = dict(
+            document_id="document-1", user_id="user-1", workspace_id="workspace-1",
+            source_hash="a" * 64, requested_by="user-1", provider="extractive",
+            model_name="extractive-v1", prompt_version="medical-insights-v1",
+            schema_version="medical-insights-v1",
+        )
+        run, _ = repository.create_or_reuse(**arguments)
+        claimed = repository.mark_running(run["run_id"])
+        output = MedicalInsightAnalyzer(provider=ExtractiveMedicalAIProvider()).run(
+            [{"id": "chunk-1", "text": "The result was reported.",
+              "metadata": {"section_type": "results", "page_start": 2}}],
+            title="paper.pdf", document_kind="research_paper", language="en",
+        )
+        first_locked = threading.Event()
+        second_attempting = threading.Event()
+        operation = threading.local()
+        connections = {}
+        original_document = repository._document
+
+        def coordinated_document(db, *args, **kwargs):
+            name = operation.name
+            connections[name] = db.scalar(text("SELECT pg_backend_pid()"))
+            if name != first_operation:
+                second_attempting.set()
+            document = original_document(db, *args, **kwargs)
+            if name == first_operation:
+                first_locked.set()
+                assert second_attempting.wait(10), "second transaction never reached the document lock"
+            return document
+
+        monkeypatch.setattr(repository, "_document", coordinated_document)
+
+        def execute(name):
+            operation.name = name
+            if name == "create":
+                return repository.create_or_reuse(**arguments)
+            return repository.save_success(
+                run["run_id"], output, attempt_count=claimed["attempt_count"]
+            )
+
+        # Hold one document lock until the other connection asks for it.
+        # With run -> document in save_success, the create-first case deadlocks.
+        second_operation = "save" if first_operation == "create" else "create"
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            first = workers.submit(execute, first_operation)
+            assert first_locked.wait(10), "first transaction never acquired the document lock"
+            second = workers.submit(execute, second_operation)
+            results = {
+                first_operation: first.result(timeout=20),
+                second_operation: second.result(timeout=20),
+            }
+        assert connections["create"] != connections["save"]
+        reused, created = results["create"]
+        assert not created
+        assert reused["run_id"] == run["run_id"]
+        assert results["save"]["status"] == "succeeded"
+        assert results["save"]["evidence"]
+        with sessions() as db:
+            runs = db.scalars(select(MedicalAnalysisRunRecord)).all()
+            assert len(runs) == 1
+            assert runs[0].status == "succeeded"
+            assert runs[0].is_current
+            assert runs[0].attempt_count == claimed["attempt_count"]
+    finally:
+        engine.dispose()
+        with admin.begin() as connection:
+            connection.exec_driver_sql(f'DROP SCHEMA "{schema}" CASCADE')
+        admin.dispose()
 
 
 def test_repository_persists_citations_and_filters_stale_source_versions():
