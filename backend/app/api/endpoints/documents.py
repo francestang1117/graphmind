@@ -59,7 +59,9 @@ class UploadResponse(BaseModel):
     file_hash: str
     status: str = "uploaded"
     job_id: str | None = None
+    document_id: str | None = None
     workspace_id: str | None = None
+    document_kind: str | None = None
 
 
 class DuplicateResponse(BaseModel):
@@ -79,7 +81,9 @@ class FileInfo(BaseModel):
     mime_type: str
     created_at: str
     modified_at: str
+    document_id: str | None = None
     workspace_id: str | None = None
+    document_kind: str | None = None
 
 
 class FileListResponse(BaseModel):
@@ -160,7 +164,9 @@ async def upload_document(
         file_type=metadata["file_type"],
         file_hash=metadata["file_hash"],
         job_id=job_id,
+        document_id=metadata.get("document_id"),
         workspace_id=metadata.get("workspace_id") or scope,
+        document_kind=metadata.get("document_kind"),
     )
 
 
@@ -441,7 +447,13 @@ async def delete_document(
     user_id = _user_id(user)
     workspace_id = normalize_workspace_id(workspace_id)
     resolve_workspace_id(user_id, workspace_id)
+    metadata = document_service.get_document(filename, user_id, workspace_id=workspace_id)
     if not document_service.delete_document(filename, user_id, workspace_id=workspace_id):
         raise HTTPException(status_code=404, detail="File not found")
-    clear_cached_parse(filename, user_id, workspace_id=workspace_id)
+    clear_cached_parse(
+        filename,
+        user_id,
+        document_id=(metadata or {}).get("document_id", ""),
+        workspace_id=workspace_id,
+    )
     return {"message": "File deleted"}

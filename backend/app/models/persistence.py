@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -92,6 +92,11 @@ class DocumentRecord(Base):
     language: Mapped[str | None] = mapped_column(String(16), nullable=True)
     document_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     parser_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Updated when parsing commits a new profile, sections, and chunk set.
+    # Analysis status checks this scalar instead of hashing the whole document.
+    parsed_source_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     modified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -331,3 +336,94 @@ class ProcessingJobRecord(Base):
     # Only filled once the job is no longer active. Cleanup uses this instead
     # of updated_at so a long-running job is never removed by age alone.
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MedicalAnalysisRunRecord(Base):
+    """One versioned request to explain a medical document."""
+
+    __tablename__ = "medical_analysis_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "document_id",
+            "analysis_key",
+            name="uq_medical_analysis_run_version",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    document_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    requested_by: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    source_hash: Mapped[str] = mapped_column(String(64), index=True)
+    # Hash of the parsed profile, sections, and chunks used by this run. A
+    # file can keep the same bytes while parser output changes.
+    parsed_source_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    analysis_key: Mapped[str] = mapped_column(String(255), index=True)
+    provider: Mapped[str] = mapped_column(String(64), default="extractive")
+    model_name: Mapped[str] = mapped_column(String(128), default="extractive-v1")
+    prompt_version: Mapped[str] = mapped_column(String(64), default="medical-insights-v1")
+    schema_version: Mapped[str] = mapped_column(String(64), default="medical-insights-v1")
+    redact_pii: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_input_tokens: Mapped[int] = mapped_column(Integer, default=12000)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    error_code: Mapped[str] = mapped_column(String(80), default="")
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    is_current: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class MedicalAnalysisResultRecord(Base):
+    """Validated report attached to one analysis run."""
+
+    __tablename__ = "medical_analysis_results"
+
+    run_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("medical_analysis_runs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    report_json: Mapped[str] = mapped_column(Text)
+    citation_coverage: Mapped[float] = mapped_column(Float, default=0.0)
+    validation_status: Mapped[str] = mapped_column(String(32), default="validated")
+    warnings_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class MedicalAnalysisEvidenceRecord(Base):
+    """A saved link from a report finding to source text."""
+
+    __tablename__ = "medical_analysis_evidence"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # This is the id shown in the report, for example EVIDENCE_001. Keep it
+    # separate from the database row id so the API can map citations back to
+    # the context that was sent to the provider.
+    evidence_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    run_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("medical_analysis_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    finding_id: Mapped[str] = mapped_column(String(128), index=True)
+    chunk_id: Mapped[str] = mapped_column(String(320), index=True)
+    section_id: Mapped[str | None] = mapped_column(String(320), nullable=True, index=True)
+    section_type: Mapped[str] = mapped_column(String(64), default="unknown")
+    section_title: Mapped[str] = mapped_column(String(255), default="")
+    page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quoted_text: Mapped[str] = mapped_column(Text)
+    character_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    character_end: Mapped[int | None] = mapped_column(Integer, nullable=True)

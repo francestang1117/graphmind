@@ -20,6 +20,7 @@ interface Props {
   onRetryUpload?: (id: string) => void;
   onOpenFile?: (filename: string) => void;
   onViewParsed?: (filename: string, label: string) => void;
+  onViewInsights?: (file: FileInfo, label: string) => void;
 }
 
 const filters: Array<{ value: StatusFilter; label: string }> = [
@@ -92,6 +93,7 @@ export default function DocumentList({
   onRetryUpload,
   onOpenFile,
   onViewParsed,
+  onViewInsights,
 }: Props) {
   // Keep active uploads above the saved list.
   const filteredFiles = files.filter((file) => {
@@ -149,6 +151,7 @@ export default function DocumentList({
             onDelete={onDelete}
             onOpenFile={onOpenFile}
             onViewParsed={onViewParsed}
+            onViewInsights={onViewInsights}
           />
         ))}
       </div>

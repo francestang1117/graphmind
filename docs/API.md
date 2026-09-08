@@ -268,6 +268,57 @@ lists the other meaning in `secondary_types`. `location_exact=false` means the
 parser kept the extracted content but could not safely align it to a character
 range in the source text, which can happen with PDF tables.
 
+### Medical insights
+
+These endpoints run a bounded, evidence-backed analysis for documents whose
+medical profile is `research_paper` or `guideline`. Every report finding points
+to an evidence ID from the current document. The default provider is the local
+`extractive` provider, so the default path does not send document content to an
+external model.
+
+```bash
+curl -X POST \
+  "http://localhost:8000/api/v1/documents/<document_id>/medical-insights?workspace_id=$WORKSPACE_ID"
+```
+
+The response is a `202` run snapshot. A repeated request for the same document
+version returns the existing queued, running, or successful run instead of
+creating another task.
+
+```json
+{
+  "run_id": "run-123",
+  "status": "queued",
+  "document_id": "doc-123",
+  "workspace_id": "workspace-abc",
+  "citation_coverage": 0.0,
+  "warnings": []
+}
+```
+
+Poll the run until it is `succeeded` or `failed`:
+
+```bash
+curl "http://localhost:8000/api/v1/medical-analysis-runs/<run_id>?workspace_id=$WORKSPACE_ID"
+```
+
+A successful response contains `report` and `evidence`. Evidence includes the
+page range, normalized section, chunk ID, character range, and the quoted
+source passage. Clicking an evidence item in the frontend opens the same
+source details. The current UI does not embed a PDF viewer or perform a page
+scroll; it shows the traceable page/chunk location and quote.
+
+```bash
+curl "http://localhost:8000/api/v1/documents/<document_id>/medical-insights/latest?workspace_id=$WORKSPACE_ID"
+curl -X POST \
+  "http://localhost:8000/api/v1/documents/<document_id>/medical-insights/reanalyze?workspace_id=$WORKSPACE_ID"
+```
+
+Analysis data is scoped by user, workspace, and document. A deleted document,
+different workspace, unsupported medical kind, stale source version, or
+unvalidated provider response cannot become the current report. The report is
+for document understanding only and is not a diagnosis or treatment plan.
+
 ### `DELETE /documents/{filename}`
 
 Deletes the stored file, soft-deletes the database document record when persistence is enabled, and clears cached parsed artifacts for that file.

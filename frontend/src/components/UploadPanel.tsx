@@ -12,6 +12,7 @@ import { useAppStore } from "../stores/appStore";
 import DocumentList, { type StatusFilter } from "./upload/DocumentList";
 import DocumentOverview from "./upload/DocumentOverview";
 import JobHistory from "./upload/JobHistory";
+import MedicalInsightPanel from "./upload/MedicalInsightPanel";
 import UploadDropzone from "./upload/UploadDropzone";
 
 function parsedHighlights(parsed: ParsedDocumentSummary) {
@@ -77,6 +78,11 @@ export default function UploadPanel() {
   const [parsedLabel, setParsedLabel] = useState("");
   const [parsedFilename, setParsedFilename] = useState("");
   const [loadingParsed, setLoadingParsed] = useState(false);
+  const [insightDocument, setInsightDocument] = useState<{
+    documentId: string;
+    title: string;
+    workspaceId?: string | null;
+  } | null>(null);
   const { uploads, uploadMany, cancelUpload, retryUpload, dismissUpload } = useUpload();
   const { files, setFiles, removeFile } = useAppStore();
   const jobRefreshKey = uploads
@@ -92,14 +98,18 @@ export default function UploadPanel() {
   const handleDelete = async (filename: string) => {
     setDeleting(filename);
     setDeleteError("");
+    const file = files.find((item) => item.filename === filename);
     try {
-      await deleteDocument(filename);
+      await deleteDocument(filename, file?.workspace_id);
       removeFile(filename);
       if (parsedFilename === filename) {
         setParsed(null);
         setParsedError("");
         setParsedLabel("");
         setParsedFilename("");
+      }
+      if (insightDocument?.documentId === file?.document_id) {
+        setInsightDocument(null);
       }
     } catch {
       setDeleteError("Could not delete this document. Refresh the list and try again.");
@@ -123,7 +133,8 @@ export default function UploadPanel() {
     setParsedLabel(label);
     setParsedFilename(filename);
     try {
-      setParsed(await getParsedDocument(filename));
+      const file = files.find((item) => item.filename === filename);
+      setParsed(await getParsedDocument(filename, file?.workspace_id));
     } catch {
       setParsed(null);
       setParsedError("Parse result is not ready yet. Try again after upload finishes.");
@@ -133,7 +144,26 @@ export default function UploadPanel() {
   };
 
   const handleOpenFile = (filename: string) => {
-    window.open(getDocumentOpenUrl(filename), "_blank", "noopener,noreferrer");
+    const file = files.find((item) => item.filename === filename);
+    window.open(
+      getDocumentOpenUrl(filename, file?.workspace_id),
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
+
+  const handleViewInsights = (file: (typeof files)[number], label: string) => {
+    if (!file.document_id) return;
+    const documentId = file.document_id;
+    setInsightDocument((current) =>
+      current?.documentId === documentId
+        ? null
+        : {
+            documentId,
+            title: label,
+            workspaceId: file.workspace_id,
+          },
+    );
   };
 
   return (
@@ -156,6 +186,7 @@ export default function UploadPanel() {
         onRetryUpload={retryUpload}
         onOpenFile={handleOpenFile}
         onViewParsed={handleViewParsed}
+        onViewInsights={handleViewInsights}
       />
       {(loadingParsed || parsed || parsedError) && (
         <section className="parsed-viewer">
@@ -224,6 +255,15 @@ export default function UploadPanel() {
             </>
           )}
         </section>
+      )}
+      {insightDocument && (
+        <MedicalInsightPanel
+          key={`${insightDocument.documentId}:${insightDocument.workspaceId ?? ""}`}
+          documentId={insightDocument.documentId}
+          title={insightDocument.title}
+          workspaceId={insightDocument.workspaceId}
+          onClose={() => setInsightDocument(null)}
+        />
       )}
     </div>
   );

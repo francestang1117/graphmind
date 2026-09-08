@@ -2,7 +2,8 @@
 
 This project currently has backend tests for upload, validation, parsing, auth,
 search, graph construction, chat, persistence, rate limiting, virus scanning,
-and WebSocket progress.
+WebSocket progress, medical document analysis, citation validation, and safety
+boundaries.
 
 ## Quick Start
 
@@ -13,7 +14,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
 
 The exact count can change as tests are added. The latest local result is
-`236 passed, 1 skipped`.
+`266 passed, 1 skipped`.
 
 The skipped test is the PostgreSQL migration check when
 `GRAPHMIND_TEST_POSTGRES_URL` is not set. GitHub Actions supplies PostgreSQL 16
@@ -59,6 +60,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 | `backend/tests/test_medical_analyzer.py` | Medical analysis step and fallback to generic parsing |
 | `backend/tests/test_medical_repository.py` | Scoped profile/section replacement, cleanup, and deleted-document guard |
 | `backend/tests/test_medical_api.py` | User/workspace scope on the medical analysis endpoint |
+| `backend/tests/test_medical_ai_insights.py` | Bounded evidence context, provider output, citation/safety validation, versioned persistence, and stale-result handling |
 
 ## Running Specific Tests
 
@@ -153,6 +155,35 @@ Check `document_kind`, `language`, `missing_sections`, and each section's
 with no extractable text should be reported as `unknown` with an
 `ocr_required` warning. The current phase does not run OCR or generate study
 cards, medical conclusions, or treatment advice.
+
+Run a medical insight for a parsed paper or guideline. Use the `document_id`
+and `workspace_id` returned by the document list endpoint, not the stored
+content-hash filename:
+
+```bash
+curl -X POST \
+  "http://localhost:8000/api/v1/documents/<document_id>/medical-insights?workspace_id=<workspace_id>"
+```
+
+Poll the returned `run_id`:
+
+```bash
+curl "http://localhost:8000/api/v1/medical-analysis-runs/<run_id>?workspace_id=<workspace_id>"
+```
+
+With the default `MEDICAL_AI_PROVIDER=extractive`, a local deterministic
+provider produces the report without a GPT API key. Check that the final
+response is `succeeded`, each core report item has `evidence_ids`, and each
+evidence row includes a page or section location when the parser had one. A
+second start request should return the same run for the unchanged document.
+The frontend's **Medical insight** action shows the report and opens the quote,
+section, page, and character range for each citation.
+
+To test the optional provider boundary without calling an external service,
+set `MEDICAL_AI_PROVIDER=fake` in a test environment or use the supplied
+`FakeMedicalAIProvider` in unit tests. A provider timeout or invalid citation
+must fail only the insight run; the original document and its parsed data stay
+available.
 
 Check database-backed parsed artifacts:
 

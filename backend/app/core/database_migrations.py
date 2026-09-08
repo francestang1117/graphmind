@@ -46,6 +46,7 @@ def upgrade_persistence_schema(engine) -> None:
         _ensure_workspace_table(connection)
         _ensure_medical_document_columns(connection)
         _ensure_medical_tables(connection)
+        _ensure_medical_ai_tables(connection)
         _ensure_workspace_columns(connection)
         changed = _move_legacy_document_ids(connection)
         seeded = _seed_default_workspaces(connection)
@@ -73,6 +74,7 @@ def _upgrade_sqlite(engine) -> None:
                 _ensure_workspace_table(connection)
                 _ensure_medical_document_columns(connection)
                 _ensure_medical_tables(connection)
+                _ensure_medical_ai_tables(connection)
                 _ensure_workspace_columns(connection)
                 changed = _move_legacy_document_ids(connection)
                 seeded = _seed_default_workspaces(connection)
@@ -153,6 +155,7 @@ def _ensure_medical_document_columns(connection) -> None:
         ("language", "VARCHAR(16)"),
         ("document_date", "VARCHAR(32)"),
         ("parser_version", "VARCHAR(64)"),
+        ("parsed_source_hash", "VARCHAR(64)"),
     )
     for column, column_type in columns:
         if _has_column(connection, "documents", column):
@@ -164,6 +167,10 @@ def _ensure_medical_document_columns(connection) -> None:
     connection.exec_driver_sql(
         "CREATE INDEX IF NOT EXISTS ix_documents_document_kind "
         "ON documents (document_kind)"
+    )
+    connection.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_documents_parsed_source_hash "
+        "ON documents (parsed_source_hash)"
     )
 
 
@@ -239,6 +246,151 @@ def _ensure_medical_tables(connection) -> None:
         ("ix_document_sections_workspace_id", "document_sections", "workspace_id"),
         ("ix_document_sections_document_id", "document_sections", "document_id"),
         ("ix_document_sections_section_type", "document_sections", "section_type"),
+    )
+    for name, table, column in indexes:
+        connection.exec_driver_sql(
+            f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"
+        )
+
+
+def _ensure_medical_ai_tables(connection) -> None:
+    """Add report and citation tables without changing existing medical rows."""
+    if not _has_table(connection, "documents"):
+        return
+
+    timestamp_type = (
+        "DATETIME"
+        if connection.dialect.name == "sqlite"
+        else "TIMESTAMP WITH TIME ZONE"
+    )
+    if not _has_table(connection, "medical_analysis_runs"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE medical_analysis_runs (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                requested_by VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                source_hash VARCHAR(64) NOT NULL,
+                parsed_source_hash VARCHAR(64),
+                analysis_key VARCHAR(255) NOT NULL,
+                provider VARCHAR(64) NOT NULL,
+                model_name VARCHAR(128) NOT NULL,
+                prompt_version VARCHAR(64) NOT NULL,
+                schema_version VARCHAR(64) NOT NULL,
+                redact_pii BOOLEAN NOT NULL DEFAULT TRUE,
+                max_input_tokens INTEGER NOT NULL DEFAULT 12000,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                last_heartbeat_at {timestamp_type},
+                lease_expires_at {timestamp_type},
+                error_code VARCHAR(80) NOT NULL,
+                error_message TEXT NOT NULL,
+                is_current BOOLEAN NOT NULL,
+                created_at {timestamp_type} NOT NULL,
+                started_at {timestamp_type},
+                completed_at {timestamp_type},
+                updated_at {timestamp_type} NOT NULL,
+                CONSTRAINT uq_medical_analysis_run_version
+                    UNIQUE (user_id, workspace_id, document_id, analysis_key),
+                CONSTRAINT fk_medical_analysis_runs_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+    # These columns were added after the first PR4 schema. ADD COLUMN keeps
+    # existing local and PostgreSQL databases upgradeable without recreating
+    # the report tables.
+    missing_columns = (
+        ("parsed_source_hash", "VARCHAR(64)"),
+        ("redact_pii", "BOOLEAN NOT NULL DEFAULT TRUE"),
+        ("max_input_tokens", "INTEGER NOT NULL DEFAULT 12000"),
+        ("attempt_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_heartbeat_at", timestamp_type),
+        ("lease_expires_at", timestamp_type),
+    )
+    for column, definition in missing_columns:
+        if not _has_column(connection, "medical_analysis_runs", column):
+            connection.exec_driver_sql(
+                f"ALTER TABLE medical_analysis_runs ADD COLUMN {column} {definition}"
+            )
+
+    if not _has_table(connection, "medical_analysis_results"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE medical_analysis_results (
+                run_id VARCHAR(64) NOT NULL PRIMARY KEY,
+                report_json TEXT NOT NULL,
+                citation_coverage FLOAT NOT NULL,
+                validation_status VARCHAR(32) NOT NULL,
+                warnings_json TEXT NOT NULL,
+                created_at {timestamp_type} NOT NULL,
+                CONSTRAINT fk_medical_analysis_results_run
+                    FOREIGN KEY (run_id) REFERENCES medical_analysis_runs(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+    if not _has_table(connection, "medical_analysis_evidence"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE medical_analysis_evidence (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                evidence_id VARCHAR(64),
+                run_id VARCHAR(64) NOT NULL,
+                finding_id VARCHAR(128) NOT NULL,
+                chunk_id VARCHAR(320) NOT NULL,
+                section_id VARCHAR(320),
+                section_type VARCHAR(64) NOT NULL DEFAULT 'unknown',
+                section_title VARCHAR(255) NOT NULL DEFAULT '',
+                page_start INTEGER,
+                page_end INTEGER,
+                quoted_text TEXT NOT NULL,
+                character_start INTEGER,
+                character_end INTEGER,
+                CONSTRAINT fk_medical_analysis_evidence_run
+                    FOREIGN KEY (run_id) REFERENCES medical_analysis_runs(id) ON DELETE CASCADE
+            )
+            """
+        )
+    else:
+        # Older PR4 databases may already contain reports. Add the public
+        # evidence key and section labels in place so saved results survive.
+        missing_columns = (
+            ("evidence_id", "VARCHAR(64)"),
+            ("section_type", "VARCHAR(64) NOT NULL DEFAULT 'unknown'"),
+            ("section_title", "VARCHAR(255) NOT NULL DEFAULT ''"),
+        )
+        for column, definition in missing_columns:
+            if not _has_column(connection, "medical_analysis_evidence", column):
+                connection.exec_driver_sql(
+                    f"ALTER TABLE medical_analysis_evidence ADD COLUMN {column} {definition}"
+                )
+
+    if _has_column(connection, "medical_analysis_evidence", "evidence_id"):
+        connection.exec_driver_sql(
+            "UPDATE medical_analysis_evidence SET evidence_id = id "
+            "WHERE evidence_id IS NULL OR evidence_id = ''"
+        )
+
+    indexes = (
+        ("ix_medical_analysis_runs_user_id", "medical_analysis_runs", "user_id"),
+        ("ix_medical_analysis_runs_workspace_id", "medical_analysis_runs", "workspace_id"),
+        ("ix_medical_analysis_runs_document_id", "medical_analysis_runs", "document_id"),
+        ("ix_medical_analysis_runs_status", "medical_analysis_runs", "status"),
+        ("ix_medical_analysis_runs_analysis_key", "medical_analysis_runs", "analysis_key"),
+        ("ix_medical_analysis_runs_is_current", "medical_analysis_runs", "is_current"),
+        ("ix_medical_analysis_runs_parsed_source_hash", "medical_analysis_runs", "parsed_source_hash"),
+        ("ix_medical_analysis_runs_lease_expires_at", "medical_analysis_runs", "lease_expires_at"),
+        ("ix_medical_analysis_results_run_id", "medical_analysis_results", "run_id"),
+        ("ix_medical_analysis_evidence_run_id", "medical_analysis_evidence", "run_id"),
+        ("ix_medical_analysis_evidence_evidence_id", "medical_analysis_evidence", "evidence_id"),
+        ("ix_medical_analysis_evidence_finding_id", "medical_analysis_evidence", "finding_id"),
+        ("ix_medical_analysis_evidence_chunk_id", "medical_analysis_evidence", "chunk_id"),
+        ("ix_medical_analysis_evidence_section_id", "medical_analysis_evidence", "section_id"),
+        ("ix_medical_analysis_evidence_section_type", "medical_analysis_evidence", "section_type"),
     )
     for name, table, column in indexes:
         connection.exec_driver_sql(
@@ -680,6 +832,7 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
                 language VARCHAR(16),
                 document_date VARCHAR(32),
                 parser_version VARCHAR(64),
+                parsed_source_hash VARCHAR(64),
                 created_at DATETIME NOT NULL,
                 modified_at DATETIME NOT NULL,
                 deleted_at DATETIME,
@@ -690,6 +843,7 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
             "id, user_id, workspace_id, filename, stored_filename, original_filename, "
             "file_extension, file_type, mime_type, file_hash, file_path, file_size, "
             "status, document_kind, source_kind, language, document_date, parser_version, "
+            "parsed_source_hash, "
             "created_at, modified_at, deleted_at",
         ),
         "parsed_chunks": (
@@ -882,6 +1036,7 @@ def _sqlite_indexes(table: str) -> tuple[tuple[str, str], ...]:
             ("ix_documents_file_hash", "file_hash"),
             ("ix_documents_file_extension", "file_extension"),
             ("ix_documents_document_kind", "document_kind"),
+            ("ix_documents_parsed_source_hash", "parsed_source_hash"),
             ("ix_documents_deleted_at", "deleted_at"),
         ),
         "parsed_chunks": common + (("ix_parsed_chunks_document_id", "document_id"),),

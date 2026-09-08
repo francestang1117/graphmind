@@ -71,6 +71,65 @@ def test_paper_analysis_replaces_generic_chunks_and_is_persisted():
     assert repository.calls[0][1]["workspace_id"] == "workspace-a"
 
 
+def test_guideline_analysis_uses_guideline_sections_and_roles():
+    text = """Clinical Practice Guideline
+
+Scope
+This guideline covers adults with the condition.
+
+Recommendations
+Clinicians should discuss treatment options.
+
+Population
+The target population is adults.
+
+Evidence
+The recommendation is based on moderate certainty evidence.
+
+Contraindications
+The intervention is not for this population."""
+    parsed = {
+        "title": "Clinical Practice Guideline",
+        "content": text,
+        "chunks": [{"text": text, "type": "page", "page": 1}],
+        "metadata": {"format": "pdf"},
+        "extra": {
+            "sections": [{"title": "Page 1", "content": text}],
+            "tables": [],
+        },
+    }
+
+    result = analyze_document(
+        parsed,
+        filename="guideline.pdf",
+        original_filename="guideline.pdf",
+        document_id="guideline-a",
+        user_id="user-a",
+        workspace_id="workspace-a",
+        repository=_Repository(),
+    )
+
+    by_type = {section["section_type"]: section for section in result["sections"]}
+    assert result["document_kind"] == "guideline"
+    assert {
+        "scope",
+        "recommendations",
+        "population",
+        "evidence",
+        "contraindications",
+    } <= by_type.keys()
+    assert by_type["recommendations"]["metadata"]["evidence_role"] == (
+        "guideline_recommendation"
+    )
+    assert by_type["evidence"]["metadata"]["evidence_role"] == "guideline_evidence"
+    assert all(chunk["type"] == "medical_section" for chunk in parsed["chunks"])
+    assert any(
+        chunk["section_type"] == "recommendations"
+        and chunk["evidence_role"] == "guideline_recommendation"
+        for chunk in parsed["chunks"]
+    )
+
+
 def test_ordinary_document_keeps_the_generic_parse_path():
     parsed = {
         "content": "FastAPI and Python",

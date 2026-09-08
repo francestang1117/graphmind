@@ -86,6 +86,19 @@ class ParsedArtifactRepository:
             ):
                 db.rollback()
                 return
+
+            # Keep the analysis version in step with the generic parser path.
+            # The medical bundle refreshes it after sections are written.
+            from app.services.medical.ai.analysis_repository import (
+                refresh_document_parsed_source_hash_in_session,
+            )
+
+            refresh_document_parsed_source_hash_in_session(
+                db,
+                document,
+                user_id,
+                document.workspace_id or default_workspace_id(user_id),
+            )
             db.commit()
 
     def replace_parse_bundle(
@@ -274,6 +287,7 @@ class ParsedArtifactRepository:
                     ),
                 )
             )
+            document.parsed_source_hash = None
             db.commit()
 
     def list_chunks(
@@ -486,6 +500,7 @@ def _dedupe_entities(entities: list[Any]) -> list[Any]:
 
 def _chunk_to_dict(row: "ParsedChunkRecord") -> dict[str, Any]:
     return {
+        "id": row.id,
         "document_id": row.document_id,
         "user_id": row.user_id,
         "workspace_id": row.workspace_id,

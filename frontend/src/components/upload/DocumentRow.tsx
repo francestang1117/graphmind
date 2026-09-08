@@ -1,4 +1,4 @@
-import { AlertCircle, CheckCircle2, ExternalLink, Eye, EyeOff, Loader2, Trash2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, ExternalLink, Eye, EyeOff, FileSearch, Loader2, Trash2 } from "lucide-react";
 import type { FileInfo } from "../../stores/appStore";
 import { displayName, fileStatusLabel, formatDate, formatSize } from "../../utils/fileMeta";
 import FileIcon from "./FileIcon";
@@ -11,6 +11,7 @@ interface Props {
   onDelete: (filename: string) => void;
   onOpenFile?: (filename: string) => void;
   onViewParsed?: (filename: string, label: string) => void;
+  onViewInsights?: (file: FileInfo, label: string) => void;
 }
 
 const PARSEABLE_EXTENSIONS = new Set([
@@ -35,9 +36,17 @@ export default function DocumentRow({
   onDelete,
   onOpenFile,
   onViewParsed,
+  onViewInsights,
 }: Props) {
   const status = file.status ?? "done";
   const canViewParsed = !demo && PARSEABLE_EXTENSIONS.has(file.file_extension) && onViewParsed;
+  const isMedicalAnalysisCandidate =
+    file.document_kind === "research_paper" ||
+    file.document_kind === "guideline";
+  const canViewInsights =
+    !demo &&
+    isMedicalAnalysisCandidate &&
+    Boolean(file.document_id && onViewInsights);
 
   return (
     <div className={`document-row ${demo ? "demo-row" : ""}`}>
@@ -67,6 +76,17 @@ export default function DocumentRow({
           onClick={() => onViewParsed(file.filename, displayName(file))}
         >
           {parsedActive ? <EyeOff size={17} /> : <Eye size={17} />}
+        </button>
+      )}
+      {canViewInsights && (
+        <button
+          className="row-action insight-action"
+          aria-label={`Analyze ${displayName(file)}`}
+          title="Open medical insight"
+          onClick={() => onViewInsights?.(file, displayName(file))}
+          type="button"
+        >
+          <FileSearch size={16} />
         </button>
       )}
       {!demo && onOpenFile && (

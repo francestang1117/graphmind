@@ -8,6 +8,9 @@ export interface FileInfo {
   file_extension: string;
   file_hash?: string;
   mime_type?: string;
+  document_id?: string | null;
+  workspace_id?: string | null;
+  document_kind?: string | null;
   created_at: string;
   modified_at?: string;
   status?: "done" | "processing" | "error";

@@ -34,7 +34,7 @@ class _PageRange:
 
 
 class PaperStructureParser:
-    """Build section-aware chunks without inventing missing paper content."""
+    """Build page-aware chunks for papers and clinical guidelines."""
 
     REQUIRED_SECTIONS = (
         MedicalSectionType.ABSTRACT.value,
@@ -45,6 +45,13 @@ class PaperStructureParser:
         MedicalSectionType.CONCLUSION.value,
         MedicalSectionType.LIMITATIONS.value,
         MedicalSectionType.REFERENCES.value,
+    )
+    GUIDELINE_SECTIONS = (
+        MedicalSectionType.SCOPE.value,
+        MedicalSectionType.RECOMMENDATIONS.value,
+        MedicalSectionType.POPULATION.value,
+        MedicalSectionType.EVIDENCE.value,
+        MedicalSectionType.CONTRAINDICATIONS.value,
     )
 
     _MARKDOWN_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*$")
@@ -64,11 +71,12 @@ class PaperStructureParser:
         parsed: dict[str, Any],
         analysis: MedicalDocumentAnalysis,
     ) -> PaperStructureResult:
-        """Parse a classified research paper into traceable sections."""
+        """Parse a classified paper or guideline into traceable sections."""
+        required_sections = self._required_sections(analysis.document_kind)
         text = str(parsed.get("content") or parsed.get("raw_content") or "")
         if not text.strip():
             warning = "ocr_required" if self._format(parsed) == "pdf" else "no_extractable_text"
-            return PaperStructureResult(warnings=[warning], missing_sections=list(self.REQUIRED_SECTIONS))
+            return PaperStructureResult(warnings=[warning], missing_sections=list(required_sections))
 
         pages = self._page_ranges(parsed, text)
         explicit = self._docx_sections(parsed)
@@ -121,7 +129,7 @@ class PaperStructureParser:
             for section in sections
             for secondary in section.secondary_types
         )
-        missing = [section for section in self.REQUIRED_SECTIONS if section not in present]
+        missing = [section for section in required_sections if section not in present]
         warnings = []
         if self._format(parsed) == "pdf" and not self._page_ranges(parsed, text):
             warnings.append("page_location_unavailable")
@@ -651,6 +659,12 @@ class PaperStructureParser:
     def _evidence_role(self, section_type: str) -> str:
         return {
             "title": "study_title",
+            "scope": "guideline_scope",
+            "recommendations": "guideline_recommendation",
+            "evidence": "guideline_evidence",
+            "contraindications": "guideline_contraindication",
+            "implementation": "guideline_implementation",
+            "monitoring": "guideline_monitoring",
             "abstract": "study_summary",
             "introduction": "background",
             "methods": "study_method",
@@ -668,3 +682,8 @@ class PaperStructureParser:
             "table": "table",
             "figure_caption": "figure_caption",
         }.get(section_type, "context")
+
+    def _required_sections(self, document_kind: str) -> tuple[str, ...]:
+        if document_kind == "guideline":
+            return self.GUIDELINE_SECTIONS
+        return self.REQUIRED_SECTIONS

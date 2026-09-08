@@ -95,7 +95,7 @@ else:
         "graphmind",
         broker=broker_url,
         backend=result_backend,
-        include=["app.tasks.process_document"],
+        include=["app.tasks.process_document", "app.tasks.medical_analysis"],
     )
     celery_app.conf.update(
         task_serializer="json",
@@ -107,6 +107,7 @@ else:
         task_default_queue=settings.CELERY_TASK_DEFAULT_QUEUE,
         task_routes={
             "app.tasks.process_document.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+            "app.tasks.medical_analysis.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
         },
     )
     # Beat is opt-in. Reindexing is useful, but local dev should not suddenly
