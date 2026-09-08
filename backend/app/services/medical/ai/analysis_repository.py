@@ -107,26 +107,39 @@ class AnalysisRepository:
 
         try:
             with self.session_factory() as db:
-                document = self._document(db, document_id, user_id, workspace_id)
+                # Serialize analysis creation with parser commits. Without the
+                # row lock, a parser can commit new chunks between the
+                # document read and the snapshot calculation.
+                document = self._document(
+                    db,
+                    document_id,
+                    user_id,
+                    workspace_id,
+                    lock=True,
+                )
                 if not document:
                     raise MedicalInsightError(
                         "Medical document was not found.",
                         code="document_not_found",
                     )
 
-                profile, sections, chunks = self._source_records(
-                    db, document, user_id, workspace_id
-                )
-                current_snapshot = _source_snapshot_hash(
-                    document, profile, sections, chunks
-                )
-                # Recompute from the database when possible. The optional
-                # argument keeps direct callers and older integrations working.
-                snapshot_hash = current_snapshot or parsed_source_hash or ""
+                snapshot_hash = document.parsed_source_hash
+                if not snapshot_hash:
+                    # Older rows have no stored snapshot yet. The document lock
+                    # keeps this one-time backfill consistent with a parser
+                    # commit that may be waiting on the same row.
+                    profile, sections, chunks = self._source_records(
+                        db, document, user_id, workspace_id
+                    )
+                    snapshot_hash = _source_snapshot_hash(
+                        document, profile, sections, chunks
+                    )
+                    document.parsed_source_hash = snapshot_hash
+
+                # Keep direct callers and older integrations working when the
+                # source rows are not available to calculate a snapshot.
+                snapshot_hash = str(snapshot_hash or parsed_source_hash or "")
                 effective_source_hash = str(document.file_hash or source_hash or "")
-                # The parser updates this once per committed source snapshot.
-                # Analysis status requests can then compare one scalar value.
-                document.parsed_source_hash = snapshot_hash
                 key = _analysis_key(
                     document_id,
                     effective_source_hash,

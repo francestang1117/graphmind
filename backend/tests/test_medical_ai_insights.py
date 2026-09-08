@@ -559,6 +559,40 @@ def test_status_reads_document_snapshot_instead_of_rehashing_source(monkeypatch)
         engine.dispose()
 
 
+def test_create_reuses_stored_document_snapshot_without_rehashing_source(monkeypatch):
+    engine, sessions, repository = _repository()
+    try:
+        _paper_rows(sessions)
+        stored_snapshot = "c" * 64
+        with sessions() as db:
+            document = db.get(DocumentRecord, "document-1")
+            document.parsed_source_hash = stored_snapshot
+            db.commit()
+
+        import app.services.medical.ai.analysis_repository as repository_module
+
+        def fail_if_rehashed(*_args, **_kwargs):
+            raise AssertionError("analysis creation should use the stored snapshot")
+
+        monkeypatch.setattr(repository_module, "_source_snapshot_hash", fail_if_rehashed)
+        run, created = repository.create_or_reuse(
+            document_id="document-1",
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_hash="a" * 64,
+            requested_by="user-1",
+            provider="extractive",
+            model_name="extractive-v1",
+            prompt_version="medical-insights-v1",
+            schema_version="medical-insights-v1",
+        )
+
+        assert created
+        assert run["parsed_source_hash"] == stored_snapshot
+    finally:
+        engine.dispose()
+
+
 def test_repository_exposes_expired_run_as_failed_and_allows_retry():
     engine, sessions, repository = _repository()
     try:
