@@ -8,6 +8,7 @@ import {
   startMedicalInsights,
   type MedicalInsightEvidence,
   type MedicalInsightFinding,
+  type MedicalInsightAttribute,
   type MedicalInsightReport,
   type MedicalInsightRun,
 } from "../../services/api";
@@ -95,6 +96,38 @@ function FindingList({
   );
 }
 
+function MethodItem({
+  label,
+  item,
+  evidenceById,
+  onSelectEvidence,
+}: {
+  label: string;
+  item: MedicalInsightAttribute;
+  evidenceById: Map<string, MedicalInsightEvidence>;
+  onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
+}) {
+  return (
+    <div className="insight-method-item">
+      <span>{label}</span>
+      <strong>{item.value}</strong>
+      <span className="insight-type">{readable(item.support_status)}</span>
+      {item.evidence_ids.length > 0 && findingEvidence(
+        {
+          id: `method-${label}`,
+          statement: item.value,
+          plain_explanation: "",
+          evidence_ids: item.evidence_ids,
+          evidence_level: "reported_in_document",
+          interpretation_type: "direct_statement",
+        },
+        evidenceById,
+        onSelectEvidence,
+      )}
+    </div>
+  );
+}
+
 function ReportView({
   report,
   run,
@@ -128,6 +161,19 @@ function ReportView({
         )}
       </section>
 
+      {report.study_methods && (
+        <details className="insight-report-section insight-details">
+          <summary>Study methods</summary>
+          <div className="insight-method-list">
+            <MethodItem label="Design" item={report.study_methods.design} {...{ evidenceById, onSelectEvidence }} />
+            <MethodItem label="Population" item={report.study_methods.population} {...{ evidenceById, onSelectEvidence }} />
+            <MethodItem label="Evidence subject" item={report.study_methods.human_animal_in_vitro} {...{ evidenceById, onSelectEvidence }} />
+            <MethodItem label="Sample size" item={report.study_methods.sample_size} {...{ evidenceById, onSelectEvidence }} />
+            <MethodItem label="Comparator" item={report.study_methods.comparator} {...{ evidenceById, onSelectEvidence }} />
+          </div>
+        </details>
+      )}
+
       <FindingList
         title="Key findings"
         items={report.key_findings}
@@ -149,6 +195,18 @@ function ReportView({
       <FindingList
         title="Limitations"
         items={report.limitations}
+        evidenceById={evidenceById}
+        onSelectEvidence={onSelectEvidence}
+      />
+      <FindingList
+        title="Where the findings may apply"
+        items={report.applicability ?? []}
+        evidenceById={evidenceById}
+        onSelectEvidence={onSelectEvidence}
+      />
+      <FindingList
+        title="Questions for further research"
+        items={report.future_research ?? []}
         evidenceById={evidenceById}
         onSelectEvidence={onSelectEvidence}
       />
@@ -199,6 +257,20 @@ function ReportView({
             ))}
           </div>
         </div>
+      )}
+
+      {report.coverage && (
+        <details className="insight-report-section insight-details">
+          <summary>Analysis coverage</summary>
+          <div className="insight-coverage-grid">
+            <span>{report.coverage.selected_chunks} of {report.coverage.total_chunks} source chunks included</span>
+            <span>{report.coverage.selected_tokens} of {report.coverage.max_input_tokens} input tokens used</span>
+            <span>Included: {report.coverage.included_sections.map(readable).join(", ") || "No labeled sections"}</span>
+            {!report.coverage.complete && (
+              <span>Not included: {report.coverage.omitted_sections.map(readable).join(", ") || "Some source passages"}</span>
+            )}
+          </div>
+        </details>
       )}
     </div>
   );
@@ -371,13 +443,22 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
       {run?.status === "succeeded" && report && (
         <>
           <div className="insight-meta">
-            <span><CheckCircle2 size={13} /> Source citations checked</span>
+            <span><CheckCircle2 size={13} /> Citations and claim wording checked</span>
+            <span>{run.provider === "extractive" ? "Local extractive analysis" : `${readable(run.provider)} AI analysis`}</span>
+            <span>{run.model_name}</span>
+            {run.parsed_source_hash && <span>Source {run.parsed_source_hash.slice(0, 8)}</span>}
             <span>{readable(report.document_kind)}</span>
             <span>{report.language}</span>
             {typeof run.citation_coverage === "number" && (
               <span>{Math.round(run.citation_coverage * 100)}% citation coverage</span>
             )}
           </div>
+          {run.provider !== "extractive" && (
+            <div className="insight-provider-notice">
+              Selected {run.redact_pii ? "redacted " : ""}document excerpts were sent to the configured AI provider.
+              {run.redact_pii === false && " PII redaction was disabled for this run."} API keys stay on the server.
+            </div>
+          )}
           <ReportView
             report={report}
             run={run}

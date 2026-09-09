@@ -2,8 +2,10 @@
 
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 import threading
+from types import SimpleNamespace
 import uuid
 
 import pytest
@@ -31,10 +33,15 @@ from app.services.medical.ai.context_builder import (
     _truncate_text,
     redact_sensitive_fields,
 )
-from app.services.medical.ai.exceptions import MedicalInsightValidationError
+from app.services.medical.ai.exceptions import MedicalInsightError, MedicalInsightValidationError
 from app.services.medical.ai.models import MedicalInsightReport
-from app.services.medical.ai.provider import ExtractiveMedicalAIProvider, FakeMedicalAIProvider
+from app.services.medical.ai.provider import (
+    ExtractiveMedicalAIProvider,
+    FakeMedicalAIProvider,
+    OpenAIMedicalAIProvider,
+)
 from app.services.medical.ai.safety_validator import validate_safety
+from app.services.medical.ai.support_validator import validate_support
 
 
 def _context(*items: tuple[str, str]) -> AnalysisContext:
@@ -188,6 +195,19 @@ def test_context_builder_reads_legacy_page_metadata_for_guidelines():
     assert evidence.page_start == evidence.page_end == 4
 
 
+def test_context_builder_preserves_safe_parser_warnings_only():
+    context = ContextBuilder().build(
+        [{"id": "chunk-1", "text": "A table was extracted.", "section_type": "table"}],
+        source_warnings=[
+            "table_location_unavailable",
+            "Contains source text: Patient Name",
+            "table_location_unavailable",
+        ],
+    )
+
+    assert context.warnings == ["table_location_unavailable"]
+
+
 def test_context_builder_counts_and_truncates_cjk_text_without_rebuilding_it():
     source = "中文医学论文内容" * 200
 
@@ -207,6 +227,179 @@ def test_context_builder_counts_and_truncates_cjk_text_without_rebuilding_it():
         max_input_tokens=100,
     )
     assert context.evidence[0].token_count <= 100
+
+
+def test_context_builder_reserves_space_across_paper_sections():
+    chunks = [
+        {
+            "id": f"chunk-{section}",
+            "text": f"{section} " + ("source text " * 80),
+            "section_type": section,
+        }
+        for section in ("introduction", "methods", "results", "discussion", "limitations")
+    ]
+
+    context = ContextBuilder().build(
+        chunks,
+        title="Long paper",
+        document_kind="research_paper",
+        language="en",
+        max_input_tokens=220,
+    )
+
+    assert set(context.included_sections) == {
+        "introduction",
+        "methods",
+        "results",
+        "discussion",
+        "limitations",
+    }
+    assert context.omitted_sections == []
+    assert context.total_chunks == 5
+    assert sum(item.token_count for item in context.evidence) <= 220
+    assert "context_truncated" in context.warnings
+
+
+class _Responses:
+    def __init__(self, outcomes):
+        self.outcomes = list(outcomes)
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return SimpleNamespace(output_text=outcome)
+
+
+class _OpenAIClient:
+    def __init__(self, outcomes):
+        self.responses = _Responses(outcomes)
+
+
+def test_openai_provider_uses_responses_structured_output_without_storage():
+    payload = _report("EVIDENCE_001").model_dump()
+    client = _OpenAIClient([json.dumps(payload)])
+    provider = OpenAIMedicalAIProvider(
+        api_key="test-key",
+        model_name="test-model",
+        max_output_tokens=700,
+        retry_count=0,
+        client=client,
+    )
+
+    result = provider.generate("prompt", _context(("EVIDENCE_001", "results")))
+
+    assert json.loads(result)["overview"]["title"] == "Example paper"
+    call = client.responses.calls[0]
+    assert call["model"] == "test-model"
+    assert call["max_output_tokens"] == 700
+    assert call["store"] is False
+    assert 0 < call["timeout"] <= provider.timeout_seconds
+    schema = call["text"]["format"]["schema"]
+    assert schema["additionalProperties"] is False
+    assert "study_methods" in schema["required"]
+    assert "future_research" in schema["required"]
+
+
+def test_openai_provider_retries_rate_limits_without_logging_source():
+    rate_limit = RuntimeError("rate limited")
+    rate_limit.status_code = 429
+    payload = json.dumps(_report("EVIDENCE_001").model_dump())
+    client = _OpenAIClient([rate_limit, payload])
+    delays = []
+    provider = OpenAIMedicalAIProvider(
+        api_key="test-key",
+        model_name="test-model",
+        retry_count=1,
+        client=client,
+        sleep=delays.append,
+    )
+
+    assert provider.generate("private source", _context(("EVIDENCE_001", "results"))) == payload
+    assert len(client.responses.calls) == 2
+    assert delays == [1]
+
+
+def test_openai_provider_reports_timeout_after_bounded_retries():
+    client = _OpenAIClient([TimeoutError(), TimeoutError()])
+    provider = OpenAIMedicalAIProvider(
+        api_key="test-key",
+        model_name="test-model",
+        retry_count=1,
+        client=client,
+        sleep=lambda _delay: None,
+    )
+
+    with pytest.raises(MedicalInsightError) as exc:
+        provider.generate("prompt", _context(("EVIDENCE_001", "results")))
+
+    assert exc.value.code == "provider_timeout"
+    assert len(client.responses.calls) == 2
+
+
+def test_openai_invalid_json_gets_one_schema_repair_attempt():
+    valid = json.dumps(_report("EVIDENCE_001").model_dump())
+    client = _OpenAIClient(["not-json", valid])
+    provider = OpenAIMedicalAIProvider(
+        api_key="test-key",
+        model_name="test-model",
+        retry_count=0,
+        client=client,
+    )
+
+    output = MedicalInsightAnalyzer(provider=provider).run(
+        [{"id": "chunk-1", "text": "The result was reported.", "section_type": "results"}],
+        title="Example paper",
+        document_kind="research_paper",
+        language="en",
+    )
+
+    assert output.citations.valid
+    assert output.support.valid
+    assert len(client.responses.calls) == 2
+    assert "previous output failed" in client.responses.calls[1]["input"]
+
+
+@pytest.mark.parametrize(
+    ("source", "claim", "expected"),
+    [
+        (
+            "Treatment was associated with lower risk.",
+            "Treatment caused lower risk.",
+            "association into causation",
+        ),
+        (
+            "In vitro cell experiments showed reduced growth.",
+            "The treatment was effective in patients.",
+            "preclinical evidence into human efficacy",
+        ),
+        (
+            "There was no statistically significant difference between groups.",
+            "The treatment was proven ineffective.",
+            "proof of no effect",
+        ),
+        (
+            "The intervention may reduce symptoms in 20 patients.",
+            "The intervention proves symptoms are reduced in 40 patients.",
+            "numbers or units",
+        ),
+    ],
+)
+def test_support_validator_rejects_overstated_claims(source, claim, expected):
+    context = _context(("EVIDENCE_001", "results"))
+    context.evidence[0] = EvidenceItem(
+        **{**context.evidence[0].__dict__, "text": source}
+    )
+    payload = _report("EVIDENCE_001").model_dump()
+    payload["key_findings"][0]["statement"] = claim
+    report = MedicalInsightReport.model_validate(payload)
+
+    validation = validate_support(report, context)
+
+    assert not validation.valid
+    assert any(expected in error for error in validation.errors)
 
 
 def test_redact_sensitive_fields_removes_chinese_and_english_names():
@@ -259,6 +452,20 @@ def test_analyzer_repairs_one_invalid_provider_response():
     assert output.citations.valid
     assert len(provider.calls) == 2
     assert output.report.warnings[-1] == "not_medical_advice"
+
+
+def test_analyzer_exposes_parser_warnings_in_the_report():
+    provider = FakeMedicalAIProvider(payloads=[_report("EVIDENCE_001").model_dump()])
+
+    output = MedicalInsightAnalyzer(provider=provider).run(
+        [{"id": "chunk-1", "text": "The result was reported.", "section_type": "results"}],
+        source_warnings=["table_location_unavailable"],
+        title="Example paper",
+        document_kind="research_paper",
+        language="en",
+    )
+
+    assert "table_location_unavailable" in output.report.warnings
 
 
 def test_analyzer_does_not_retry_more_than_once_after_invalid_repair():
@@ -519,6 +726,44 @@ def test_repository_persists_citations_and_filters_stale_source_versions():
         with sessions() as db:
             assert len(db.scalars(select(MedicalAnalysisRunRecord)).all()) == 1
             assert len(db.scalars(select(MedicalAnalysisEvidenceRecord)).all()) >= 1
+    finally:
+        engine.dispose()
+
+
+def test_repository_versions_and_returns_external_provider_parameters():
+    engine, sessions, repository = _repository()
+    try:
+        _paper_rows(sessions)
+        common = {
+            "document_id": "document-1",
+            "user_id": "user-1",
+            "workspace_id": "workspace-1",
+            "source_hash": "a" * 64,
+            "requested_by": "user-1",
+            "provider": "openai",
+            "model_name": "test-model",
+            "prompt_version": "medical-insights-v2",
+            "schema_version": "medical-insights-v2",
+            "max_input_tokens": 8000,
+            "timeout_seconds": 45,
+            "max_output_tokens": 3000,
+            "provider_retry_count": 1,
+        }
+
+        first, created = repository.create_or_reuse(**common)
+
+        assert created
+        assert first["timeout_seconds"] == 45
+        assert first["max_output_tokens"] == 3000
+        assert first["provider_retry_count"] == 1
+
+        changed, created = repository.create_or_reuse(
+            **{**common, "max_output_tokens": 3500}
+        )
+
+        assert created
+        assert changed["run_id"] != first["run_id"]
+        assert changed["max_output_tokens"] == 3500
     finally:
         engine.dispose()
 

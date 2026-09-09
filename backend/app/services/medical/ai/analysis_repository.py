@@ -93,6 +93,9 @@ class AnalysisRepository:
         parsed_source_hash: str | None = None,
         redact_pii: bool = True,
         max_input_tokens: int = 12000,
+        timeout_seconds: int = 30,
+        max_output_tokens: int = 5000,
+        provider_retry_count: int = 2,
         force: bool = False,
     ) -> tuple[dict[str, Any], bool]:
         """Create one run for the current parsed source, or reuse it.
@@ -150,6 +153,9 @@ class AnalysisRepository:
                     schema_version,
                     redact_pii=redact_pii,
                     max_input_tokens=max_input_tokens,
+                    timeout_seconds=timeout_seconds,
+                    max_output_tokens=max_output_tokens,
+                    provider_retry_count=provider_retry_count,
                     force=force,
                 )
 
@@ -184,6 +190,9 @@ class AnalysisRepository:
                     row.parsed_source_hash = snapshot_hash
                     row.redact_pii = bool(redact_pii)
                     row.max_input_tokens = max(1, int(max_input_tokens or 1))
+                    row.timeout_seconds = max(1, int(timeout_seconds or 1))
+                    row.max_output_tokens = max(256, int(max_output_tokens or 256))
+                    row.provider_retry_count = max(0, int(provider_retry_count or 0))
                     row.created_at = now
                     row.started_at = None
                     row.completed_at = None
@@ -211,6 +220,9 @@ class AnalysisRepository:
                     schema_version=schema_version,
                     redact_pii=bool(redact_pii),
                     max_input_tokens=max(1, int(max_input_tokens or 1)),
+                    timeout_seconds=max(1, int(timeout_seconds or 1)),
+                    max_output_tokens=max(256, int(max_output_tokens or 256)),
+                    provider_retry_count=max(0, int(provider_retry_count or 0)),
                     attempt_count=0,
                     last_heartbeat_at=None,
                     lease_expires_at=now + timedelta(seconds=_queue_lease_seconds()),
@@ -645,6 +657,9 @@ class AnalysisRepository:
                     if profile
                     else document.language or "unknown"
                 ),
+                "source_warnings": (
+                    _loads_json(profile.warnings_json, []) if profile else []
+                ),
                 "sections": [
                     {
                         "id": item.id,
@@ -770,6 +785,9 @@ def _analysis_key(
     *,
     redact_pii: bool = True,
     max_input_tokens: int = 12000,
+    timeout_seconds: int = 30,
+    max_output_tokens: int = 5000,
+    provider_retry_count: int = 2,
     force: bool,
 ) -> str:
     values = [
@@ -783,6 +801,9 @@ def _analysis_key(
         schema_version,
         str(bool(redact_pii)),
         str(max(1, int(max_input_tokens or 1))),
+        str(max(1, int(timeout_seconds or 1))),
+        str(max(256, int(max_output_tokens or 256))),
+        str(max(0, int(provider_retry_count or 0))),
     ]
     if force:
         values.append(uuid.uuid4().hex)
@@ -852,6 +873,9 @@ def _run_dict(row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
         "schema_version": row.schema_version,
         "redact_pii": bool(row.redact_pii),
         "max_input_tokens": row.max_input_tokens,
+        "timeout_seconds": row.timeout_seconds,
+        "max_output_tokens": row.max_output_tokens,
+        "provider_retry_count": row.provider_retry_count,
         "attempt_count": row.attempt_count or 0,
         "last_heartbeat_at": _iso(row.last_heartbeat_at),
         "lease_expires_at": _iso(row.lease_expires_at),

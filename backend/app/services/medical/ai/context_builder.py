@@ -31,6 +31,19 @@ class AnalysisContext:
     language: str
     evidence: list[EvidenceItem] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    total_chunks: int = 0
+    total_tokens: int = 0
+    max_input_tokens: int = 0
+    included_sections: list[str] = field(default_factory=list)
+    omitted_sections: list[str] = field(default_factory=list)
+
+    @property
+    def coverage_complete(self) -> bool:
+        return (
+            not self.omitted_sections
+            and len(self.evidence) >= self.total_chunks
+            and not any(item.truncated for item in self.evidence)
+        )
 
     @property
     def evidence_by_id(self) -> dict[str, EvidenceItem]:
@@ -93,6 +106,7 @@ class ContextBuilder:
         chunks: Iterable[dict[str, Any]],
         *,
         sections: Iterable[dict[str, Any]] | None = None,
+        source_warnings: Iterable[str] | None = None,
         title: str = "",
         document_kind: str = "unknown",
         language: str = "unknown",
@@ -143,28 +157,31 @@ class ContextBuilder:
         candidates.sort(key=lambda value: (value[0], value[1]))
         budget = max(1, int(max_input_tokens or 1))
         selected: list[EvidenceItem] = []
-        warnings: list[str] = []
+        selected_indexes: set[int] = set()
+        warnings = _warning_codes(source_warnings or [])
         redacted = title_redacted
         truncated = False
         skipped = False
         remaining = budget
 
-        for _priority, _index, candidate in candidates:
-            token_count = _estimate_tokens(candidate["text"])
+        def add_candidate(candidate: dict[str, Any], allowance: int) -> None:
+            nonlocal redacted, remaining, truncated, skipped
+            index = candidate["index"]
+            if index in selected_indexes:
+                return
             if remaining <= 0:
                 skipped = True
-                continue
-            item_truncated = False
-            if token_count > remaining:
-                text = _truncate_text(candidate["text"], remaining)
-                if not text:
-                    skipped = True
-                    continue
-                truncated = True
-                item_truncated = True
-                token_count = _estimate_tokens(text)
-            else:
-                text = candidate["text"]
+                return
+            allowed = max(1, min(remaining, allowance))
+            source_text = candidate["text"]
+            source_tokens = _estimate_tokens(source_text)
+            item_truncated = source_tokens > allowed
+            text = _truncate_text(source_text, allowed) if item_truncated else source_text
+            if not text:
+                skipped = True
+                return
+            token_count = _estimate_tokens(text)
+            truncated = truncated or item_truncated
 
             if redact_pii:
                 text, changed = redact_sensitive_fields(text)
@@ -185,8 +202,8 @@ class ContextBuilder:
                 redacted = redacted or changed
             selected.append(
                 EvidenceItem(
-                    evidence_id=f"EVIDENCE_{len(selected) + 1:03d}",
-                    chunk_id=str(raw.get("id") or f"chunk:{candidate['index']}"),
+                    evidence_id="",
+                    chunk_id=str(raw.get("id") or f"chunk:{index}"),
                     section_id=_as_optional_str(
                         raw.get("section_id") or metadata.get("section_id") or section.get("id")
                     ),
@@ -194,45 +211,56 @@ class ContextBuilder:
                     section_title=section_title,
                     page_start=_as_int(
                         _first_present(
-                            raw.get("page_start"),
-                            metadata.get("page_start"),
-                            raw.get("page"),
-                            metadata.get("page"),
-                            section.get("page_start"),
+                            raw.get("page_start"), metadata.get("page_start"), raw.get("page"),
+                            metadata.get("page"), section.get("page_start"),
                         )
                     ),
                     page_end=_as_int(
                         _first_present(
-                            raw.get("page_end"),
-                            metadata.get("page_end"),
-                            raw.get("page"),
-                            metadata.get("page"),
-                            section.get("page_end"),
+                            raw.get("page_end"), metadata.get("page_end"), raw.get("page"),
+                            metadata.get("page"), section.get("page_end"),
                         )
                     ),
                     character_start=_as_int(
                         _first_present(
-                            raw.get("char_start"),
-                            metadata.get("char_start"),
-                            raw.get("start"),
+                            raw.get("char_start"), metadata.get("char_start"), raw.get("start"),
                             metadata.get("start"),
                         )
                     ),
                     character_end=_as_int(
                         _first_present(
-                            raw.get("char_end"),
-                            metadata.get("char_end"),
-                            raw.get("end"),
+                            raw.get("char_end"), metadata.get("char_end"), raw.get("end"),
                             metadata.get("end"),
                         )
                     ),
                     text=text,
                     token_count=token_count,
-                    source_index=candidate["index"],
+                    source_index=index,
                     truncated=item_truncated,
                 )
             )
+            selected_indexes.add(index)
             remaining = max(0, remaining - token_count)
+
+        # Give each non-reference section a share before spending the rest on
+        # high-priority findings. This prevents a long Results section from
+        # crowding Methods, population, and limitations out of the analysis.
+        first_by_section: dict[str, dict[str, Any]] = {}
+        for _priority, _index, candidate in candidates:
+            section_type = candidate["section_type"]
+            if section_type in {"references", "reference", "bibliography"}:
+                continue
+            first_by_section.setdefault(section_type, candidate)
+        section_candidates = list(first_by_section.values())
+        for position, candidate in enumerate(section_candidates):
+            sections_left = len(section_candidates) - position
+            add_candidate(candidate, max(1, remaining // max(1, sections_left)))
+
+        for _priority, _index, candidate in candidates:
+            if remaining <= 0:
+                skipped = skipped or candidate["index"] not in selected_indexes
+                continue
+            add_candidate(candidate, remaining)
 
         selected.sort(key=lambda item: item.source_index)
         # Evidence ids follow source order in the prompt, which makes the UI
@@ -260,12 +288,22 @@ class ContextBuilder:
             warnings.append("pii_redacted")
         if truncated or skipped or len(selected) < len(candidates):
             warnings.append("context_truncated")
+        all_sections = list(dict.fromkeys(candidate[2]["section_type"] for candidate in candidates))
+        included_sections = list(dict.fromkeys(item.section_type for item in selected))
+        omitted_sections = [value for value in all_sections if value not in included_sections]
+        if omitted_sections:
+            warnings.append("sections_omitted")
         return AnalysisContext(
             title=safe_title,
             document_kind=document_kind or "unknown",
             language=language or "unknown",
             evidence=selected,
             warnings=warnings,
+            total_chunks=len(candidates),
+            total_tokens=sum(_estimate_tokens(candidate[2]["text"]) for candidate in candidates),
+            max_input_tokens=budget,
+            included_sections=included_sections,
+            omitted_sections=omitted_sections,
         )
 
     def _section_map(self, sections: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -341,6 +379,19 @@ _NAMED_FIELD = re.compile(
     r"(?im)^(?P<prefix>\s*(?:patient\s+name|name|患者姓名|姓名|address|地址)\s*[:：])"
     r"\s*(?P<value>.+?)\s*$"
 )
+_WARNING_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+def _warning_codes(values: Iterable[str]) -> list[str]:
+    """Keep parser warning codes while rejecting free-form source text."""
+    return list(
+        dict.fromkeys(
+            value
+            for item in values
+            if isinstance(item, str)
+            if (value := item.strip().lower()) and _WARNING_CODE.fullmatch(value)
+        )
+    )
 
 
 def redact_sensitive_fields(text: str) -> tuple[str, bool]:

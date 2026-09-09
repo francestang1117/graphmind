@@ -274,7 +274,8 @@ These endpoints run a bounded, evidence-backed analysis for documents whose
 medical profile is `research_paper` or `guideline`. Every report finding points
 to an evidence ID from the current document. The default provider is the local
 `extractive` provider, so the default path does not send document content to an
-external model.
+external model. Set `MEDICAL_AI_PROVIDER=openai`, `MEDICAL_AI_MODEL`, and the
+server-side `MEDICAL_AI_OPENAI_API_KEY` to enable it explicitly.
 
 ```bash
 curl -X POST \
@@ -307,6 +308,13 @@ page range, normalized section, chunk ID, character range, and the quoted
 source passage. Clicking an evidence item in the frontend opens the same
 source details. The current UI does not embed a PDF viewer or perform a page
 scroll; it shows the traceable page/chunk location and quote.
+
+The report also includes `study_methods`, `applicability`, `future_research`,
+and `coverage`. Method fields use an explicit support status; missing values
+are returned as `not_reported`. Coverage lists included and omitted sections
+when the source exceeds the configured input budget. The run snapshot records
+the provider, model, prompt and schema versions, input/output budgets, timeout,
+retry count, and parsed source hash.
 
 ```bash
 curl "http://localhost:8000/api/v1/documents/<document_id>/medical-insights/latest?workspace_id=$WORKSPACE_ID"

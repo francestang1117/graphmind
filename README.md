@@ -10,8 +10,9 @@ parsing, entity extraction, graph, search, chat fallback, async jobs,
 observability, safety, and workspace boundary are working MVPs. The current V2
 branch also adds explainable medical document classification, page-aware paper
 sections, and evidence-backed single-document insights. The medical insight
-path uses a deterministic local extractor by default; GPT/OpenAI integration,
-study cards, and multi-paper comparison are still planned upgrades. It does not
+path uses a deterministic local extractor by default and can explicitly enable
+an OpenAI Responses API provider. Study cards and multi-paper comparison are
+still planned upgrades. It does not
 provide a diagnosis or treatment recommendation.
 
 ## What Works Today
@@ -47,8 +48,11 @@ provide a diagnosis or treatment recommendation.
 - Medical analysis endpoint for document kind, section ranges, missing sections,
   and parser warnings
 - Evidence-backed medical insight runs for research papers and guidelines, with
-  bounded source context, citation validation, PII redaction, and safety checks
-- 266 backend tests covering the current core modules
+  section-balanced context, citation and claim-support validation, PII
+  redaction, coverage reporting, and safety checks
+- Optional OpenAI medical insight provider with schema-constrained output,
+  bounded retries, server-side credentials, and disabled response storage
+- 292 backend tests covering the current core modules
 
 ## Project Status
 
@@ -63,7 +67,7 @@ provide a diagnosis or treatment recommendation.
 | Async jobs | Working | Redis/Celery path, WebSocket progress, cancel/retry, job history |
 | Persistence | Partial | Workspaces, documents, parsed chunks/entities, graph nodes/edges, users, and jobs |
 | V2 research boundary | PR1 complete | Account-owned workspaces and workspace-scoped document-derived data |
-| V2 medical analysis | PR4 implementation | Cited single-document insight runs; study cards and multi-paper comparison are next |
+| V2 medical analysis | PR5 implementation | Local or OpenAI single-document interpretation with traceable evidence and coverage |
 | Observability | Working MVP | Prometheus metrics and optional Sentry |
 | File storage backend | Working MVP | Local by default; optional S3/MinIO keeps a local parser cache |
 | Authentication | Working MVP | Email/password, optional GitHub OAuth, user-scoped workspaces |
@@ -223,7 +227,7 @@ More testing notes are in [docs/TESTING.md](docs/TESTING.md).
 ## Near-Term Roadmap
 
 1. Add study cards with explicit not-found states and source citations.
-2. Add a GPT/OpenAI provider behind the medical insight interface, with an explicit external-processing setting.
-3. Add the workspace and paper workflow to the frontend.
+2. Add the workspace and paper workflow to the frontend.
+3. Build a small reviewed evaluation set for Chinese and English medical papers.
 4. Replace the local vector-search MVP with a real embedding model and vector DB.
 5. Add multi-paper evidence comparison and stronger persisted graph queries.

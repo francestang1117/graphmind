@@ -185,6 +185,28 @@ set `MEDICAL_AI_PROVIDER=fake` in a test environment or use the supplied
 must fail only the insight run; the original document and its parsed data stay
 available.
 
+To run the external provider intentionally, keep the key on the backend and
+choose a model available to your OpenAI project:
+
+```bash
+MEDICAL_AI_PROVIDER=openai \
+MEDICAL_AI_MODEL=<model> \
+MEDICAL_AI_OPENAI_API_KEY=<key> \
+uvicorn app.main:app --reload
+```
+
+The OpenAI path sends only the selected, optionally redacted evidence blocks,
+uses strict JSON Schema output, and requests `store=false`. The completed run
+records the provider, model, prompt/schema versions, timeout, token budgets,
+retry count, source snapshot, and coverage. Do not place real patient data in
+manual provider tests.
+
+Before release, manually analyze one public English paper and one public
+Chinese paper. Confirm that numeric findings match the cited quote, missing
+sample or comparator fields say they were not reported, every finding opens a
+source location, and incomplete section coverage is visible. This live check
+is deliberately separate from CI so CI never requires an API key.
+
 Check database-backed parsed artifacts:
 
 ```bash

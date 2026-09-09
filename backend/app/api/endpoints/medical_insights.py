@@ -160,7 +160,7 @@ async def _start_analysis(
 
     provider_name = settings.MEDICAL_AI_PROVIDER.strip().lower()
     try:
-        get_provider(provider_name, settings.MEDICAL_AI_MODEL)
+        configured_provider = get_provider(provider_name, settings.MEDICAL_AI_MODEL)
     except MedicalInsightError as exc:
         raise AppError(
             "The configured medical AI provider is unavailable.",
@@ -176,12 +176,15 @@ async def _start_analysis(
             source_hash=str(source.get("source_hash") or metadata.get("file_hash") or ""),
             requested_by=user_id,
             provider=provider_name,
-            model_name=settings.MEDICAL_AI_MODEL,
+            model_name=configured_provider.model_name,
             prompt_version=settings.MEDICAL_AI_PROMPT_VERSION,
             schema_version=settings.MEDICAL_AI_SCHEMA_VERSION,
             parsed_source_hash=source.get("parsed_source_hash"),
             redact_pii=settings.MEDICAL_AI_REDACT_PII,
             max_input_tokens=settings.MEDICAL_AI_MAX_INPUT_TOKENS,
+            timeout_seconds=settings.MEDICAL_AI_TIMEOUT_SECONDS,
+            max_output_tokens=settings.MEDICAL_AI_MAX_OUTPUT_TOKENS,
+            provider_retry_count=settings.MEDICAL_AI_PROVIDER_RETRY_COUNT,
             force=force,
         )
     except MedicalInsightError as exc:

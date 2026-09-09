@@ -13,6 +13,12 @@ InterpretationType = Literal[
     "inference",
     "uncertain",
 ]
+SupportStatus = Literal[
+    "supported",
+    "partially_supported",
+    "not_reported",
+    "uncertain",
+]
 
 
 class _StrictModel(BaseModel):
@@ -41,15 +47,43 @@ class MedicalTermExplanation(_StrictModel):
     evidence_ids: list[str] = Field(default_factory=list)
 
 
+class EvidenceAttribute(_StrictModel):
+    value: str = "Not reported in the selected source evidence."
+    support_status: SupportStatus = "not_reported"
+    evidence_ids: list[str] = Field(default_factory=list)
+
+
+class StudyMethods(_StrictModel):
+    design: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
+    population: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
+    human_animal_in_vitro: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
+    sample_size: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
+    comparator: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
+
+
+class AnalysisCoverage(_StrictModel):
+    complete: bool = True
+    selected_chunks: int = 0
+    total_chunks: int = 0
+    selected_tokens: int = 0
+    max_input_tokens: int = 0
+    included_sections: list[str] = Field(default_factory=list)
+    omitted_sections: list[str] = Field(default_factory=list)
+
+
 class MedicalInsightReport(_StrictModel):
-    schema_version: str = "medical-insights-v1"
+    schema_version: str = "medical-insights-v2"
     document_kind: str
     language: str
     overview: DocumentOverview
+    study_methods: StudyMethods = Field(default_factory=StudyMethods)
     key_findings: list[EvidenceFinding] = Field(default_factory=list)
     limitations: list[EvidenceFinding] = Field(default_factory=list)
     medical_terms: list[MedicalTermExplanation] = Field(default_factory=list)
     what_it_means: list[EvidenceFinding] = Field(default_factory=list)
     what_it_does_not_mean: list[EvidenceFinding] = Field(default_factory=list)
+    applicability: list[EvidenceFinding] = Field(default_factory=list)
+    future_research: list[EvidenceFinding] = Field(default_factory=list)
     questions_for_professional: list[str] = Field(default_factory=list)
+    coverage: AnalysisCoverage = Field(default_factory=AnalysisCoverage)
     warnings: list[str] = Field(default_factory=list)
