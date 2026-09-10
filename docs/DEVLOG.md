@@ -1572,3 +1572,13 @@ does not excuse a later causal claim. External-processing consent now carries a
 fingerprint of the provider, resolved model, excerpt scope, and redaction mode.
 If the server configuration changes after the disclosure is shown, the stale
 request is rejected and the frontend reloads the terms before asking again.
+
+## 2026-09 — Secure Runtime Auth Configuration
+
+The runtime auth configuration now fails closed. `AUTH_REQUIRED` defaults to
+true and `SECRET_KEY` defaults to empty; only explicit development or test
+environments may opt into the account-free local fallback and public placeholder
+key. Startup validates the environment, auth mode, and secret length before
+creating directories or running database migrations. The Celery app applies the
+same check so a standalone worker cannot start with weaker settings than the
+API. The full combined backend suite passes with `320 passed, 3 skipped`.

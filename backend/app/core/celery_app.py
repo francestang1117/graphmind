@@ -4,7 +4,12 @@ from functools import wraps
 from types import SimpleNamespace
 from typing import Any, Callable
 
-from app.core.config import settings
+from app.core.config import settings, validate_runtime_config
+
+
+# A worker can run without the API process, so enforce the same security gate
+# when Celery imports its application module.
+validate_runtime_config(settings)
 
 
 class LocalTaskQueue:

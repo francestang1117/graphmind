@@ -33,6 +33,8 @@ services:
       VERSION: 0.1.0
       GIT_SHA: ${GIT_SHA:-}
       ENVIRONMENT: development
+      AUTH_REQUIRED: "false"
+      SECRET_KEY: dev-only-change-me-before-deploy
       API_V1_PREFIX: /api/v1
       UPLOAD_DIR: /app/uploads
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
@@ -73,6 +75,8 @@ services:
       VERSION: 0.1.0
       GIT_SHA: ${GIT_SHA:-}
       ENVIRONMENT: development
+      AUTH_REQUIRED: "false"
+      SECRET_KEY: dev-only-change-me-before-deploy
       UPLOAD_DIR: /app/uploads
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       S3_BUCKET: ${S3_BUCKET:-graphmind}
@@ -108,6 +112,8 @@ services:
       VERSION: 0.1.0
       GIT_SHA: ${GIT_SHA:-}
       ENVIRONMENT: development
+      AUTH_REQUIRED: "false"
+      SECRET_KEY: dev-only-change-me-before-deploy
       UPLOAD_DIR: /app/uploads
       STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
       S3_BUCKET: ${S3_BUCKET:-graphmind}
