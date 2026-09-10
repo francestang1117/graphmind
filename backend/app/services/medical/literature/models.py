@@ -9,7 +9,15 @@ from pydantic import BaseModel, Field
 
 
 LiteratureSort = Literal["relevance", "newest"]
-RetractionStatus = Literal["normal", "retracted", "corrected", "unknown"]
+RetractionStatus = Literal[
+    "normal",
+    "retracted",
+    "retraction_notice",
+    "corrected",
+    "correction_notice",
+    "expression_of_concern",
+    "unknown",
+]
 
 
 class DetectedConcept(BaseModel):
@@ -42,7 +50,7 @@ class LiteratureArticle(BaseModel):
 
     source: str = "pubmed"
     external_id: str = Field(min_length=1, max_length=32)
-    doi: str | None = Field(default=None, max_length=512)
+    doi: str | None = Field(default=None, max_length=255)
     pmcid: str | None = Field(default=None, max_length=32)
     title: str = Field(default="", max_length=4000)
     abstract: str | None = None

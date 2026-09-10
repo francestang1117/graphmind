@@ -53,6 +53,32 @@ def test_redaction_does_not_treat_normal_patient_phrases_as_record_ids() -> None
     assert redactions == []
 
 
+@pytest.mark.parametrize(
+    ("question", "leaked_values"),
+    [
+        (
+            "患者张三患有戈谢病，有什么新研究？",
+            ("患者", "张三"),
+        ),
+        (
+            "John Smith has Gaucher disease",
+            ("John", "Smith", "has"),
+        ),
+    ],
+)
+def test_unknown_disease_query_keeps_only_the_disease_term(
+    question: str, leaked_values: tuple[str, ...]
+) -> None:
+    query = build_literature_query(question)
+
+    assert any(
+        concept.normalized.casefold() in {"戈谢病", "gaucher disease"}
+        for concept in query.detected_concepts
+    )
+    for leaked_value in leaked_values:
+        assert leaked_value.casefold() not in query.normalized_query.casefold()
+
+
 def test_build_query_rejects_unsupported_or_uninformative_questions() -> None:
     with pytest.raises(LiteratureQueryError, match="No medical concepts"):
         build_literature_query("How should I organize my software project?")

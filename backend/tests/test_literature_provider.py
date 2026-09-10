@@ -9,6 +9,7 @@ import pytest
 
 from app.services.medical.literature.exceptions import LiteratureProviderError
 from app.services.medical.literature.models import LiteratureQuery
+from app.services.medical.literature import pubmed_provider as pubmed_provider_module
 from app.services.medical.literature.pubmed_provider import PubMedProvider
 from app.services.medical.literature.query_builder import build_literature_query
 
@@ -69,15 +70,32 @@ RETRACTION_AND_CORRECTION_XML = b"""
         <ArticleTitle>Corrected Fabry disease report</ArticleTitle>
         <Journal><Title>Example Journal</Title></Journal>
       </Article>
-    </MedlineCitation>
-    <PubmedData>
       <CommentsCorrectionsList>
-        <CommentsCorrections><RefType>ErratumFor</RefType></CommentsCorrections>
+        <CommentsCorrections RefType="ErratumIn" />
       </CommentsCorrectionsList>
-    </PubmedData>
+    </MedlineCitation>
   </PubmedArticle>
 </PubmedArticleSet>
 """
+
+STATUS_XML = b"""
+<PubmedArticleSet>
+  <PubmedArticle>
+    <MedlineCitation><PMID>33333333</PMID><Article><ArticleTitle>Notice</ArticleTitle><Journal><Title>Journal</Title></Journal></Article><CommentsCorrectionsList><CommentsCorrections RefType="RetractionOf" /></CommentsCorrectionsList></MedlineCitation>
+  </PubmedArticle>
+  <PubmedArticle>
+    <MedlineCitation><PMID>44444444</PMID><Article><ArticleTitle>Notice</ArticleTitle><Journal><Title>Journal</Title></Journal></Article><CommentsCorrectionsList><CommentsCorrections RefType="ErratumFor" /></CommentsCorrectionsList></MedlineCitation>
+  </PubmedArticle>
+  <PubmedArticle>
+    <MedlineCitation><PMID>55555555</PMID><Article><ArticleTitle>Notice</ArticleTitle><Journal><Title>Journal</Title></Journal></Article><CommentsCorrectionsList><CommentsCorrections RefType="ExpressionOfConcernIn" /></CommentsCorrectionsList></MedlineCitation>
+  </PubmedArticle>
+</PubmedArticleSet>
+"""
+
+EXTERNAL_DTD_XML = b'''<?xml version="1.0"?>
+<!DOCTYPE PubmedArticleSet SYSTEM "https://dtd.nlm.nih.gov/ncbi/pubmed/out/pubmed_250101.dtd">
+<PubmedArticleSet />
+'''
 
 
 def _query() -> LiteratureQuery:
@@ -121,6 +139,26 @@ def test_pubmed_provider_batches_ids_and_normalizes_metadata() -> None:
     assert "RESULTS: The measured outcome was reported." in (article.abstract or "")
     assert article.retraction_status == "normal"
     assert len(article.metadata_hash) == 64
+
+
+def test_pubmed_provider_uses_the_official_newest_sort_value() -> None:
+    calls: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(
+            200,
+            json={"esearchresult": {"count": "0", "idlist": []}},
+            request=request,
+        )
+
+    provider = PubMedProvider(
+        transport=httpx.MockTransport(handler),
+        min_request_interval=0,
+    )
+    asyncio.run(provider.search(_query().model_copy(update={"sort": "newest"})))
+
+    assert calls[0].url.params["sort"] == "pub_date"
 
 
 def test_pubmed_provider_does_not_fetch_when_search_has_no_ids() -> None:
@@ -236,3 +274,62 @@ def test_pubmed_provider_rejects_dtd_and_tracks_retraction_status() -> None:
     )
     assert warnings == []
     assert [article.retraction_status for article in articles] == ["retracted", "corrected"]
+
+    notices, warnings = PubMedProvider._parse_articles(
+        STATUS_XML,
+        ["33333333", "44444444", "55555555"],
+        datetime.now(timezone.utc),
+    )
+    assert warnings == []
+    assert [article.retraction_status for article in notices] == [
+        "retraction_notice",
+        "correction_notice",
+        "expression_of_concern",
+    ]
+
+
+def test_pubmed_provider_accepts_an_official_external_dtd_declaration() -> None:
+    articles, warnings = PubMedProvider._parse_articles(
+        EXTERNAL_DTD_XML,
+        [],
+        datetime.now(timezone.utc),
+    )
+
+    assert articles == []
+    assert warnings == []
+
+
+def test_multiple_provider_instances_share_the_default_global_limiter(monkeypatch) -> None:
+    class RecordingLimiter:
+        def __init__(self) -> None:
+            self.calls: list[bool] = []
+
+        async def acquire(self, *, has_api_key: bool = False) -> None:
+            self.calls.append(has_api_key)
+
+    limiter = RecordingLimiter()
+    monkeypatch.setattr(
+        pubmed_provider_module,
+        "get_pubmed_rate_limiter",
+        lambda: limiter,
+    )
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"esearchresult": {"count": "0", "idlist": []}},
+            request=request,
+        )
+
+    async def run() -> None:
+        providers = [
+            PubMedProvider(
+                transport=httpx.MockTransport(handler),
+            )
+            for _ in range(2)
+        ]
+        await asyncio.gather(*(provider.search(_query()) for provider in providers))
+
+    asyncio.run(run())
+
+    assert limiter.calls == [False, False]

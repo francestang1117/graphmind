@@ -86,6 +86,7 @@ GraphMind/
 │   │   │   │       ├── provider.py
 │   │   │   │       ├── pubmed_provider.py
 │   │   │   │       ├── query_builder.py
+│   │   │   │       ├── rate_limiter.py
 │   │   │   │       └── repository.py
 │   │   │   ├── parsed_artifact_repository.py
 │   │   │   ├── persistence_service.py
@@ -124,6 +125,7 @@ GraphMind/
 │       ├── test_literature_api.py
 │       ├── test_literature_provider.py
 │       ├── test_literature_query_builder.py
+│       ├── test_literature_rate_limiter.py
 │       ├── test_literature_repository.py
 │       ├── test_literature_search_task.py
 │       ├── test_parsed_artifact_repository.py
@@ -194,8 +196,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
   builds page-aware sections and chunks, stores the resulting analysis, and
   provides the evidence-backed insight modules under `services/medical/ai/`.
 - `services/medical/literature/` builds privacy-bounded PubMed queries, calls
-  the official E-utilities endpoints, normalizes public metadata, and persists
-  scoped search runs and result links.
+  the official E-utilities endpoints, normalizes public metadata, coordinates
+  request pacing through Redis, and persists scoped search runs and result links.
 - `auth.py` handles email/password login, GitHub OAuth, JWT access tokens,
   HttpOnly refresh cookies, and the optional local-dev workspace.
 - `workspaces.py` creates and lists account-owned research projects. The
@@ -270,7 +272,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `tasks/medical_analysis.py` runs one scoped insight job through Celery or the
   local background fallback. A failed insight does not fail the source document.
 - `tasks/literature_search.py` runs one confirmed PubMed search with a bounded
-  retryable worker lease and saves only normalized public metadata.
+  retryable worker lease and fencing token, then saves only normalized public
+  metadata.
 - `web_scraper.py` fetches public web pages, strips noisy HTML, and stores the
   readable result as a normal Markdown document.
 - `virus_scanner.py` is the ClamAV integration wrapper. Scanning is optional and

@@ -21,10 +21,14 @@ from app.services.medical.literature.models import LiteratureArticle, Literature
 
 try:
     from sqlalchemy import delete, select
+    from sqlalchemy.dialects.postgresql import insert as postgres_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
     from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 except ImportError:  # pragma: no cover - only before DB dependencies are installed
     delete = None
     select = None
+    postgres_insert = None
+    sqlite_insert = None
     IntegrityError = Exception
     SQLAlchemyError = Exception
 
@@ -143,7 +147,11 @@ class LiteratureRepository:
                     row.error_code = ""
                     row.error_message = ""
                     row.warnings_json = "[]"
-                    row.attempt_count = 0
+                    # Keep this counter monotonic. The random token below is
+                    # the primary fence, while the counter helps operators
+                    # see how many times a lease was reclaimed.
+                    row.attempt_count = max(0, int(row.attempt_count or 0))
+                    row.attempt_token = None
                     row.external_search_confirmed_at = now
                     row.last_heartbeat_at = None
                     row.lease_expires_at = now + timedelta(seconds=max(1, queue_lease_seconds))
@@ -225,14 +233,21 @@ class LiteratureRepository:
                 return None
             row.status = RUNNING
             row.attempt_count = (row.attempt_count or 0) + 1
+            row.attempt_token = uuid.uuid4().hex
             row.started_at = row.started_at or now
             row.last_heartbeat_at = now
             row.lease_expires_at = now + timedelta(seconds=_running_lease_seconds())
             row.updated_at = now
             db.commit()
-            return _run_dict(row)
+            return _run_dict(row, include_attempt_token=True)
 
-    def heartbeat(self, run_id: str, *, attempt_count: int | None = None) -> bool:
+    def heartbeat(
+        self,
+        run_id: str,
+        *,
+        attempt_count: int | None = None,
+        attempt_token: str | None = None,
+    ) -> bool:
         """Keep a worker lease alive only while the source document is live."""
         self._require_available()
         now = _utc_now()
@@ -240,7 +255,7 @@ class LiteratureRepository:
             document, row = self._lock_run_context(db, run_id, require_document=True)
             if not document or not row or row.status != RUNNING:
                 return False
-            if attempt_count is not None and row.attempt_count != attempt_count:
+            if not _attempt_matches(row, attempt_count, attempt_token):
                 return False
             row.last_heartbeat_at = now
             row.lease_expires_at = now + timedelta(seconds=_running_lease_seconds())
@@ -257,7 +272,7 @@ class LiteratureRepository:
                     LiteratureSearchRunRecord.id == run_id
                 )
             ).first()
-            return _run_dict(row) if row else None
+            return _run_dict(row, include_attempt_token=True) if row else None
 
     def save_success(
         self,
@@ -265,6 +280,7 @@ class LiteratureRepository:
         page: LiteratureSearchPage,
         *,
         attempt_count: int | None = None,
+        attempt_token: str | None = None,
     ) -> dict[str, Any]:
         """Replace one run's ranked results and mark it successful atomically."""
         self._require_available()
@@ -289,7 +305,15 @@ class LiteratureRepository:
                         "The literature search run is no longer active.",
                         code="literature_run_not_active",
                     )
-                if attempt_count is not None and row.attempt_count != attempt_count:
+                if row.status == RUNNING:
+                    if not _attempt_matches(row, attempt_count, attempt_token):
+                        raise LiteratureError(
+                            "The literature search attempt is no longer active.",
+                            code="literature_run_stale",
+                        )
+                elif (
+                    attempt_count is not None and row.attempt_count != attempt_count
+                ) or (attempt_token is not None and row.attempt_token != attempt_token):
                     raise LiteratureError(
                         "The literature search attempt is no longer active.",
                         code="literature_run_stale",
@@ -302,24 +326,7 @@ class LiteratureRepository:
 
                 self._clear_results(db, row.id)
                 for rank, article in enumerate(page.articles, start=1):
-                    article_row = db.scalars(
-                        select(LiteratureArticleRecord)
-                        .where(
-                            LiteratureArticleRecord.source == article.source,
-                            LiteratureArticleRecord.external_id == article.external_id,
-                        )
-                        .with_for_update()
-                    ).first()
-                    if not article_row:
-                        article_row = LiteratureArticleRecord(
-                            id=uuid.uuid4().hex,
-                            source=article.source,
-                            external_id=article.external_id,
-                            created_at=now,
-                        )
-                        db.add(article_row)
-                    _update_article(article_row, article, now)
-                    db.flush()
+                    article_row = _upsert_article(db, article, now)
                     db.add(
                         LiteratureSearchResultRecord(
                             id=uuid.uuid4().hex,
@@ -341,6 +348,7 @@ class LiteratureRepository:
                 row.fetched_at = page.fetched_at
                 row.last_heartbeat_at = now
                 row.lease_expires_at = None
+                row.attempt_token = None
                 row.updated_at = now
                 db.commit()
                 return _run_payload(db, row)
@@ -360,6 +368,7 @@ class LiteratureRepository:
         message: str,
         *,
         attempt_count: int | None = None,
+        attempt_token: str | None = None,
     ) -> None:
         """Record a bounded, public-safe failure state."""
         if not self.available():
@@ -372,7 +381,14 @@ class LiteratureRepository:
                 )
                 if not row or row.status == SUCCEEDED:
                     return
-                if attempt_count is not None and row.attempt_count != attempt_count:
+                if row.status == RUNNING and not _attempt_matches(
+                    row, attempt_count, attempt_token
+                ):
+                    return
+                if row.status != RUNNING and (
+                    (attempt_count is not None and row.attempt_count != attempt_count)
+                    or (attempt_token is not None and row.attempt_token != attempt_token)
+                ):
                     return
                 row.status = FAILED
                 row.error_code = str(code or "literature_search_failed")[:80]
@@ -380,6 +396,7 @@ class LiteratureRepository:
                 row.completed_at = now
                 row.last_heartbeat_at = now
                 row.lease_expires_at = None
+                row.attempt_token = None
                 row.updated_at = now
                 db.commit()
         except (SQLAlchemyError, OSError, RuntimeError):
@@ -414,6 +431,7 @@ class LiteratureRepository:
                 row.error_message = "The literature search worker did not finish."
                 row.completed_at = now
                 row.lease_expires_at = None
+                row.attempt_token = None
                 row.updated_at = now
                 db.commit()
             return _run_payload(db, row)
@@ -521,25 +539,100 @@ class LiteratureRepository:
             )
 
 
+def _attempt_matches(
+    row: LiteratureSearchRunRecord,
+    attempt_count: int | None,
+    attempt_token: str | None,
+) -> bool:
+    """Require the random fence for every active worker operation."""
+    if not attempt_token or not row.attempt_token or row.attempt_token != attempt_token:
+        return False
+    return attempt_count is None or row.attempt_count == attempt_count
+
+
+def _article_values(article: LiteratureArticle, now: datetime) -> dict[str, Any]:
+    return {
+        "id": uuid.uuid4().hex,
+        "source": article.source,
+        "external_id": article.external_id,
+        "doi": article.doi,
+        "pmcid": article.pmcid,
+        "title": article.title,
+        "abstract": article.abstract or "",
+        "journal": article.journal,
+        "publication_date": article.publication_date or "",
+        "publication_year": article.publication_year,
+        "authors_json": _dump_json(article.authors),
+        "publication_types_json": _dump_json(article.publication_types),
+        "mesh_terms_json": _dump_json(article.mesh_terms),
+        "language": article.language,
+        "source_url": article.source_url,
+        "retraction_status": article.retraction_status,
+        "metadata_hash": article.metadata_hash,
+        "fetched_at": article.fetched_at,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _upsert_article(db, article: LiteratureArticle, now: datetime) -> LiteratureArticleRecord:
+    """Upsert public metadata so concurrent runs share one cache row."""
+    values = _article_values(article, now)
+    dialect = db.get_bind().dialect.name
+    insert_factory = (
+        postgres_insert
+        if dialect == "postgresql"
+        else sqlite_insert
+        if dialect == "sqlite"
+        else None
+    )
+    if insert_factory is None:
+        row = db.scalars(
+            select(LiteratureArticleRecord)
+            .where(
+                LiteratureArticleRecord.source == article.source,
+                LiteratureArticleRecord.external_id == article.external_id,
+            )
+            .with_for_update()
+        ).first()
+        if not row:
+            row = LiteratureArticleRecord(
+                id=values["id"],
+                source=article.source,
+                external_id=article.external_id,
+                created_at=now,
+            )
+            db.add(row)
+        _update_article(row, article, now)
+        db.flush()
+        return row
+
+    statement = insert_factory(LiteratureArticleRecord).values(**values)
+    update_values = {
+        name: getattr(statement.excluded, name)
+        for name in values
+        if name not in {"id", "created_at", "source", "external_id"}
+    }
+    statement = statement.on_conflict_do_update(
+        index_elements=["source", "external_id"],
+        set_=update_values,
+    )
+    db.execute(statement)
+    return db.scalars(
+        select(LiteratureArticleRecord)
+        .where(
+            LiteratureArticleRecord.source == article.source,
+            LiteratureArticleRecord.external_id == article.external_id,
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).one()
+
+
 def _update_article(row: LiteratureArticleRecord, article: LiteratureArticle, now: datetime) -> None:
-    row.source = article.source
-    row.external_id = article.external_id
-    row.doi = article.doi
-    row.pmcid = article.pmcid
-    row.title = article.title
-    row.abstract = article.abstract or ""
-    row.journal = article.journal
-    row.publication_date = article.publication_date or ""
-    row.publication_year = article.publication_year
-    row.authors_json = _dump_json(article.authors)
-    row.publication_types_json = _dump_json(article.publication_types)
-    row.mesh_terms_json = _dump_json(article.mesh_terms)
-    row.language = article.language
-    row.source_url = article.source_url
-    row.retraction_status = article.retraction_status
-    row.metadata_hash = article.metadata_hash
-    row.fetched_at = article.fetched_at
-    row.updated_at = now
+    for name, value in _article_values(article, now).items():
+        if name not in {"id", "source", "external_id", "created_at"}:
+            setattr(row, name, value)
 
 
 def _run_payload(db, row: LiteratureSearchRunRecord) -> dict[str, Any]:
@@ -567,10 +660,14 @@ def _run_payload(db, row: LiteratureSearchRunRecord) -> dict[str, Any]:
     return payload
 
 
-def _run_dict(row: LiteratureSearchRunRecord | None) -> dict[str, Any]:
+def _run_dict(
+    row: LiteratureSearchRunRecord | None,
+    *,
+    include_attempt_token: bool = False,
+) -> dict[str, Any]:
     if not row:
         return {}
-    return {
+    payload = {
         "run_id": row.id,
         "user_id": row.user_id,
         "workspace_id": row.workspace_id,
@@ -596,6 +693,9 @@ def _run_dict(row: LiteratureSearchRunRecord | None) -> dict[str, Any]:
         "created_at": _iso(row.created_at),
         "updated_at": _iso(row.updated_at),
     }
+    if include_attempt_token:
+        payload["attempt_token"] = row.attempt_token
+    return payload
 
 
 def _article_dict(row: LiteratureArticleRecord) -> dict[str, Any]:

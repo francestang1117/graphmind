@@ -10,4 +10,3 @@ from app.services.medical.literature.models import LiteratureQuery, LiteratureSe
 class LiteratureProvider(Protocol):
     async def search(self, query: LiteratureQuery) -> LiteratureSearchPage:
         """Search the provider and return normalized metadata."""
-

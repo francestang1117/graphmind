@@ -1618,3 +1618,31 @@ failure paths, scoped persistence, cache/retry behavior, confirmation, and
 workspace isolation. The latest local result is `341 passed, 3 skipped`; the
 PostgreSQL migration and row-lock checks remain conditional on
 `GRAPHMIND_TEST_POSTGRES_URL`.
+
+## 2026-09 - V2 PR7 Review Hardening
+
+The literature-search boundary now keeps unknown disease extraction privacy
+bounded. Narrative prefixes such as patient names and case wording are removed
+before a query is assembled, while the preview still shows the exact terms that
+will leave the application.
+
+Search workers use a monotonic attempt count and a random attempt token. The
+token is checked on heartbeat, success, and failure writes, so a worker from an
+expired lease cannot overwrite a later attempt. Repeated public PMID metadata
+uses PostgreSQL/SQLite conflict upserts, allowing concurrent searches to share
+one cache row without turning a unique-key race into a failed run.
+
+The PubMed parser now follows the official `CommentsCorrectionsList` location
+and `RefType` attribute, distinguishing retracted articles, retraction notices,
+corrections, correction notices, and expressions of concern. It accepts the
+official external DTD declaration only after rejecting internal subsets and
+entities, and streams EFetch responses so the configured byte limit is enforced
+while reading.
+
+Provider instances use a Redis-backed token bucket shared by API processes and
+Celery workers. Outside development and test, loss of Redis coordination fails
+the search rather than silently reverting to an independent per-process budget.
+The DOI and journal storage limits now match the normalized metadata model, and
+the newest sort uses the official `pub_date` value. The local backend suite is
+now `350 passed, 3 skipped`; PostgreSQL migration and row-lock checks remain
+conditional on `GRAPHMIND_TEST_POSTGRES_URL`.

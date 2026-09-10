@@ -120,6 +120,12 @@ class Settings(BaseSettings):
     PUBMED_CACHE_TTL_SECONDS: int = 86400
     PUBMED_MAX_RESPONSE_BYTES: int = 5242880
     PUBMED_RETRY_COUNT: int = 2
+    PUBMED_RATE_LIMIT_ENABLED: bool = True
+    PUBMED_RATE_LIMIT_NO_KEY_REQUESTS_PER_SECOND: int = 3
+    PUBMED_RATE_LIMIT_WITH_KEY_REQUESTS_PER_SECOND: int = 10
+    # Redis is required outside local/test environments so multiple workers
+    # cannot each apply an independent PubMed request budget.
+    PUBMED_RATE_LIMIT_REDIS_REQUIRED: bool = True
 
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",

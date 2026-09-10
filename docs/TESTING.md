@@ -14,7 +14,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
 
 The exact count can change as tests are added. The latest local result is
-`341 passed, 3 skipped`.
+`350 passed, 3 skipped`.
 
 The three skipped checks are the PostgreSQL migration test and two PostgreSQL
 row-lock tests when `GRAPHMIND_TEST_POSTGRES_URL` is not set. GitHub Actions
@@ -78,6 +78,7 @@ or unsafe.
 | `backend/tests/test_literature_query_builder.py` | Explainable concept extraction, PII redaction, filters, and safe query fingerprints |
 | `backend/tests/test_literature_provider.py` | Mocked PubMed ESearch/EFetch, metadata normalization, retries, size limits, XML safety, and retraction flags |
 | `backend/tests/test_literature_repository.py` | Scoped run lifecycle, cache reuse, lease recovery, idempotency, and deletion cleanup |
+| `backend/tests/test_literature_rate_limiter.py` | Redis token-bucket pacing and fail-closed production behavior |
 | `backend/tests/test_literature_api.py` | Preview confirmation, stale fingerprints, queueing, and workspace isolation |
 | `backend/tests/test_literature_search_task.py` | Worker claim, provider success, and safe failure persistence |
 | `backend/tests/test_config.py` | Runtime environment, authentication, and JWT secret safety guards |
@@ -268,11 +269,13 @@ curl -X POST \
 
 Poll the returned `run_id` with `GET /api/v1/literature-search-runs/<run_id>`.
 Confirm the final rows contain PMID, title, abstract when available, the
-official PubMed URL, and a normal/retracted/corrected status. The run's
+official PubMed URL, and a normal/retracted/corrected/notices status. The run's
 `normalized_query` should contain only the reviewed terms. A request without
 confirmation, with a changed fingerprint, or from another workspace must not
-contact PubMed. CI uses `httpx.MockTransport`; it never calls the external
-service.
+contact PubMed. In a multi-worker deployment, the provider uses the shared
+Redis PubMed token bucket; staging and production fail closed if that
+coordination service is unavailable. CI uses `httpx.MockTransport`; it never
+calls the external service.
 
 Check database-backed parsed artifacts:
 

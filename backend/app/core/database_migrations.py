@@ -431,7 +431,7 @@ def _ensure_literature_tables(connection) -> None:
                 pmcid VARCHAR(64),
                 title TEXT NOT NULL,
                 abstract TEXT NOT NULL,
-                journal VARCHAR(512) NOT NULL,
+                journal TEXT NOT NULL,
                 publication_date VARCHAR(32) NOT NULL,
                 publication_year INTEGER,
                 authors_json TEXT NOT NULL,
@@ -473,6 +473,7 @@ def _ensure_literature_tables(connection) -> None:
                 error_message TEXT NOT NULL,
                 warnings_json TEXT NOT NULL,
                 attempt_count INTEGER NOT NULL,
+                attempt_token VARCHAR(64),
                 external_search_confirmed_at {timestamp_type},
                 last_heartbeat_at {timestamp_type},
                 lease_expires_at {timestamp_type},
@@ -488,10 +489,26 @@ def _ensure_literature_tables(connection) -> None:
             )
             """
         )
-    elif not _has_column(connection, "literature_search_runs", "warnings_json"):
+    else:
+        if not _has_column(connection, "literature_search_runs", "warnings_json"):
+            connection.exec_driver_sql(
+                "ALTER TABLE literature_search_runs "
+                "ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        if not _has_column(connection, "literature_search_runs", "attempt_token"):
+            connection.exec_driver_sql(
+                "ALTER TABLE literature_search_runs "
+                "ADD COLUMN attempt_token VARCHAR(64)"
+            )
+
+    # PostgreSQL enforces VARCHAR limits while SQLite does not. Keep the
+    # journal column unbounded for long publisher names on existing installs.
+    if (
+        connection.dialect.name == "postgresql"
+        and _has_table(connection, "literature_articles")
+    ):
         connection.exec_driver_sql(
-            "ALTER TABLE literature_search_runs "
-            "ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]'"
+            "ALTER TABLE literature_articles ALTER COLUMN journal TYPE TEXT"
         )
 
     if not _has_table(connection, "literature_search_results"):
@@ -532,6 +549,7 @@ def _ensure_literature_tables(connection) -> None:
         ("ix_literature_search_runs_provider", "literature_search_runs", "provider"),
         ("ix_literature_search_runs_status", "literature_search_runs", "status"),
         ("ix_literature_search_runs_lease_expires_at", "literature_search_runs", "lease_expires_at"),
+        ("ix_literature_search_runs_attempt_token", "literature_search_runs", "attempt_token"),
         ("ix_literature_search_results_run_id", "literature_search_results", "search_run_id"),
         ("ix_literature_search_results_article_id", "literature_search_results", "article_id"),
     )

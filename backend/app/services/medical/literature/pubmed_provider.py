@@ -27,6 +27,11 @@ from app.services.medical.literature.normalizer import (
     normalize_date_parts,
     normalize_doi,
 )
+from app.services.medical.literature.rate_limiter import (
+    PubMedRateLimitUnavailable,
+    PubMedRateLimiter,
+    get_pubmed_rate_limiter,
+)
 
 
 PUBMED_HOST = "eutils.ncbi.nlm.nih.gov"
@@ -55,6 +60,7 @@ class PubMedProvider:
         retry_count: int | None = None,
         max_response_bytes: int | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        rate_limiter: PubMedRateLimiter | Any | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         jitter: Callable[[], float] = random.random,
         min_request_interval: float | None = None,
@@ -87,13 +93,12 @@ class PubMedProvider:
             ),
         )
         self.transport = transport
+        self._rate_limiter = rate_limiter
+        if self._rate_limiter is None and min_request_interval is None:
+            self._rate_limiter = get_pubmed_rate_limiter()
         self.sleep = sleep
         self.jitter = jitter
-        self.min_request_interval = (
-            min_request_interval
-            if min_request_interval is not None
-            else (0.1 if self.api_key else 0.34)
-        )
+        self.min_request_interval = float(min_request_interval or 0)
         self._last_request_at = 0.0
         self._pacer = asyncio.Lock()
 
@@ -141,7 +146,7 @@ class PubMedProvider:
             "retmax": min(query.max_results, self.max_results),
         }
         if query.sort == "newest":
-            params["sort"] = "pub date"
+            params["sort"] = "pub_date"
 
         async with httpx.AsyncClient(
             timeout=self.timeout_seconds,
@@ -231,7 +236,42 @@ class PubMedProvider:
         for attempt in range(self.retry_count + 1):
             await self._pace()
             try:
-                response = await client.get(url, params=request_params)
+                async with client.stream("GET", url, params=request_params) as response:
+                    if response.status_code in _RETRYABLE_STATUSES:
+                        if attempt < self.retry_count:
+                            await self._backoff(attempt, response.headers.get("Retry-After"))
+                            continue
+                        raise LiteratureProviderError(
+                            "PubMed is temporarily unavailable.",
+                            code="literature_provider_unavailable",
+                            retryable=True,
+                        )
+                    if response.status_code < 200 or response.status_code >= 300:
+                        raise LiteratureProviderError(
+                            "PubMed rejected the literature request.",
+                            code="literature_provider_request_rejected",
+                        )
+
+                    content_length = _safe_int(
+                        response.headers.get("Content-Length"), default=0
+                    )
+                    if content_length > self.max_response_bytes:
+                        raise LiteratureProviderError(
+                            "The PubMed response exceeded the configured size limit.",
+                            code="literature_provider_response_too_large",
+                        )
+
+                    chunks: list[bytes] = []
+                    total_bytes = 0
+                    async for chunk in response.aiter_bytes(chunk_size=64 * 1024):
+                        total_bytes += len(chunk)
+                        if total_bytes > self.max_response_bytes:
+                            raise LiteratureProviderError(
+                                "The PubMed response exceeded the configured size limit.",
+                                code="literature_provider_response_too_large",
+                            )
+                        chunks.append(chunk)
+                    return b"".join(chunks)
             except (httpx.TimeoutException, httpx.RequestError) as exc:
                 if attempt >= self.retry_count:
                     raise LiteratureProviderError(
@@ -242,29 +282,6 @@ class PubMedProvider:
                 await self._backoff(attempt)
                 continue
 
-            if response.status_code in _RETRYABLE_STATUSES:
-                if attempt < self.retry_count:
-                    await self._backoff(attempt, response.headers.get("Retry-After"))
-                    continue
-                raise LiteratureProviderError(
-                    "PubMed is temporarily unavailable.",
-                    code="literature_provider_unavailable",
-                    retryable=True,
-                )
-            if response.status_code < 200 or response.status_code >= 300:
-                raise LiteratureProviderError(
-                    "PubMed rejected the literature request.",
-                    code="literature_provider_request_rejected",
-                )
-
-            content_length = _safe_int(response.headers.get("Content-Length"), default=0)
-            if content_length > self.max_response_bytes or len(response.content) > self.max_response_bytes:
-                raise LiteratureProviderError(
-                    "The PubMed response exceeded the configured size limit.",
-                    code="literature_provider_response_too_large",
-                )
-            return response.content
-
         raise LiteratureProviderError(
             "PubMed search failed.",
             code="literature_provider_unavailable",
@@ -272,6 +289,16 @@ class PubMedProvider:
         )
 
     async def _pace(self) -> None:
+        if self._rate_limiter is not None:
+            try:
+                await self._rate_limiter.acquire(has_api_key=bool(self.api_key))
+            except PubMedRateLimitUnavailable as exc:
+                raise LiteratureProviderError(
+                    "PubMed rate-limit coordination is unavailable.",
+                    code="literature_rate_limiter_unavailable",
+                    retryable=True,
+                ) from exc
+            return
         if self.min_request_interval <= 0:
             return
         async with self._pacer:
@@ -295,12 +322,7 @@ class PubMedProvider:
     ) -> tuple[list[LiteratureArticle], list[str]]:
         # The response is expected from NCBI, but keep XML expansion and DTD
         # handling out of this boundary if a proxy or test ever returns one.
-        upper_xml = xml_bytes.upper()
-        if b"<!DOCTYPE" in upper_xml or b"<!ENTITY" in upper_xml:
-            raise LiteratureProviderError(
-                "PubMed returned unsupported XML metadata.",
-                code="literature_provider_invalid_response",
-            )
+        xml_bytes = _remove_external_doctype(xml_bytes)
         try:
             root = ET.fromstring(xml_bytes)
         except ET.ParseError as exc:
@@ -438,17 +460,90 @@ def _article_ids(record: ET.Element) -> tuple[str | None, str | None]:
 
 def _retraction_status(record: ET.Element, publication_types: list[str]) -> str:
     lowered = {value.casefold() for value in publication_types}
-    if any("retract" in value for value in lowered):
-        return "retracted"
-    for item in record.findall("./PubmedData/CommentsCorrectionsList/CommentsCorrections"):
-        ref_type = _text(item.find("./RefType")).casefold()
-        if "retract" in ref_type:
-            return "retracted"
-        if any(term in ref_type for term in ("correct", "erratum", "update")):
-            return "corrected"
-    if any(any(term in value for term in ("correction", "erratum")) for value in lowered):
-        return "corrected"
+    statuses: set[str] = set()
+    if "retracted publication" in lowered or "retracted article" in lowered:
+        statuses.add("retracted")
+    if any("expression of concern" in value for value in lowered):
+        statuses.add("expression_of_concern")
+    if any("retraction of publication" in value for value in lowered):
+        statuses.add("retraction_notice")
+    if any("erratum" in value or "correction" in value for value in lowered):
+        statuses.add("corrected")
+
+    # CommentsCorrectionsList belongs to MedlineCitation and RefType is an
+    # attribute on each CommentsCorrections element in the PubMed DTD.
+    relation_nodes = record.findall(
+        "./MedlineCitation/CommentsCorrectionsList/CommentsCorrections"
+    )
+    if not relation_nodes:
+        # Keep old recorded fixtures readable while the official location
+        # above remains the source of truth for current PubMed responses.
+        relation_nodes = record.findall(
+            "./PubmedData/CommentsCorrectionsList/CommentsCorrections"
+        )
+    for item in relation_nodes:
+        ref_type = clean_text(
+            item.attrib.get("RefType") or _text(item.find("./RefType"))
+        ).casefold().replace(" ", "")
+        if ref_type in {"retractionin", "retractedandrepublishedin"}:
+            statuses.add("retracted")
+        elif ref_type in {"retractionof", "retractedandrepublishedfrom"}:
+            statuses.add("retraction_notice")
+        elif ref_type in {"expressionofconcernin", "expressionofconcernfor"}:
+            statuses.add("expression_of_concern")
+        elif ref_type in {"erratumin", "correctedandrepublishedin", "updatein"}:
+            statuses.add("corrected")
+        elif ref_type in {
+            "erratumfor",
+            "correctedandrepublishedfrom",
+            "updateof",
+        }:
+            statuses.add("correction_notice")
+
+    for status in (
+        "retracted",
+        "retraction_notice",
+        "expression_of_concern",
+        "corrected",
+        "correction_notice",
+    ):
+        if status in statuses:
+            return status
     return "normal"
+
+
+def _remove_external_doctype(xml_bytes: bytes) -> bytes:
+    """Strip only the official external DTD declaration before parsing.
+
+    ElementTree does not need the PubMed DTD to build the metadata tree. An
+    external declaration is therefore removed after checking that it has no
+    internal subset or entity definition. This keeps normal PubMed XML usable
+    without allowing arbitrary entity expansion or fetching a remote DTD.
+    """
+    upper_xml = xml_bytes.upper()
+    if b"<!ENTITY" in upper_xml:
+        raise LiteratureProviderError(
+            "PubMed returned unsupported XML metadata.",
+            code="literature_provider_invalid_response",
+        )
+    doctype_start = upper_xml.find(b"<!DOCTYPE")
+    if doctype_start < 0:
+        return xml_bytes
+    doctype_end = upper_xml.find(b">", doctype_start)
+    if doctype_end < 0:
+        raise LiteratureProviderError(
+            "PubMed returned unsupported XML metadata.",
+            code="literature_provider_invalid_response",
+        )
+    declaration = upper_xml[doctype_start : doctype_end + 1]
+    if b"[" in declaration or not (
+        b"DTD.NLM.NIH.GOV" in declaration or b"NCBI.NLM.NIH.GOV" in declaration
+    ):
+        raise LiteratureProviderError(
+            "PubMed returned unsupported XML metadata.",
+            code="literature_provider_invalid_response",
+        )
+    return xml_bytes[:doctype_start] + xml_bytes[doctype_end + 1 :]
 
 
 def _text(element: ET.Element | None) -> str:

@@ -475,6 +475,11 @@ class LiteratureSearchRunRecord(Base):
     error_message: Mapped[str] = mapped_column(Text, default="")
     warnings_json: Mapped[str] = mapped_column(Text, default="[]")
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    # A new random token fences off workers from earlier lease attempts. The
+    # nullable shape keeps upgrades compatible with runs created before it.
+    attempt_token: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     external_search_confirmed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -510,7 +515,7 @@ class LiteratureArticleRecord(Base):
     pmcid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     title: Mapped[str] = mapped_column(Text, default="")
     abstract: Mapped[str] = mapped_column(Text, default="")
-    journal: Mapped[str] = mapped_column(String(512), default="")
+    journal: Mapped[str] = mapped_column(Text, default="")
     publication_date: Mapped[str] = mapped_column(String(32), default="")
     publication_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     authors_json: Mapped[str] = mapped_column(Text, default="[]")

@@ -419,7 +419,9 @@ curl "http://localhost:8000/api/v1/literature-search-runs/<run_id>?workspace_id=
 A successful run returns normalized article records with PMID, DOI when
 available, PMCID when available, title, abstract, journal, publication date,
 authors, publication types, MeSH terms, language, the official PubMed URL,
-and `retraction_status`. A result set can include warnings such as a missing
+and `retraction_status`. The status distinguishes `normal`, `retracted`,
+`retraction_notice`, `corrected`, `correction_notice`, and
+`expression_of_concern`. A result set can include warnings such as a missing
 contact email or metadata records that PubMed could not normalize. Empty
 results are successful and include `empty_reason` when the provider returned
 no usable articles.
@@ -431,9 +433,10 @@ same ownership checks as the polling endpoint.
 
 The worker retries bounded network, rate-limit, and temporary NCBI failures.
 Queued or running runs with an expired lease become a visible stalled failure
-and can be submitted again. Deleting a document removes its search runs and
-result links; the shared public article metadata cache is retained because it
-does not contain uploaded document content.
+and can be submitted again. Each worker attempt has a private fencing token so
+an expired worker cannot overwrite a later attempt. Deleting a document removes
+its search runs and result links; the shared public article metadata cache is
+retained because it does not contain uploaded document content.
 
 Common API errors include `literature_no_medical_concepts` (`422`),
 `external_search_confirmation_required` (`409`),

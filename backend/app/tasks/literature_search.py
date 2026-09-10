@@ -36,15 +36,24 @@ def run_literature_search_once(run_id: str) -> dict[str, Any]:
         return current or {"run_id": run_id, "status": "not_found"}
 
     attempt_count = claimed.get("attempt_count")
+    attempt_token = claimed.get("attempt_token")
     try:
-        if not repository.heartbeat(run_id, attempt_count=attempt_count):
+        if not repository.heartbeat(
+            run_id,
+            attempt_count=attempt_count,
+            attempt_token=attempt_token,
+        ):
             raise LiteratureError(
                 "This literature search attempt is no longer active.",
                 code="literature_run_stale",
             )
         query = _query_from_run(claimed)
         page = asyncio.run(PubMedProvider().search(query))
-        if not repository.heartbeat(run_id, attempt_count=attempt_count):
+        if not repository.heartbeat(
+            run_id,
+            attempt_count=attempt_count,
+            attempt_token=attempt_token,
+        ):
             raise LiteratureError(
                 "This literature search attempt is no longer active.",
                 code="literature_run_stale",
@@ -53,6 +62,7 @@ def run_literature_search_once(run_id: str) -> dict[str, Any]:
             run_id,
             page,
             attempt_count=attempt_count,
+            attempt_token=attempt_token,
         )
     except LiteratureError as exc:
         repository.save_failure(
@@ -60,6 +70,7 @@ def run_literature_search_once(run_id: str) -> dict[str, Any]:
             exc.code,
             str(exc),
             attempt_count=attempt_count,
+            attempt_token=attempt_token,
         )
         log.warning("Literature search run %s failed: %s", run_id, exc.code)
         return {
@@ -75,6 +86,7 @@ def run_literature_search_once(run_id: str) -> dict[str, Any]:
             "literature_search_failed",
             "Literature search failed.",
             attempt_count=attempt_count,
+            attempt_token=attempt_token,
         )
         return {
             "run_id": run_id,

@@ -161,6 +161,61 @@ _GENERIC_ENGLISH_DISEASE = re.compile(
 _GENERIC_CJK_DISEASE = re.compile(r"[\u4e00-\u9fff]{2,12}(?:病|症|癌|炎|综合征)")
 _ENGLISH_WORD = re.compile(r"\b[A-Za-z][A-Za-z-]{2,}\b")
 _CJK_TERM = re.compile(r"[\u4e00-\u9fff]{2,12}")
+_ENGLISH_DISEASE_MARKERS = {
+    "disease",
+    "syndrome",
+    "cancer",
+    "carcinoma",
+    "leukemia",
+    "lymphoma",
+    "disorder",
+}
+_ENGLISH_DISEASE_CONTEXT_WORDS = {
+    "a",
+    "about",
+    "after",
+    "an",
+    "and",
+    "are",
+    "case",
+    "cases",
+    "cause",
+    "causes",
+    "caused",
+    "causing",
+    "diagnosed",
+    "diagnosis",
+    "does",
+    "for",
+    "from",
+    "had",
+    "has",
+    "have",
+    "history",
+    "in",
+    "is",
+    "known",
+    "new",
+    "of",
+    "on",
+    "patient",
+    "patients",
+    "person",
+    "reported",
+    "research",
+    "study",
+    "suffered",
+    "suffering",
+    "the",
+    "this",
+    "to",
+    "what",
+    "with",
+}
+_CJK_DISEASE_CONTEXT = re.compile(
+    r"患者|病人|患有|得了|诊断为|诊断是|诊断|病例|病历|姓名"
+)
+_CJK_DISEASE_SEPARATORS = re.compile(r"[\s,，。；;:：、/|（）()]+")
 
 _STUDY_TYPE_TERMS = {
     "systematic_review": '"Systematic Review"[Publication Type]',
@@ -299,7 +354,14 @@ def _extract_concepts(question: str) -> list[DetectedConcept]:
 
     for pattern in (_GENERIC_ENGLISH_DISEASE, _GENERIC_CJK_DISEASE):
         for match in pattern.finditer(question):
-            value = clean_text(match.group(0))
+            raw_value = clean_text(match.group(0))
+            value = (
+                _safe_english_disease_term(raw_value)
+                if pattern is _GENERIC_ENGLISH_DISEASE
+                else _safe_cjk_disease_term(raw_value)
+            )
+            if not value:
+                continue
             normalized = value
             overlaps_known = any(
                 match.start() < end and match.end() > start
@@ -341,6 +403,62 @@ def _extract_concepts(question: str) -> list[DetectedConcept]:
                 break
 
     return concepts[:8]
+
+
+def _safe_english_disease_term(value: str) -> str | None:
+    """Keep a disease phrase, never the narrative that introduced it."""
+    tokens = value.split()
+    if len(tokens) < 2 or tokens[-1].casefold() not in _ENGLISH_DISEASE_MARKERS:
+        return None
+
+    context_index = max(
+        (
+            index
+            for index, token in enumerate(tokens[:-1])
+            if token.casefold().strip(".,;:()") in _ENGLISH_DISEASE_CONTEXT_WORDS
+        ),
+        default=-1,
+    )
+    if context_index >= 0:
+        tokens = tokens[context_index + 1 :]
+    elif len(tokens) > 2:
+        # Without a narrative boundary, a multi-word free-form match could be
+        # a person's name followed by a disease. Prefer no search to leakage.
+        if all(token[:1].isupper() and token.isalpha() for token in tokens[:-1]):
+            return None
+        return None
+
+    if not tokens or any(
+        token.casefold().strip(".,;:()") in _ENGLISH_DISEASE_CONTEXT_WORDS
+        for token in tokens[:-1]
+    ):
+        return None
+    return clean_text(" ".join(tokens))
+
+
+def _safe_cjk_disease_term(value: str) -> str | None:
+    """Extract only the disease suffix from a Chinese case narrative."""
+    if not value or not re.search(r"(?:病|症|癌|炎|综合征)$", value):
+        return None
+
+    context_matches = list(_CJK_DISEASE_CONTEXT.finditer(value))
+    candidate = value[context_matches[-1].end() :] if context_matches else value
+    candidate = re.sub(r"^[有的是]+", "", candidate)
+    pieces = [clean_text(piece) for piece in _CJK_DISEASE_SEPARATORS.split(candidate)]
+    pieces = [piece for piece in pieces if piece]
+    if pieces:
+        candidate = next(
+            (piece for piece in reversed(pieces) if re.search(r"(?:病|症|癌|炎|综合征)$", piece)),
+            pieces[-1],
+        )
+    elif not context_matches and "的" in candidate:
+        candidate = candidate.rsplit("的", 1)[-1]
+
+    if "的" in candidate:
+        candidate = candidate.rsplit("的", 1)[-1]
+    if not re.fullmatch(r"[\u4e00-\u9fff]{2,12}(?:病|症|癌|炎|综合征)", candidate):
+        return None
+    return candidate
 
 
 def _looks_medical(token: str) -> bool:

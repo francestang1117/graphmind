@@ -29,4 +29,3 @@ class LiteratureQueryError(LiteratureError):
 
 class LiteratureProviderError(LiteratureError):
     """The external provider did not return usable data."""
-
