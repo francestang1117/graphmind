@@ -66,14 +66,30 @@ def run_medical_analysis_once(run_id: str) -> dict[str, Any]:
                 code="source_changed",
             )
 
-        provider = get_provider(claimed["provider"], claimed["model_name"])
+        provider = get_provider(
+            claimed["provider"],
+            claimed["model_name"],
+            timeout_seconds=int(
+                claimed.get("timeout_seconds") or settings.MEDICAL_AI_TIMEOUT_SECONDS
+            ),
+            max_output_tokens=int(
+                claimed.get("max_output_tokens") or settings.MEDICAL_AI_MAX_OUTPUT_TOKENS
+            ),
+            retry_count=int(
+                claimed.get("provider_retry_count")
+                if claimed.get("provider_retry_count") is not None
+                else settings.MEDICAL_AI_PROVIDER_RETRY_COUNT
+            ),
+        )
         analyzer = MedicalInsightAnalyzer(
             provider=provider,
             max_input_tokens=int(
                 claimed.get("max_input_tokens")
                 or settings.MEDICAL_AI_MAX_INPUT_TOKENS
             ),
-            timeout_seconds=settings.MEDICAL_AI_TIMEOUT_SECONDS,
+            timeout_seconds=int(
+                claimed.get("timeout_seconds") or settings.MEDICAL_AI_TIMEOUT_SECONDS
+            ),
             redact_pii=bool(
                 claimed.get("redact_pii", settings.MEDICAL_AI_REDACT_PII)
             ),
@@ -83,6 +99,7 @@ def run_medical_analysis_once(run_id: str) -> dict[str, Any]:
         output = analyzer.run(
             source["chunks"],
             sections=source["sections"],
+            source_warnings=source.get("source_warnings"),
             title=source["title"],
             document_kind=source["document_kind"],
             language=source["language"],

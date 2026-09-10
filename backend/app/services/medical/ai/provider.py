@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import copy
 import re
+import time
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from app.services.medical.ai.context_builder import AnalysisContext, EvidenceItem
-from app.services.medical.ai.exceptions import ProviderUnavailable
+from app.services.medical.ai.exceptions import MedicalInsightError, ProviderUnavailable
+from app.services.medical.ai.models import MedicalInsightReport
 
 
 class MedicalAIProvider(Protocol):
@@ -132,7 +135,7 @@ class ExtractiveMedicalAIProvider:
 
         warnings = ["not_medical_advice", *context.warnings]
         return {
-            "schema_version": "medical-insights-v1",
+            "schema_version": "medical-insights-v2",
             "document_kind": context.document_kind,
             "language": context.language,
             "overview": {
@@ -141,17 +144,130 @@ class ExtractiveMedicalAIProvider:
                 "study_type": _study_type(context.document_kind),
                 "evidence_ids": [overview_item.evidence_id] if overview_item else [],
             },
+            "study_methods": {},
             "key_findings": findings,
             "limitations": limitations,
             "medical_terms": [],
             "what_it_means": meanings,
             "what_it_does_not_mean": does_not_mean,
+            "applicability": [],
+            "future_research": [],
             "questions_for_professional": [
                 "Which people were included in this document, and who was not included?",
                 "How strong are the reported findings and their limitations?",
             ],
+            "coverage": _coverage(context),
             "warnings": warnings,
         }
+
+
+class OpenAIMedicalAIProvider:
+    """Generate a schema-constrained report with the OpenAI Responses API."""
+
+    name = "openai"
+    manages_timeout = True
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model_name: str,
+        timeout_seconds: int = 60,
+        max_output_tokens: int = 5000,
+        retry_count: int = 2,
+        client: Any | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        if not api_key and client is None:
+            raise ProviderUnavailable(
+                "OpenAI is not configured for medical insights.",
+                details={"provider": self.name},
+            )
+        if not model_name or model_name == "extractive-v1":
+            raise ProviderUnavailable(
+                "Set MEDICAL_AI_MODEL before enabling the OpenAI provider.",
+                details={"provider": self.name},
+            )
+        self.model_name = model_name
+        self.timeout_seconds = max(1, int(timeout_seconds))
+        self.max_output_tokens = max(256, int(max_output_tokens))
+        self.retry_count = max(0, int(retry_count))
+        self._sleep = sleep
+        self._client = client or self._build_client(api_key)
+
+    def _build_client(self, api_key: str) -> Any:
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise ProviderUnavailable(
+                "The openai package is required for the OpenAI medical provider.",
+                details={"provider": self.name},
+            ) from exc
+        return OpenAI(
+            api_key=api_key,
+            timeout=self.timeout_seconds,
+            max_retries=0,
+        )
+
+    def generate(self, prompt: str, _context: AnalysisContext) -> Any:
+        last_error: Exception | None = None
+        deadline = time.monotonic() + self.timeout_seconds
+        for attempt in range(self.retry_count + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise MedicalInsightError(
+                    "OpenAI medical insight request timed out.",
+                    code="provider_timeout",
+                ) from last_error
+            try:
+                response = self._client.responses.create(
+                    model=self.model_name,
+                    input=prompt,
+                    max_output_tokens=self.max_output_tokens,
+                    store=False,
+                    timeout=remaining,
+                    text={
+                        "format": {
+                            "type": "json_schema",
+                            "name": "medical_insight_report",
+                            "strict": True,
+                            "schema": _strict_json_schema(
+                                MedicalInsightReport.model_json_schema()
+                            ),
+                        }
+                    },
+                )
+                output_text = getattr(response, "output_text", None)
+                if not output_text:
+                    raise MedicalInsightError(
+                        "OpenAI returned no medical insight report.",
+                        code="provider_empty_response",
+                    )
+                # Keep parsing in the analyzer so malformed output gets the
+                # same single repair attempt as every other provider.
+                return output_text
+            except MedicalInsightError:
+                raise
+            except Exception as exc:
+                last_error = exc
+                code = _provider_error_code(exc)
+                retryable = code in {"provider_timeout", "provider_rate_limited", "provider_unavailable"}
+                if not retryable or attempt >= self.retry_count:
+                    raise MedicalInsightError(
+                        "OpenAI medical insight request failed.",
+                        code=code,
+                    ) from exc
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise MedicalInsightError(
+                        "OpenAI medical insight request timed out.",
+                        code="provider_timeout",
+                    ) from exc
+                self._sleep(min(2**attempt, 4, remaining))
+        raise MedicalInsightError(
+            "OpenAI medical insight request failed.",
+            code="provider_failed",
+        ) from last_error
 
 
 class FakeMedicalAIProvider:
@@ -179,12 +295,38 @@ class FakeMedicalAIProvider:
         return ExtractiveMedicalAIProvider().generate(prompt, context)
 
 
-def get_provider(name: str, model_name: str = "") -> MedicalAIProvider:
+def get_provider(
+    name: str,
+    model_name: str = "",
+    *,
+    api_key: str | None = None,
+    timeout_seconds: int | None = None,
+    max_output_tokens: int | None = None,
+    retry_count: int | None = None,
+) -> MedicalAIProvider:
     provider_name = (name or "extractive").strip().lower()
     if provider_name == "extractive":
         return ExtractiveMedicalAIProvider(model_name or "extractive-v1")
     if provider_name == "fake":
         return FakeMedicalAIProvider(model_name=model_name or "fake-v1")
+    if provider_name == "openai":
+        from app.core.config import settings
+
+        return OpenAIMedicalAIProvider(
+            api_key=(
+                api_key
+                if api_key is not None
+                else settings.MEDICAL_AI_OPENAI_API_KEY or settings.OPENAI_API_KEY
+            ),
+            model_name=model_name or settings.OPENAI_MODEL,
+            timeout_seconds=timeout_seconds or settings.MEDICAL_AI_TIMEOUT_SECONDS,
+            max_output_tokens=max_output_tokens or settings.MEDICAL_AI_MAX_OUTPUT_TOKENS,
+            retry_count=(
+                settings.MEDICAL_AI_PROVIDER_RETRY_COUNT
+                if retry_count is None
+                else retry_count
+            ),
+        )
     raise ProviderUnavailable(
         f"Medical AI provider '{provider_name}' is not configured.",
         details={"provider": provider_name},
@@ -261,3 +403,47 @@ def _study_type(document_kind: str) -> str:
         "research_paper": "Research paper",
         "guideline": "Clinical guideline or consensus document",
     }.get(document_kind, "Medical document")
+
+
+def _coverage(context: AnalysisContext) -> dict[str, Any]:
+    return {
+        "complete": context.coverage_complete,
+        "selected_chunks": len(context.evidence),
+        "total_chunks": context.total_chunks,
+        "selected_tokens": sum(item.token_count for item in context.evidence),
+        "max_input_tokens": context.max_input_tokens,
+        "included_sections": context.included_sections,
+        "omitted_sections": context.omitted_sections,
+    }
+
+
+def _provider_error_code(exc: Exception) -> str:
+    name = exc.__class__.__name__.lower()
+    status_code = getattr(exc, "status_code", None)
+    if "timeout" in name or isinstance(exc, TimeoutError):
+        return "provider_timeout"
+    if status_code == 429 or "ratelimit" in name or "rate_limit" in name:
+        return "provider_rate_limited"
+    if isinstance(status_code, int) and status_code >= 500:
+        return "provider_unavailable"
+    return "provider_failed"
+
+
+def _strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Make Pydantic's schema satisfy Structured Outputs strict mode."""
+    schema = copy.deepcopy(schema)
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            properties = value.get("properties")
+            if isinstance(properties, dict):
+                value["required"] = list(properties)
+                value["additionalProperties"] = False
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(schema)
+    return schema

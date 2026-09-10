@@ -119,11 +119,16 @@ def _core_items(
         "limitations",
         "what_it_means",
         "what_it_does_not_mean",
+        "applicability",
+        "future_research",
     ):
         for index, item in enumerate(getattr(report, field_name), start=1):
             yield f"{field_name}[{index}]", item, item.evidence_ids
     for index, item in enumerate(report.medical_terms, start=1):
         yield f"medical_terms[{index}]", item, item.evidence_ids
+    for field_name, item in report.study_methods.model_dump().items():
+        if item["support_status"] != "not_reported":
+            yield f"study_methods.{field_name}", item, item["evidence_ids"]
 
 
 def _report_citations(report: MedicalInsightReport) -> Iterable[tuple[str, list[str]]]:
@@ -133,11 +138,16 @@ def _report_citations(report: MedicalInsightReport) -> Iterable[tuple[str, list[
         "limitations",
         "what_it_means",
         "what_it_does_not_mean",
+        "applicability",
+        "future_research",
     ):
         for item in getattr(report, field_name):
             yield item.id, item.evidence_ids
     for item in report.medical_terms:
         yield item.term, item.evidence_ids
+    for field_name, item in report.study_methods.model_dump().items():
+        if item["support_status"] != "not_reported":
+            yield f"study_methods.{field_name}", item["evidence_ids"]
 
 
 def _section_key(value: str) -> str:

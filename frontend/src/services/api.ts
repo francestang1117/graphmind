@@ -107,6 +107,12 @@ export interface MedicalInsightFinding {
   interpretation_type: "direct_statement" | "summary" | "inference" | "uncertain" | string;
 }
 
+export interface MedicalInsightAttribute {
+  value: string;
+  support_status: "supported" | "partially_supported" | "not_reported" | "uncertain" | string;
+  evidence_ids: string[];
+}
+
 export interface MedicalInsightReport {
   schema_version: string;
   document_kind: string;
@@ -117,6 +123,13 @@ export interface MedicalInsightReport {
     study_type: string;
     evidence_ids: string[];
   };
+  study_methods?: {
+    design: MedicalInsightAttribute;
+    population: MedicalInsightAttribute;
+    human_animal_in_vitro: MedicalInsightAttribute;
+    sample_size: MedicalInsightAttribute;
+    comparator: MedicalInsightAttribute;
+  };
   key_findings: MedicalInsightFinding[];
   limitations: MedicalInsightFinding[];
   medical_terms: Array<{
@@ -126,7 +139,18 @@ export interface MedicalInsightReport {
   }>;
   what_it_means: MedicalInsightFinding[];
   what_it_does_not_mean: MedicalInsightFinding[];
+  applicability?: MedicalInsightFinding[];
+  future_research?: MedicalInsightFinding[];
   questions_for_professional: string[];
+  coverage?: {
+    complete: boolean;
+    selected_chunks: number;
+    total_chunks: number;
+    selected_tokens: number;
+    max_input_tokens: number;
+    included_sections: string[];
+    omitted_sections: string[];
+  };
   warnings: string[];
 }
 
@@ -143,6 +167,10 @@ export interface MedicalInsightRun {
   schema_version: string;
   redact_pii?: boolean;
   max_input_tokens?: number;
+  timeout_seconds?: number;
+  max_output_tokens?: number;
+  provider_retry_count?: number;
+  external_processing_confirmed_at?: string;
   attempt_count?: number;
   last_heartbeat_at?: string;
   lease_expires_at?: string;
@@ -159,6 +187,18 @@ export interface MedicalInsightRun {
   validation_status?: string;
   warnings?: string[];
   evidence?: MedicalInsightEvidence[];
+}
+
+export interface MedicalInsightConfig {
+  enabled: boolean;
+  configured: boolean;
+  provider: string;
+  model_name: string;
+  external_processing: boolean;
+  requires_confirmation: boolean;
+  sends_selected_excerpts: boolean;
+  redact_pii: boolean;
+  config_fingerprint: string;
 }
 
 export interface JobProgress {
@@ -371,11 +411,16 @@ export const getDocumentOpenUrl = (filename: string, workspaceId?: string | null
 export const startMedicalInsights = (
   documentId: string,
   workspaceId?: string | null,
+  externalProcessingConfirmed = false,
+  externalProcessingConfigFingerprint?: string,
 ): Promise<MedicalInsightRun> =>
   http
     .post<MedicalInsightRun>(
       `/documents/${encodeURIComponent(documentId)}/medical-insights`,
-      {},
+      {
+        external_processing_confirmed: externalProcessingConfirmed,
+        external_processing_config_fingerprint: externalProcessingConfigFingerprint,
+      },
       workspaceParams(workspaceId),
     )
     .then((r) => r.data);
@@ -383,14 +428,22 @@ export const startMedicalInsights = (
 export const reanalyzeMedicalInsights = (
   documentId: string,
   workspaceId?: string | null,
+  externalProcessingConfirmed = false,
+  externalProcessingConfigFingerprint?: string,
 ): Promise<MedicalInsightRun> =>
   http
     .post<MedicalInsightRun>(
       `/documents/${encodeURIComponent(documentId)}/medical-insights/reanalyze`,
-      {},
+      {
+        external_processing_confirmed: externalProcessingConfirmed,
+        external_processing_config_fingerprint: externalProcessingConfigFingerprint,
+      },
       workspaceParams(workspaceId),
     )
     .then((r) => r.data);
+
+export const getMedicalInsightConfig = (): Promise<MedicalInsightConfig> =>
+  http.get<MedicalInsightConfig>("/medical-insights/config").then((r) => r.data);
 
 export const getMedicalInsightRun = (
   runId: string,

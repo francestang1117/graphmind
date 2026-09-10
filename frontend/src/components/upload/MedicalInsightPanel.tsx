@@ -3,14 +3,59 @@ import axios from "axios";
 import { AlertCircle, CheckCircle2, FileSearch, Loader2, RefreshCw, X } from "lucide-react";
 import {
   getCurrentMedicalInsights,
+  getMedicalInsightConfig,
   getMedicalInsightRun,
   reanalyzeMedicalInsights,
   startMedicalInsights,
   type MedicalInsightEvidence,
   type MedicalInsightFinding,
+  type MedicalInsightAttribute,
+  type MedicalInsightConfig,
   type MedicalInsightReport,
   type MedicalInsightRun,
 } from "../../services/api";
+
+function consentStorageKey(
+  config: MedicalInsightConfig,
+  documentId: string,
+  workspaceId?: string | null,
+) {
+  return [
+    "graphmind.medical-insight-consent.v1",
+    workspaceId || "default",
+    documentId,
+    config.config_fingerprint,
+  ].join(":");
+}
+
+function savedExternalConsent(
+  config: MedicalInsightConfig,
+  documentId: string,
+  workspaceId?: string | null,
+) {
+  try {
+    return window.localStorage.getItem(
+      consentStorageKey(config, documentId, workspaceId),
+    ) === "confirmed";
+  } catch {
+    return false;
+  }
+}
+
+function saveExternalConsent(
+  config: MedicalInsightConfig,
+  documentId: string,
+  workspaceId?: string | null,
+) {
+  try {
+    window.localStorage.setItem(
+      consentStorageKey(config, documentId, workspaceId),
+      "confirmed",
+    );
+  } catch {
+    // The explicit confirmation still applies to this open browser session.
+  }
+}
 
 interface Props {
   documentId: string;
@@ -95,6 +140,38 @@ function FindingList({
   );
 }
 
+function MethodItem({
+  label,
+  item,
+  evidenceById,
+  onSelectEvidence,
+}: {
+  label: string;
+  item: MedicalInsightAttribute;
+  evidenceById: Map<string, MedicalInsightEvidence>;
+  onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
+}) {
+  return (
+    <div className="insight-method-item">
+      <span>{label}</span>
+      <strong>{item.value}</strong>
+      <span className="insight-type">{readable(item.support_status)}</span>
+      {item.evidence_ids.length > 0 && findingEvidence(
+        {
+          id: `method-${label}`,
+          statement: item.value,
+          plain_explanation: "",
+          evidence_ids: item.evidence_ids,
+          evidence_level: "reported_in_document",
+          interpretation_type: "direct_statement",
+        },
+        evidenceById,
+        onSelectEvidence,
+      )}
+    </div>
+  );
+}
+
 function ReportView({
   report,
   run,
@@ -128,6 +205,19 @@ function ReportView({
         )}
       </section>
 
+      {report.study_methods && (
+        <details className="insight-report-section insight-details">
+          <summary>Study methods</summary>
+          <div className="insight-method-list">
+            <MethodItem label="Design" item={report.study_methods.design} {...{ evidenceById, onSelectEvidence }} />
+            <MethodItem label="Population" item={report.study_methods.population} {...{ evidenceById, onSelectEvidence }} />
+            <MethodItem label="Evidence subject" item={report.study_methods.human_animal_in_vitro} {...{ evidenceById, onSelectEvidence }} />
+            <MethodItem label="Sample size" item={report.study_methods.sample_size} {...{ evidenceById, onSelectEvidence }} />
+            <MethodItem label="Comparator" item={report.study_methods.comparator} {...{ evidenceById, onSelectEvidence }} />
+          </div>
+        </details>
+      )}
+
       <FindingList
         title="Key findings"
         items={report.key_findings}
@@ -149,6 +239,18 @@ function ReportView({
       <FindingList
         title="Limitations"
         items={report.limitations}
+        evidenceById={evidenceById}
+        onSelectEvidence={onSelectEvidence}
+      />
+      <FindingList
+        title="Where the findings may apply"
+        items={report.applicability ?? []}
+        evidenceById={evidenceById}
+        onSelectEvidence={onSelectEvidence}
+      />
+      <FindingList
+        title="Questions for further research"
+        items={report.future_research ?? []}
         evidenceById={evidenceById}
         onSelectEvidence={onSelectEvidence}
       />
@@ -200,16 +302,59 @@ function ReportView({
           </div>
         </div>
       )}
+
+      {report.coverage && (
+        <details className="insight-report-section insight-details">
+          <summary>Analysis coverage</summary>
+          <div className="insight-coverage-grid">
+            <span>{report.coverage.selected_chunks} of {report.coverage.total_chunks} source chunks included</span>
+            <span>{report.coverage.selected_tokens} of {report.coverage.max_input_tokens} input tokens used</span>
+            <span>Included: {report.coverage.included_sections.map(readable).join(", ") || "No labeled sections"}</span>
+            {!report.coverage.complete && (
+              <span>Not included: {report.coverage.omitted_sections.map(readable).join(", ") || "Some source passages"}</span>
+            )}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
 
 export default function MedicalInsightPanel({ documentId, title, workspaceId, onClose }: Props) {
   const [run, setRun] = useState<MedicalInsightRun | null>(null);
+  const [analysisConfig, setAnalysisConfig] = useState<MedicalInsightConfig | null>(null);
   const [loading, setLoading] = useState(true);
+  const [configLoading, setConfigLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [selectedEvidence, setSelectedEvidence] = useState<MedicalInsightEvidence | null>(null);
+  const [externalConsent, setExternalConsent] = useState(false);
+  const [showExternalConfirmation, setShowExternalConfirmation] = useState(false);
+  const [pendingReanalysis, setPendingReanalysis] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    getMedicalInsightConfig()
+      .then((config) => {
+        if (!active) return;
+        setAnalysisConfig(config);
+        setExternalConsent(
+          config.requires_confirmation
+          && savedExternalConsent(config, documentId, workspaceId),
+        );
+      })
+      .catch(() => {
+        if (active) setError("Could not load the medical analysis configuration.");
+      })
+      .finally(() => {
+        if (active) setConfigLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [documentId, workspaceId]);
 
   useEffect(() => {
     let active = true;
@@ -271,20 +416,79 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     [run?.evidence],
   );
 
-  const runAnalysis = async (reanalyze = false) => {
+  const executeAnalysis = async (
+    reanalyze: boolean,
+    confirmed: boolean,
+    configFingerprint?: string,
+  ) => {
     setStarting(true);
     setError("");
     setSelectedEvidence(null);
     try {
       const nextRun = reanalyze
-        ? await reanalyzeMedicalInsights(documentId, workspaceId)
-        : await startMedicalInsights(documentId, workspaceId);
+        ? await reanalyzeMedicalInsights(
+            documentId,
+            workspaceId,
+            confirmed,
+            configFingerprint,
+          )
+        : await startMedicalInsights(
+            documentId,
+            workspaceId,
+            confirmed,
+            configFingerprint,
+          );
       setRun(nextRun);
-    } catch {
-      setError("Could not start the medical insight. Check that this is a parsed paper or guideline.");
+    } catch (requestError) {
+      const code = axios.isAxiosError(requestError)
+        ? requestError.response?.data?.code
+        : undefined;
+      if (code === "external_processing_config_changed") {
+        try {
+          const latestConfig = await getMedicalInsightConfig();
+          setAnalysisConfig(latestConfig);
+          setExternalConsent(false);
+          setPendingReanalysis(reanalyze);
+          setShowExternalConfirmation(true);
+          setError("External processing settings changed. Review and confirm them again.");
+        } catch {
+          setError("External processing settings changed, but the new settings could not be loaded.");
+        }
+      } else {
+        setError("Could not start the medical insight. Check that this is a parsed paper or guideline.");
+      }
     } finally {
       setStarting(false);
     }
+  };
+
+  const runAnalysis = (reanalyze = false) => {
+    if (!analysisConfig?.enabled || !analysisConfig.configured) {
+      setError("Medical analysis is not configured on the server.");
+      return;
+    }
+    if (analysisConfig.requires_confirmation && !externalConsent) {
+      setPendingReanalysis(reanalyze);
+      setShowExternalConfirmation(true);
+      return;
+    }
+    void executeAnalysis(
+      reanalyze,
+      externalConsent,
+      analysisConfig.config_fingerprint,
+    );
+  };
+
+  const confirmExternalAnalysis = () => {
+    if (!analysisConfig) return;
+    saveExternalConsent(analysisConfig, documentId, workspaceId);
+    setExternalConsent(true);
+    setShowExternalConfirmation(false);
+    void executeAnalysis(
+      pendingReanalysis,
+      true,
+      analysisConfig.config_fingerprint,
+    );
   };
 
   const report = run?.report;
@@ -302,7 +506,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
               className="row-action"
               type="button"
               onClick={() => runAnalysis(true)}
-              disabled={starting}
+              disabled={starting || configLoading}
               aria-label="Re-analyze document"
               title="Re-analyze document"
             >
@@ -315,14 +519,54 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
         </div>
       </header>
 
-      {loading && (
+      {analysisConfig?.external_processing && (
+        <div className="insight-provider-notice insight-provider-notice-before">
+          <strong>{readable(analysisConfig.provider)} · {analysisConfig.model_name}</strong>
+          <span>
+            Analysis sends selected {analysisConfig.redact_pii ? "PII-redacted " : "unredacted "}
+            document excerpts to this external provider. API keys remain on the server.
+          </span>
+          {!analysisConfig.configured && <span>The provider is not fully configured.</span>}
+        </div>
+      )}
+
+      {showExternalConfirmation && analysisConfig && (
+        <div
+          className="insight-external-confirmation"
+          role="dialog"
+          aria-label="Confirm external document processing"
+        >
+          <strong>Send selected excerpts for analysis?</strong>
+          <p>
+            {readable(analysisConfig.provider)} will receive selected {analysisConfig.redact_pii ? "PII-redacted" : "unredacted"} passages from this document using {analysisConfig.model_name}.
+          </p>
+          <div className="insight-confirm-actions">
+            <button
+              type="button"
+              className="insight-retry"
+              onClick={() => setShowExternalConfirmation(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="insight-primary-action"
+              onClick={confirmExternalAnalysis}
+            >
+              Confirm and analyze
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(loading || configLoading) && (
         <div className="parsed-state">
           <Loader2 className="spin" size={18} />
           Loading medical insight...
         </div>
       )}
 
-      {!loading && !run && !error && (
+      {!loading && !configLoading && !run && !error && (
         <div className="insight-empty">
           <FileSearch size={18} />
           <p>Generate a cited summary for this research paper or guideline.</p>
@@ -371,13 +615,22 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
       {run?.status === "succeeded" && report && (
         <>
           <div className="insight-meta">
-            <span><CheckCircle2 size={13} /> Source citations checked</span>
+            <span><CheckCircle2 size={13} /> Citations and claim wording checked</span>
+            <span>{run.provider === "extractive" ? "Local extractive analysis" : `${readable(run.provider)} AI analysis`}</span>
+            <span>{run.model_name}</span>
+            {run.parsed_source_hash && <span>Source {run.parsed_source_hash.slice(0, 8)}</span>}
             <span>{readable(report.document_kind)}</span>
             <span>{report.language}</span>
             {typeof run.citation_coverage === "number" && (
               <span>{Math.round(run.citation_coverage * 100)}% citation coverage</span>
             )}
           </div>
+          {run.provider !== "extractive" && (
+            <div className="insight-provider-notice">
+              Selected {run.redact_pii ? "redacted " : ""}document excerpts were sent to the configured AI provider.
+              {run.redact_pii === false && " PII redaction was disabled for this run."} API keys stay on the server.
+            </div>
+          )}
           <ReportView
             report={report}
             run={run}
