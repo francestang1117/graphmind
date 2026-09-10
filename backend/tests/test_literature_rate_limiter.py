@@ -25,6 +25,15 @@ class _BrokenRedis:
         raise OSError("redis unavailable")
 
 
+class _WaitThenGrantRedis:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def eval(self, *args: object) -> list[int]:
+        self.calls += 1
+        return [0, 333] if self.calls == 1 else [1, 0]
+
+
 def test_rate_limiter_uses_redis_token_bucket() -> None:
     redis = _GrantingRedis()
     limiter = PubMedRateLimiter(
@@ -39,6 +48,26 @@ def test_rate_limiter_uses_redis_token_bucket() -> None:
     assert len(redis.calls) == 1
     assert redis.calls[0][1] == 1
     assert redis.calls[0][-2:] == ("10", "10")
+
+
+def test_rate_limiter_interprets_wait_time_as_milliseconds() -> None:
+    redis = _WaitThenGrantRedis()
+    sleeps: list[float] = []
+
+    async def record_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    limiter = PubMedRateLimiter(
+        redis_client=redis,
+        requests_per_second=3,
+        strict=True,
+        sleep=record_sleep,
+    )
+
+    asyncio.run(limiter.acquire())
+
+    assert redis.calls == 2
+    assert sleeps == [pytest.approx(0.333)]
 
 
 def test_rate_limiter_fails_closed_when_redis_is_unavailable() -> None:

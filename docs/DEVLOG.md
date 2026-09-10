@@ -1648,5 +1648,5 @@ outside development and test, loss of Redis coordination fails the search and
 startup rejects attempts to disable either the limiter or its Redis requirement.
 The DOI and journal storage limits now match the normalized metadata model, and
 the newest sort uses the official `pub_date` value. The local backend suite is
-now `365 passed, 3 skipped`; PostgreSQL migration and row-lock checks remain
+now `368 passed, 3 skipped`; PostgreSQL migration and row-lock checks remain
 conditional on `GRAPHMIND_TEST_POSTGRES_URL`.

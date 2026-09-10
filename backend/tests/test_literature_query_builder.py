@@ -54,50 +54,68 @@ def test_redaction_does_not_treat_normal_patient_phrases_as_record_ids() -> None
 
 
 @pytest.mark.parametrize(
-    ("question", "leaked_values"),
+    ("question", "expected_term", "leaked_values"),
     [
         (
+            "关于李明戈谢病有什么新研究？",
+            "Gaucher disease",
+            ("关于", "李明"),
+        ),
+        (
+            "病例为李明戈谢病，有什么研究？",
+            "Gaucher disease",
+            ("病例", "李明"),
+        ),
+        (
             "患者张三患有戈谢病，有什么新研究？",
+            "Gaucher disease",
             ("患者", "张三"),
         ),
         (
             "John Smith has Gaucher disease",
+            "Gaucher disease",
             ("John", "Smith", "has"),
         ),
     ],
 )
-def test_unknown_disease_query_keeps_only_the_disease_term(
-    question: str, leaked_values: tuple[str, ...]
+def test_dictionary_disease_query_keeps_only_the_normalized_term(
+    question: str, expected_term: str, leaked_values: tuple[str, ...]
 ) -> None:
     query = build_literature_query(question)
 
-    assert any(
-        concept.normalized.casefold() in {"戈谢病", "gaucher disease"}
-        for concept in query.detected_concepts
-    )
+    assert [concept.normalized for concept in query.detected_concepts] == [expected_term]
     for leaked_value in leaked_values:
         assert leaked_value.casefold() not in query.normalized_query.casefold()
 
 
 @pytest.mark.parametrize(
-    "question",
+    ("question", "expected_term"),
     [
-        "张三戈谢病有什么新研究？",
-        "关于某人的戈谢病有什么新研究？",
+        ("关于胃癌的最新研究", "Stomach cancer"),
+        ("关于肝癌的治疗研究", "Liver cancer"),
+        ("关于脑炎的研究", "Encephalitis"),
+        ("关于麻疹的研究", "Measles"),
+        ("关于痛风的研究", "Gout"),
     ],
 )
-def test_ambiguous_chinese_disease_text_fails_closed(question: str) -> None:
+def test_common_chinese_diseases_use_dictionary_terms(
+    question: str, expected_term: str
+) -> None:
+    query = build_literature_query(question)
+
+    assert [concept.normalized for concept in query.detected_concepts] == [expected_term]
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "关于李明未知病有什么新研究？",
+        "病例为李明青龙病，有什么研究？",
+    ],
+)
+def test_unrecognized_chinese_disease_text_fails_closed(question: str) -> None:
     with pytest.raises(LiteratureQueryError, match="No medical concepts"):
         build_literature_query(question)
-
-
-@pytest.mark.parametrize("marker", ["患", "罹患", "确诊为", "病例为", "关于"])
-def test_explicit_chinese_disease_capture_excludes_the_narrative(marker: str) -> None:
-    query = build_literature_query(f"{marker}戈谢病有什么新研究？")
-
-    assert [concept.normalized for concept in query.detected_concepts] == ["戈谢病"]
-    assert "患" not in query.normalized_query
-    assert "罹患" not in query.normalized_query
 
 
 @pytest.mark.parametrize("question", [

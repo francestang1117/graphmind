@@ -33,7 +33,9 @@ end
 local wait_for = (1 - tokens) / rate
 redis.call('HSET', KEYS[1], 'tokens', tokens, 'updated_at', now)
 redis.call('EXPIRE', KEYS[1], math.ceil(capacity / rate) + 2)
-return {0, wait_for}
+-- RESP2 represents Lua numbers as integers. Return milliseconds so a
+-- sub-second wait is not truncated to zero by the Redis protocol.
+return {0, math.max(1, math.ceil(wait_for * 1000))}
 """
 
 
@@ -119,10 +121,10 @@ class PubMedRateLimiter:
                         str(rate),
                         str(rate),
                     )
-                    granted, wait_for = _bucket_result(result)
+                    granted, wait_for_ms = _bucket_result(result)
                     if granted:
                         return
-                    await self.sleep(min(max(wait_for, 0.01), 10.0))
+                    await self.sleep(min(max(wait_for_ms / 1000.0, 0.01), 10.0))
             except Exception as exc:
                 await self._discard_redis_client()
                 if self.strict:

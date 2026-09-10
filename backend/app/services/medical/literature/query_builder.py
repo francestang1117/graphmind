@@ -116,6 +116,42 @@ _CONCEPT_RULES = (
         ('"Rare Diseases"[MeSH Terms]', '"rare disease"[Title/Abstract]'),
     ),
     _ConceptRule(
+        "condition",
+        "Gaucher disease",
+        ("戈谢病", "gaucher disease", "gaucher's disease"),
+        ('"Gaucher Disease"[MeSH Terms]', '"Gaucher disease"[Title/Abstract]'),
+    ),
+    _ConceptRule(
+        "condition",
+        "Stomach cancer",
+        ("胃癌", "stomach cancer", "gastric cancer"),
+        ('"Stomach Neoplasms"[MeSH Terms]', '"gastric cancer"[Title/Abstract]'),
+    ),
+    _ConceptRule(
+        "condition",
+        "Liver cancer",
+        ("肝癌", "liver cancer", "hepatocellular carcinoma"),
+        ('"Liver Neoplasms"[MeSH Terms]', '"liver cancer"[Title/Abstract]'),
+    ),
+    _ConceptRule(
+        "condition",
+        "Encephalitis",
+        ("脑炎", "encephalitis"),
+        ('"Encephalitis"[MeSH Terms]', 'encephalitis[Title/Abstract]'),
+    ),
+    _ConceptRule(
+        "condition",
+        "Measles",
+        ("麻疹", "measles"),
+        ('"Measles"[MeSH Terms]', 'measles[Title/Abstract]'),
+    ),
+    _ConceptRule(
+        "condition",
+        "Gout",
+        ("痛风", "gout"),
+        ('"Gout"[MeSH Terms]', 'gout[Title/Abstract]'),
+    ),
+    _ConceptRule(
         "organ_or_symptom",
         "renal function",
         ("肾功能", "renal function", "renal impairment", "kidney function", "kidney disease"),
@@ -216,12 +252,6 @@ _ENGLISH_DISEASE_CONTEXT_WORDS = {
     "what",
     "with",
 }
-_EXPLICIT_CJK_DISEASE = re.compile(
-    r"(?:患有|罹患|患(?!者)|得了|确诊(?:为|是)?|诊断(?:为|是)?|"
-    r"病例(?:为|是)?|关于|有关|针对)\s*"
-    r"(?P<term>[\u4e00-\u9fff]{2,12}(?:病|症|癌|炎|综合征))"
-)
-
 _STUDY_TYPE_TERMS = {
     "systematic_review": '"Systematic Review"[Publication Type]',
     "systematic review": '"Systematic Review"[Publication Type]',
@@ -356,21 +386,12 @@ def _extract_concepts(question: str) -> list[DetectedConcept]:
                 occupied_spans.append((match.start(), match.end()))
                 break
 
-    for pattern in (_GENERIC_ENGLISH_DISEASE, _EXPLICIT_CJK_DISEASE):
+    for pattern in (_GENERIC_ENGLISH_DISEASE,):
         for match in pattern.finditer(question):
-            if pattern is _EXPLICIT_CJK_DISEASE:
-                raw_value = clean_text(match.group("term"))
-                term_start = match.start("term")
-                term_end = match.end("term")
-            else:
-                raw_value = clean_text(match.group(0))
-                term_start = match.start()
-                term_end = match.end()
-            value = (
-                _safe_english_disease_term(raw_value)
-                if pattern is _GENERIC_ENGLISH_DISEASE
-                else _safe_cjk_disease_term(raw_value)
-            )
+            raw_value = clean_text(match.group(0))
+            term_start = match.start()
+            term_end = match.end()
+            value = _safe_english_disease_term(raw_value)
             if not value:
                 continue
             normalized = value
@@ -395,8 +416,8 @@ def _extract_concepts(question: str) -> list[DetectedConcept]:
             seen.add(normalized.casefold())
             occupied_spans.append((term_start, term_end))
 
-    # A small fallback keeps uncommon but clearly medical questions usable,
-    # while still avoiding a raw free-form case narrative in the query.
+    # Keep the fallback English-only. Unrecognized Chinese text is not safe to
+    # infer from because a name and a disease can be adjacent without spaces.
     if not concepts:
         for token in _ENGLISH_WORD.findall(question):
             normalized = clean_text(token)
@@ -456,16 +477,6 @@ def _safe_english_disease_term(value: str) -> str | None:
     ):
         return None
     return clean_text(" ".join(tokens))
-
-
-def _safe_cjk_disease_term(value: str) -> str | None:
-    """Accept only the exact disease term captured after an explicit marker."""
-    candidate = clean_text(value)
-    if not re.fullmatch(r"[\u4e00-\u9fff]{2,12}(?:病|症|癌|炎|综合征)", candidate):
-        return None
-    if any(fragment in candidate for fragment in ("的", "患", "罹", "诊断", "确诊", "病例")):
-        return None
-    return candidate
 
 
 def _looks_medical(token: str) -> bool:
