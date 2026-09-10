@@ -204,8 +204,12 @@ manual provider tests.
 Before the first external analysis, confirm that the UI names the provider and
 model and explains whether selected excerpts are PII-redacted. Cancelling the
 confirmation must not create a run. Direct API calls without
-`external_processing_confirmed=true` must return `409`, and accepted runs must
-include `external_processing_confirmed_at`.
+`external_processing_confirmed=true` and the displayed `config_fingerprint`
+must return `409`, and accepted runs must include
+`external_processing_confirmed_at`. Change the provider, model, excerpt scope,
+or redaction setting after loading the configuration and confirm that the stale
+fingerprint returns `external_processing_config_changed` instead of creating a
+run.
 
 Before release, manually analyze one public English paper and one public
 Chinese paper. Confirm that numeric findings match the cited quote, missing

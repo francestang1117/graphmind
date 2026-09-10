@@ -24,9 +24,7 @@ function consentStorageKey(
     "graphmind.medical-insight-consent.v1",
     workspaceId || "default",
     documentId,
-    config.provider,
-    config.model_name,
-    config.redact_pii ? "redacted" : "unredacted",
+    config.config_fingerprint,
   ].join(":");
 }
 
@@ -418,17 +416,47 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     [run?.evidence],
   );
 
-  const executeAnalysis = async (reanalyze: boolean, confirmed: boolean) => {
+  const executeAnalysis = async (
+    reanalyze: boolean,
+    confirmed: boolean,
+    configFingerprint?: string,
+  ) => {
     setStarting(true);
     setError("");
     setSelectedEvidence(null);
     try {
       const nextRun = reanalyze
-        ? await reanalyzeMedicalInsights(documentId, workspaceId, confirmed)
-        : await startMedicalInsights(documentId, workspaceId, confirmed);
+        ? await reanalyzeMedicalInsights(
+            documentId,
+            workspaceId,
+            confirmed,
+            configFingerprint,
+          )
+        : await startMedicalInsights(
+            documentId,
+            workspaceId,
+            confirmed,
+            configFingerprint,
+          );
       setRun(nextRun);
-    } catch {
-      setError("Could not start the medical insight. Check that this is a parsed paper or guideline.");
+    } catch (requestError) {
+      const code = axios.isAxiosError(requestError)
+        ? requestError.response?.data?.code
+        : undefined;
+      if (code === "external_processing_config_changed") {
+        try {
+          const latestConfig = await getMedicalInsightConfig();
+          setAnalysisConfig(latestConfig);
+          setExternalConsent(false);
+          setPendingReanalysis(reanalyze);
+          setShowExternalConfirmation(true);
+          setError("External processing settings changed. Review and confirm them again.");
+        } catch {
+          setError("External processing settings changed, but the new settings could not be loaded.");
+        }
+      } else {
+        setError("Could not start the medical insight. Check that this is a parsed paper or guideline.");
+      }
     } finally {
       setStarting(false);
     }
@@ -444,7 +472,11 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
       setShowExternalConfirmation(true);
       return;
     }
-    void executeAnalysis(reanalyze, externalConsent);
+    void executeAnalysis(
+      reanalyze,
+      externalConsent,
+      analysisConfig.config_fingerprint,
+    );
   };
 
   const confirmExternalAnalysis = () => {
@@ -452,7 +484,11 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     saveExternalConsent(analysisConfig, documentId, workspaceId);
     setExternalConsent(true);
     setShowExternalConfirmation(false);
-    void executeAnalysis(pendingReanalysis, true);
+    void executeAnalysis(
+      pendingReanalysis,
+      true,
+      analysisConfig.config_fingerprint,
+    );
   };
 
   const report = run?.report;

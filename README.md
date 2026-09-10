@@ -52,7 +52,7 @@ provide a diagnosis or treatment recommendation.
   redaction, coverage reporting, and safety checks
 - Optional OpenAI medical insight provider with schema-constrained output,
   bounded retries, server-side credentials, and disabled response storage
-- 303 backend tests covering the current core modules
+- 307 backend tests covering the current core modules
 
 ## Project Status
 

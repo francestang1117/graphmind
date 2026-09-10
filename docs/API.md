@@ -284,14 +284,19 @@ External start and re-analysis requests must then include:
 
 ```json
 {
-  "external_processing_confirmed": true
+  "external_processing_confirmed": true,
+  "external_processing_config_fingerprint": "<config_fingerprint>"
 }
 ```
 
 The backend rejects an unconfirmed external request with
 `external_processing_confirmation_required` and records the confirmation time
-on the accepted analysis run. Provider credentials are never returned by the
-configuration endpoint.
+on the accepted analysis run. The fingerprint covers the provider, actual
+model, excerpt scope, and PII-redaction state. If any of those settings change
+after the configuration was displayed, the request returns
+`external_processing_config_changed` with status `409`; the client must fetch
+the new configuration and ask again. Provider credentials are never returned
+by the configuration endpoint.
 
 ```bash
 curl -X POST \

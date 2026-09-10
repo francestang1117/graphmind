@@ -1564,3 +1564,11 @@ English and Chinese. Context selection can extend a section's reserved excerpt
 with the remaining budget instead of discarding usable capacity. External
 processing is disclosed before the request, requires an explicit API flag, and
 stores the confirmation timestamp on the run.
+
+The next review closed two remaining consent and language boundaries. Support
+validation now evaluates clauses on both sides of English and Chinese contrast
+words, so a correct statement such as "association does not prove causation"
+does not excuse a later causal claim. External-processing consent now carries a
+fingerprint of the provider, resolved model, excerpt scope, and redaction mode.
+If the server configuration changes after the disclosure is shown, the stale
+request is rejected and the frontend reloads the terms before asking again.

@@ -198,6 +198,7 @@ export interface MedicalInsightConfig {
   requires_confirmation: boolean;
   sends_selected_excerpts: boolean;
   redact_pii: boolean;
+  config_fingerprint: string;
 }
 
 export interface JobProgress {
@@ -411,11 +412,15 @@ export const startMedicalInsights = (
   documentId: string,
   workspaceId?: string | null,
   externalProcessingConfirmed = false,
+  externalProcessingConfigFingerprint?: string,
 ): Promise<MedicalInsightRun> =>
   http
     .post<MedicalInsightRun>(
       `/documents/${encodeURIComponent(documentId)}/medical-insights`,
-      { external_processing_confirmed: externalProcessingConfirmed },
+      {
+        external_processing_confirmed: externalProcessingConfirmed,
+        external_processing_config_fingerprint: externalProcessingConfigFingerprint,
+      },
       workspaceParams(workspaceId),
     )
     .then((r) => r.data);
@@ -424,11 +429,15 @@ export const reanalyzeMedicalInsights = (
   documentId: string,
   workspaceId?: string | null,
   externalProcessingConfirmed = false,
+  externalProcessingConfigFingerprint?: string,
 ): Promise<MedicalInsightRun> =>
   http
     .post<MedicalInsightRun>(
       `/documents/${encodeURIComponent(documentId)}/medical-insights/reanalyze`,
-      { external_processing_confirmed: externalProcessingConfirmed },
+      {
+        external_processing_confirmed: externalProcessingConfirmed,
+        external_processing_config_fingerprint: externalProcessingConfigFingerprint,
+      },
       workspaceParams(workspaceId),
     )
     .then((r) => r.data);

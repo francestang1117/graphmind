@@ -52,6 +52,24 @@ FAILED = "failed"
 EXTERNAL_PROVIDERS = {"openai"}
 
 
+def external_processing_fingerprint(
+    *,
+    provider: str,
+    model_name: str,
+    redact_pii: bool,
+    sends_selected_excerpts: bool = True,
+) -> str:
+    """Identify the exact external-processing terms shown to the user."""
+    payload = {
+        "provider": provider.strip().lower(),
+        "model_name": model_name.strip(),
+        "redact_pii": bool(redact_pii),
+        "sends_selected_excerpts": bool(sends_selected_excerpts),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 class AnalysisRepository:
     """Keep report versions and citations inside the document's ownership scope."""
 
@@ -98,6 +116,7 @@ class AnalysisRepository:
         max_output_tokens: int = 5000,
         provider_retry_count: int = 2,
         external_processing_confirmed: bool = False,
+        external_processing_config_fingerprint: str | None = None,
         force: bool = False,
     ) -> tuple[dict[str, Any], bool]:
         """Create one run for the current parsed source, or reuse it.
@@ -106,14 +125,22 @@ class AnalysisRepository:
         can produce different sections from the same bytes, so the key also
         includes a snapshot of the persisted analysis input.
         """
-        if (
-            provider.strip().lower() in EXTERNAL_PROVIDERS
-            and not external_processing_confirmed
-        ):
-            raise MedicalInsightError(
-                "External processing must be confirmed before creating a run.",
-                code="external_processing_confirmation_required",
+        if provider.strip().lower() in EXTERNAL_PROVIDERS:
+            if not external_processing_confirmed:
+                raise MedicalInsightError(
+                    "External processing must be confirmed before creating a run.",
+                    code="external_processing_confirmation_required",
+                )
+            expected_fingerprint = external_processing_fingerprint(
+                provider=provider,
+                model_name=model_name,
+                redact_pii=redact_pii,
             )
+            if external_processing_config_fingerprint != expected_fingerprint:
+                raise MedicalInsightError(
+                    "External processing settings changed before confirmation.",
+                    code="external_processing_config_changed",
+                )
         self._require_available()
         key = ""
         now = _utc_now()

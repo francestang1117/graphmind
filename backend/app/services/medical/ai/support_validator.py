@@ -31,8 +31,8 @@ _CAUSAL_CLAIM = re.compile(
 _NEGATED_CAUSAL_CLAIM = re.compile(
     r"\b(?:(?:do(?:es)?|did|can(?:not|'t)?|could|should|is|are|was|were)\s+not|"
     r"cannot|can't)\s+(?:prove|establish|show|demonstrate|mean)\b.{0,60}"
-    r"\b(?:caus(?:e|es|ed|al)|lead(?:s)?\s+to|result(?:s|ed)?\s+in)\b|"
-    r"\bno evidence (?:that|of)\b.{0,60}\b(?:caus(?:e|es|ed|al)|lead(?:s)?\s+to)\b|"
+    r"\b(?:caus(?:e|es|ed|al|ation)|lead(?:s)?\s+to|result(?:s|ed)?\s+in)\b|"
+    r"\bno evidence (?:that|of)\b.{0,60}\b(?:caus(?:e|es|ed|al|ation)|lead(?:s)?\s+to)\b|"
     r"(?:不能|无法|并不|不代表|并不意味着).{0,20}(?:证明|证实|表明|说明|意味着)?"
     r".{0,30}(?:因果|导致|造成|引起)",
     re.I | re.S,
@@ -184,7 +184,13 @@ def _has_unnegated_claim(
     claim_pattern: re.Pattern[str],
     negated_pattern: re.Pattern[str],
 ) -> bool:
-    for sentence in re.split(r"[。！？]+|(?<=[.!?])\s+|[\n;；]+", text):
-        if claim_pattern.search(sentence) and not negated_pattern.search(sentence):
+    clauses = re.split(
+        r"[。！？]+|(?<=[.!?])\s+|[\n;；]+|"
+        r"\b(?:but|however|yet|nevertheless)\b|(?:但是|然而|不过|可是|但|却)",
+        text,
+        flags=re.I,
+    )
+    for clause in clauses:
+        if claim_pattern.search(clause) and not negated_pattern.search(clause):
             return True
     return False

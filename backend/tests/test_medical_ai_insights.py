@@ -22,7 +22,10 @@ from app.models.persistence import (
     MedicalDocumentProfileRecord,
     ParsedChunkRecord,
 )
-from app.services.medical.ai.analysis_repository import AnalysisRepository
+from app.services.medical.ai.analysis_repository import (
+    AnalysisRepository,
+    external_processing_fingerprint,
+)
 from app.services.medical.ai.analyzer import MedicalInsightAnalyzer
 from app.services.medical.ai.citation_validator import evidence_rows, validate_citations
 from app.services.medical.ai.context_builder import (
@@ -435,6 +438,10 @@ def test_support_validator_rejects_overstated_claims(source, claim, expected):
         ),
         (
             "Treatment may be associated with lower risk.",
+            "Association does not prove causation.",
+        ),
+        (
+            "Treatment may be associated with lower risk.",
             "These findings do not prove that treatment causes lower risk.",
         ),
         (
@@ -480,6 +487,22 @@ def test_support_validator_checks_each_chinese_sentence_for_overstatement():
     )
     payload = _report("EVIDENCE_001").model_dump()
     payload["key_findings"][0]["statement"] = "相关性不能证明因果。治疗导致风险降低。"
+
+    validation = validate_support(MedicalInsightReport.model_validate(payload), context)
+
+    assert not validation.valid
+    assert any("association into causation" in error for error in validation.errors)
+
+
+def test_support_validator_checks_claim_after_chinese_contrast():
+    context = _context(("EVIDENCE_001", "results"))
+    context.evidence[0] = EvidenceItem(
+        **{**context.evidence[0].__dict__, "text": "治疗与较低风险相关。"}
+    )
+    payload = _report("EVIDENCE_001").model_dump()
+    payload["key_findings"][0]["statement"] = (
+        "相关性不能证明因果，但是治疗导致风险降低。"
+    )
 
     validation = validate_support(MedicalInsightReport.model_validate(payload), context)
 
@@ -853,6 +876,11 @@ def test_repository_versions_and_returns_external_provider_parameters():
             "max_output_tokens": 3000,
             "provider_retry_count": 1,
             "external_processing_confirmed": True,
+            "external_processing_config_fingerprint": external_processing_fingerprint(
+                provider="openai",
+                model_name="test-model",
+                redact_pii=True,
+            ),
         }
 
         first, created = repository.create_or_reuse(**common)
@@ -893,6 +921,39 @@ def test_repository_rejects_unconfirmed_external_provider_runs():
             )
 
         assert exc.value.code == "external_processing_confirmation_required"
+        with sessions() as db:
+            assert db.scalars(select(MedicalAnalysisRunRecord)).all() == []
+    finally:
+        engine.dispose()
+
+
+def test_repository_rejects_stale_external_processing_fingerprint():
+    engine, sessions, repository = _repository()
+    try:
+        _paper_rows(sessions)
+        stale_fingerprint = external_processing_fingerprint(
+            provider="openai",
+            model_name="test-model",
+            redact_pii=True,
+        )
+
+        with pytest.raises(MedicalInsightError) as exc:
+            repository.create_or_reuse(
+                document_id="document-1",
+                user_id="user-1",
+                workspace_id="workspace-1",
+                source_hash="a" * 64,
+                requested_by="user-1",
+                provider="openai",
+                model_name="test-model",
+                prompt_version="medical-insights-v2",
+                schema_version="medical-insights-v2",
+                redact_pii=False,
+                external_processing_confirmed=True,
+                external_processing_config_fingerprint=stale_fingerprint,
+            )
+
+        assert exc.value.code == "external_processing_config_changed"
         with sessions() as db:
             assert db.scalars(select(MedicalAnalysisRunRecord)).all() == []
     finally:
