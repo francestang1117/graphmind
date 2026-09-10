@@ -87,20 +87,25 @@ class Settings(BaseSettings):
     SENTRY_DSN: str = ""
     SENTRY_TRACES_SAMPLE_RATE: float = 0.0
 
-    # The first medical insight provider is local and deterministic. A future
-    # GPT provider can use the same interface without changing the API shape.
+    # Keep extractive mode as the local default. OpenAI is enabled explicitly
+    # after the deployment has reviewed privacy and cost settings.
     MEDICAL_AI_ENABLED: bool = True
     MEDICAL_AI_PROVIDER: str = "extractive"
     MEDICAL_AI_MODEL: str = "extractive-v1"
     MEDICAL_AI_TIMEOUT_SECONDS: int = 30
     MEDICAL_AI_MAX_INPUT_TOKENS: int = 12000
+    MEDICAL_AI_MAX_OUTPUT_TOKENS: int = 5000
+    MEDICAL_AI_PROVIDER_RETRY_COUNT: int = 2
     MEDICAL_AI_REDACT_PII: bool = True
     # A stale queued or running analysis can be retried after these leases
     # expire. The values are deliberately longer than one normal provider call.
     MEDICAL_AI_QUEUE_LEASE_SECONDS: int = 300
     MEDICAL_AI_RUNNING_LEASE_SECONDS: int = 900
-    MEDICAL_AI_PROMPT_VERSION: str = "medical-insights-v1"
-    MEDICAL_AI_SCHEMA_VERSION: str = "medical-insights-v1"
+    MEDICAL_AI_PROMPT_VERSION: str = "medical-insights-v2"
+    MEDICAL_AI_SCHEMA_VERSION: str = "medical-insights-v2"
+    MEDICAL_AI_OPENAI_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = ""
 
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",

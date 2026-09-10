@@ -49,6 +49,25 @@ QUEUED = "queued"
 RUNNING = "running"
 SUCCEEDED = "succeeded"
 FAILED = "failed"
+EXTERNAL_PROVIDERS = {"openai"}
+
+
+def external_processing_fingerprint(
+    *,
+    provider: str,
+    model_name: str,
+    redact_pii: bool,
+    sends_selected_excerpts: bool = True,
+) -> str:
+    """Identify the exact external-processing terms shown to the user."""
+    payload = {
+        "provider": provider.strip().lower(),
+        "model_name": model_name.strip(),
+        "redact_pii": bool(redact_pii),
+        "sends_selected_excerpts": bool(sends_selected_excerpts),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
 class AnalysisRepository:
@@ -93,6 +112,11 @@ class AnalysisRepository:
         parsed_source_hash: str | None = None,
         redact_pii: bool = True,
         max_input_tokens: int = 12000,
+        timeout_seconds: int = 30,
+        max_output_tokens: int = 5000,
+        provider_retry_count: int = 2,
+        external_processing_confirmed: bool = False,
+        external_processing_config_fingerprint: str | None = None,
         force: bool = False,
     ) -> tuple[dict[str, Any], bool]:
         """Create one run for the current parsed source, or reuse it.
@@ -101,6 +125,22 @@ class AnalysisRepository:
         can produce different sections from the same bytes, so the key also
         includes a snapshot of the persisted analysis input.
         """
+        if provider.strip().lower() in EXTERNAL_PROVIDERS:
+            if not external_processing_confirmed:
+                raise MedicalInsightError(
+                    "External processing must be confirmed before creating a run.",
+                    code="external_processing_confirmation_required",
+                )
+            expected_fingerprint = external_processing_fingerprint(
+                provider=provider,
+                model_name=model_name,
+                redact_pii=redact_pii,
+            )
+            if external_processing_config_fingerprint != expected_fingerprint:
+                raise MedicalInsightError(
+                    "External processing settings changed before confirmation.",
+                    code="external_processing_config_changed",
+                )
         self._require_available()
         key = ""
         now = _utc_now()
@@ -150,6 +190,9 @@ class AnalysisRepository:
                     schema_version,
                     redact_pii=redact_pii,
                     max_input_tokens=max_input_tokens,
+                    timeout_seconds=timeout_seconds,
+                    max_output_tokens=max_output_tokens,
+                    provider_retry_count=provider_retry_count,
                     force=force,
                 )
 
@@ -164,6 +207,11 @@ class AnalysisRepository:
                     .with_for_update()
                 ).first()
                 if row:
+                    if (
+                        external_processing_confirmed
+                        and not row.external_processing_confirmed_at
+                    ):
+                        row.external_processing_confirmed_at = now
                     if row.status == SUCCEEDED:
                         db.commit()
                         return _run_payload(db, row), False
@@ -184,6 +232,11 @@ class AnalysisRepository:
                     row.parsed_source_hash = snapshot_hash
                     row.redact_pii = bool(redact_pii)
                     row.max_input_tokens = max(1, int(max_input_tokens or 1))
+                    row.timeout_seconds = max(1, int(timeout_seconds or 1))
+                    row.max_output_tokens = max(256, int(max_output_tokens or 256))
+                    row.provider_retry_count = max(0, int(provider_retry_count or 0))
+                    if external_processing_confirmed:
+                        row.external_processing_confirmed_at = now
                     row.created_at = now
                     row.started_at = None
                     row.completed_at = None
@@ -211,6 +264,12 @@ class AnalysisRepository:
                     schema_version=schema_version,
                     redact_pii=bool(redact_pii),
                     max_input_tokens=max(1, int(max_input_tokens or 1)),
+                    timeout_seconds=max(1, int(timeout_seconds or 1)),
+                    max_output_tokens=max(256, int(max_output_tokens or 256)),
+                    provider_retry_count=max(0, int(provider_retry_count or 0)),
+                    external_processing_confirmed_at=(
+                        now if external_processing_confirmed else None
+                    ),
                     attempt_count=0,
                     last_heartbeat_at=None,
                     lease_expires_at=now + timedelta(seconds=_queue_lease_seconds()),
@@ -236,6 +295,12 @@ class AnalysisRepository:
                     )
                 ).first()
                 if row:
+                    if (
+                        external_processing_confirmed
+                        and not row.external_processing_confirmed_at
+                    ):
+                        row.external_processing_confirmed_at = now
+                        db.commit()
                     return _run_payload(db, row), False
             raise MedicalInsightError(
                 "Could not create the medical insight run.",
@@ -645,6 +710,9 @@ class AnalysisRepository:
                     if profile
                     else document.language or "unknown"
                 ),
+                "source_warnings": (
+                    _loads_json(profile.warnings_json, []) if profile else []
+                ),
                 "sections": [
                     {
                         "id": item.id,
@@ -770,6 +838,9 @@ def _analysis_key(
     *,
     redact_pii: bool = True,
     max_input_tokens: int = 12000,
+    timeout_seconds: int = 30,
+    max_output_tokens: int = 5000,
+    provider_retry_count: int = 2,
     force: bool,
 ) -> str:
     values = [
@@ -783,6 +854,9 @@ def _analysis_key(
         schema_version,
         str(bool(redact_pii)),
         str(max(1, int(max_input_tokens or 1))),
+        str(max(1, int(timeout_seconds or 1))),
+        str(max(256, int(max_output_tokens or 256))),
+        str(max(0, int(provider_retry_count or 0))),
     ]
     if force:
         values.append(uuid.uuid4().hex)
@@ -852,6 +926,12 @@ def _run_dict(row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
         "schema_version": row.schema_version,
         "redact_pii": bool(row.redact_pii),
         "max_input_tokens": row.max_input_tokens,
+        "timeout_seconds": row.timeout_seconds,
+        "max_output_tokens": row.max_output_tokens,
+        "provider_retry_count": row.provider_retry_count,
+        "external_processing_confirmed_at": _iso(
+            row.external_processing_confirmed_at
+        ),
         "attempt_count": row.attempt_count or 0,
         "last_heartbeat_at": _iso(row.last_heartbeat_at),
         "lease_expires_at": _iso(row.lease_expires_at),

@@ -1529,6 +1529,50 @@ outside this phase.
 3. Add workspace and paper-detail navigation to the frontend.
 4. Add multi-paper evidence comparison only after single-paper citations remain stable.
 
+## 2026-09 — V2 PR5: External Medical AI Provider and Claim Checks
+
+The single-document report can now use an explicitly configured OpenAI
+Responses API provider while keeping the deterministic extractive provider as
+the local default. External calls use schema-constrained output, server-side
+credentials, bounded retries, output limits, and `store=false`. Prompts and
+document passages are not written to application logs.
+
+Long papers now reserve context across distinct sections before using the
+remaining budget for high-priority findings. Every report records selected and
+omitted sections, chunk and token counts, and whether coverage was complete.
+The report schema adds structured study methods with explicit `not_reported`
+states, applicability, and source-backed future research questions.
+
+Citation IDs are still checked against the exact source snapshot. A second
+validator now rejects several high-risk interpretation errors: unsupported
+numbers or units, association rewritten as causation, preclinical evidence
+presented as human efficacy, non-significant results presented as proof of no
+effect, and speculative wording presented as established fact. Invalid output
+gets one repair attempt and is never saved as a successful report if the checks
+still fail.
+
+The frontend identifies local versus external analysis, model and source
+version, context coverage, and omitted sections. It also tells users when
+selected redacted excerpts were sent to the configured provider. Live model
+verification remains an opt-in manual check with public Chinese and English
+papers; CI uses simulated responses and never needs an API key.
+
+The follow-up review tightened four boundaries before merge. Method attributes
+marked `not_reported` now accept only the fixed missing-value text and no
+citations. Claim checks understand negated causal and no-effect statements in
+English and Chinese. Context selection can extend a section's reserved excerpt
+with the remaining budget instead of discarding usable capacity. External
+processing is disclosed before the request, requires an explicit API flag, and
+stores the confirmation timestamp on the run.
+
+The next review closed two remaining consent and language boundaries. Support
+validation now evaluates clauses on both sides of English and Chinese contrast
+words, so a correct statement such as "association does not prove causation"
+does not excuse a later causal claim. External-processing consent now carries a
+fingerprint of the provider, resolved model, excerpt scope, and redaction mode.
+If the server configuration changes after the disclosure is shown, the stale
+request is rejected and the frontend reloads the terms before asking again.
+
 ## 2026-09 — Secure Runtime Auth Configuration
 
 The runtime auth configuration now fails closed. `AUTH_REQUIRED` defaults to
@@ -1537,5 +1581,4 @@ environments may opt into the account-free local fallback and public placeholder
 key. Startup validates the environment, auth mode, and secret length before
 creating directories or running database migrations. The Celery app applies the
 same check so a standalone worker cannot start with weaker settings than the
-API. The full backend suite passes with `293 passed, 3 skipped`; the skipped
-checks are the optional PostgreSQL cases when no test database URL is configured.
+API. The full combined backend suite passes with `320 passed, 3 skipped`.

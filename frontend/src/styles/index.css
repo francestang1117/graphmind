@@ -434,7 +434,7 @@ button {
   width: 100%;
   height: 38px;
   margin: 14px 0 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface);
   color: var(--text);
@@ -1484,6 +1484,95 @@ button {
   color: var(--text);
   font-size: 12px;
   line-height: 1.25;
+}
+
+.insight-details summary {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.insight-method-list,
+.insight-coverage-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.insight-method-item {
+  display: grid;
+  grid-template-columns: minmax(82px, 0.4fr) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.insight-method-item > strong {
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.insight-method-item .insight-evidence-list {
+  grid-column: 2 / -1;
+  margin-top: 0;
+}
+
+.insight-coverage-grid span {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.insight-provider-notice {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 2px solid rgba(96, 165, 250, 0.55);
+  color: var(--muted);
+  background: rgba(96, 165, 250, 0.06);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.insight-provider-notice-before {
+  display: grid;
+  gap: 3px;
+  margin: 10px 0 0;
+}
+
+.insight-provider-notice-before strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.insight-external-confirmation {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.insight-external-confirmation > strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.insight-external-confirmation > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.insight-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .insight-report-section p {

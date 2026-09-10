@@ -20,6 +20,7 @@ from app.services.medical.ai.models import MedicalInsightReport
 from app.services.medical.ai.prompt_builder import build_prompt, build_repair_prompt
 from app.services.medical.ai.provider import MedicalAIProvider, get_provider
 from app.services.medical.ai.safety_validator import SafetyValidation, validate_safety
+from app.services.medical.ai.support_validator import SupportValidation, validate_support
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class AnalysisOutput:
     context: AnalysisContext
     citations: CitationValidation
     safety: SafetyValidation
+    support: SupportValidation
 
 
 class MedicalInsightAnalyzer:
@@ -42,8 +44,8 @@ class MedicalInsightAnalyzer:
         max_input_tokens: int = 12000,
         timeout_seconds: int = 30,
         redact_pii: bool = True,
-        schema_version: str = "medical-insights-v1",
-        prompt_version: str = "medical-insights-v1",
+        schema_version: str = "medical-insights-v2",
+        prompt_version: str = "medical-insights-v2",
         context_builder: ContextBuilder | None = None,
     ) -> None:
         if provider is None:
@@ -69,6 +71,7 @@ class MedicalInsightAnalyzer:
         chunks: Iterable[dict[str, Any]],
         *,
         sections: Iterable[dict[str, Any]] | None = None,
+        source_warnings: Iterable[str] | None = None,
         title: str = "",
         document_kind: str = "unknown",
         language: str = "unknown",
@@ -76,6 +79,7 @@ class MedicalInsightAnalyzer:
         context = self.context_builder.build(
             chunks,
             sections=sections,
+            source_warnings=source_warnings,
             title=title,
             document_kind=document_kind,
             language=language,
@@ -119,6 +123,18 @@ class MedicalInsightAnalyzer:
         )
 
     def _generate(self, prompt: str, context: AnalysisContext) -> Any:
+        if getattr(self.provider, "manages_timeout", False):
+            try:
+                return self.provider.generate(prompt, context)
+            except MedicalInsightError:
+                raise
+            except Exception as exc:
+                log.warning("Medical insight provider failed: %s", exc)
+                raise MedicalInsightError(
+                    "Medical insight provider failed.",
+                    code="provider_failed",
+                ) from exc
+
         executor = ThreadPoolExecutor(max_workers=1)
         future = executor.submit(self.provider.generate, prompt, context)
         try:
@@ -166,7 +182,8 @@ class MedicalInsightAnalyzer:
     def _validate(self, report: MedicalInsightReport, context: AnalysisContext) -> list[str] | None:
         citation = validate_citations(report, context)
         safety = validate_safety(report)
-        errors = [*citation.errors, *safety.errors]
+        support = validate_support(report, context)
+        errors = [*citation.errors, *safety.errors, *support.errors]
         return errors or None
 
     def _normalize_report(
@@ -175,12 +192,24 @@ class MedicalInsightAnalyzer:
         context: AnalysisContext,
     ) -> MedicalInsightReport:
         warnings = _unique([*context.warnings, *report.warnings, "not_medical_advice"])
+        coverage = report.coverage.model_copy(
+            update={
+                "complete": context.coverage_complete,
+                "selected_chunks": len(context.evidence),
+                "total_chunks": context.total_chunks,
+                "selected_tokens": sum(item.token_count for item in context.evidence),
+                "max_input_tokens": context.max_input_tokens,
+                "included_sections": context.included_sections,
+                "omitted_sections": context.omitted_sections,
+            }
+        )
         return report.model_copy(
             update={
                 "schema_version": self.schema_version,
                 "document_kind": context.document_kind,
                 "language": context.language,
                 "warnings": warnings,
+                "coverage": coverage,
             }
         )
 
@@ -190,6 +219,7 @@ class MedicalInsightAnalyzer:
             context=context,
             citations=validate_citations(report, context),
             safety=validate_safety(report),
+            support=validate_support(report, context),
         )
 
 

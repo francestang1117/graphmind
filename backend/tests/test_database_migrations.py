@@ -189,9 +189,17 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         assert db.scalar(text("SELECT id FROM workspaces WHERE user_id = 'user-1'")) == default_workspace_id("user-1")
 
     inspector = inspect(engine)
-    assert {"medical_document_profiles", "document_sections"}.issubset(
+    assert {
+        "medical_document_profiles",
+        "document_sections",
+        "medical_analysis_runs",
+    }.issubset(
         set(inspector.get_table_names())
     )
+    run_columns = {
+        item["name"] for item in inspector.get_columns("medical_analysis_runs")
+    }
+    assert "external_processing_confirmed_at" in run_columns
     chunk_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_chunks")]
     entity_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_entities")]
     assert ["user_id", "workspace_id", "document_id", "chunk_index"] in chunk_uniques
