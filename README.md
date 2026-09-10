@@ -54,10 +54,11 @@ provide a diagnosis or treatment recommendation.
   redaction, coverage reporting, and safety checks
 - Optional OpenAI medical insight provider with schema-constrained output,
   bounded retries, server-side credentials, and disabled response storage
+- Fails-closed runtime auth defaults and startup validation for API and workers
 - Privacy-bounded PubMed search with query preview, explicit confirmation,
   normalized metadata, retraction/correction flags, scoped caching, and worker
   leases
-- 328 backend tests covering the current core modules
+- 341 backend tests covering the current core modules
 
 ## Project Status
 

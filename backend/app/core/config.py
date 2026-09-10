@@ -7,6 +7,16 @@ from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+DEFAULT_SECRET_KEY = "dev-only-change-me-before-deploy"
+LOCAL_ENVIRONMENTS = {"development", "test"}
+KNOWN_ENVIRONMENTS = {
+    "development",
+    "test",
+    "staging",
+    "production",
+}
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -27,7 +37,7 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
-    SECRET_KEY: str = "dev-only-change-me-before-deploy"
+    SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -39,7 +49,7 @@ class Settings(BaseSettings):
     # Only enable this in a single-process local setup. Production needs Redis
     # because the API and WebSocket connection may land on different workers.
     WEBSOCKET_TICKET_MEMORY_FALLBACK: bool = False
-    AUTH_REQUIRED: bool = False
+    AUTH_REQUIRED: bool = True
     GITHUB_OAUTH_CLIENT_ID: str = ""
     GITHUB_OAUTH_CLIENT_SECRET: str = ""
     GITHUB_OAUTH_CALLBACK_URL: str = "http://localhost:8000/api/v1/auth/github/callback"
@@ -152,3 +162,34 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def validate_runtime_config(config: Settings | None = None) -> None:
+    """Reject runtime settings that could silently disable application security."""
+    runtime = config or settings
+    environment = runtime.ENVIRONMENT.strip().lower()
+    secret = runtime.SECRET_KEY.strip()
+    problems: list[str] = []
+
+    if environment not in KNOWN_ENVIRONMENTS:
+        problems.append(f"ENVIRONMENT has an unsupported value: {environment!r}.")
+
+    is_local = environment in LOCAL_ENVIRONMENTS
+    if not is_local and not runtime.AUTH_REQUIRED:
+        problems.append("AUTH_REQUIRED must be true outside development and test.")
+
+    if runtime.AUTH_REQUIRED or not is_local:
+        if not secret:
+            problems.append("SECRET_KEY must not be empty.")
+        elif secret == DEFAULT_SECRET_KEY:
+            problems.append(
+                "SECRET_KEY must not use the public development placeholder."
+            )
+        elif len(secret) < 32:
+            problems.append("SECRET_KEY must contain at least 32 characters.")
+
+    if problems:
+        raise RuntimeError(
+            "Refusing to start with unsafe runtime configuration:\n- "
+            + "\n- ".join(problems)
+        )

@@ -14,11 +14,11 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
 
 The exact count can change as tests are added. The latest local result is
-`328 passed, 3 skipped`.
+`341 passed, 3 skipped`.
 
 The three skipped checks are the PostgreSQL migration test and two PostgreSQL
 row-lock tests when `GRAPHMIND_TEST_POSTGRES_URL` is not set. GitHub Actions
-supplies PostgreSQL 16 and runs them explicitly.
+supplies PostgreSQL 16 and runs these checks explicitly.
 
 If you are starting from a fresh environment:
 
@@ -29,6 +29,20 @@ python -m venv ../.venv
 cd ..
 PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
+
+The test suite sets `ENVIRONMENT=test`, `AUTH_REQUIRED=false`, and the public
+development placeholder explicitly in its isolated environment. This keeps
+the account-free test workflow intentional while the application defaults stay
+secure. To check the runtime guard directly:
+
+```bash
+PYTHONPATH=backend .venv/bin/python -m pytest backend/tests/test_config.py
+```
+
+For a production-style startup, set `ENVIRONMENT=production`,
+`AUTH_REQUIRED=true`, and a private `SECRET_KEY` with at least 32 characters.
+The API and Celery module both refuse to start when these settings are missing
+or unsafe.
 
 ## Current Test Files
 
@@ -66,6 +80,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 | `backend/tests/test_literature_repository.py` | Scoped run lifecycle, cache reuse, lease recovery, idempotency, and deletion cleanup |
 | `backend/tests/test_literature_api.py` | Preview confirmation, stale fingerprints, queueing, and workspace isolation |
 | `backend/tests/test_literature_search_task.py` | Worker claim, provider success, and safe failure persistence |
+| `backend/tests/test_config.py` | Runtime environment, authentication, and JWT secret safety guards |
 
 ## Running Specific Tests
 
@@ -103,7 +118,10 @@ Check the production-style auth boundary:
 
 ```bash
 cd backend
-AUTH_REQUIRED=true ../.venv/bin/python -m uvicorn app.main:app --port 8001
+ENVIRONMENT=production \
+AUTH_REQUIRED=true \
+SECRET_KEY="$(../.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
+../.venv/bin/python -m uvicorn app.main:app --port 8001
 ```
 
 In another terminal, an anonymous document request should return `401`:

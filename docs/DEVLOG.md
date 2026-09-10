@@ -1573,6 +1573,16 @@ fingerprint of the provider, resolved model, excerpt scope, and redaction mode.
 If the server configuration changes after the disclosure is shown, the stale
 request is rejected and the frontend reloads the terms before asking again.
 
+## 2026-09 - Secure Runtime Auth Configuration
+
+The runtime auth configuration now fails closed. `AUTH_REQUIRED` defaults to
+true and `SECRET_KEY` defaults to empty; only explicit development or test
+environments may opt into the account-free local fallback and public placeholder
+key. Startup validates the environment, auth mode, and secret length before
+creating directories or running database migrations. The Celery app applies the
+same check so a standalone worker cannot start with weaker settings than the
+API. The full combined backend suite passes with `320 passed, 3 skipped`.
+
 ## 2026-09 - V2 PR7: PubMed Literature Search Foundation
 
 The next V2 layer is a bounded way to find public medical literature without
@@ -1605,6 +1615,6 @@ The first version intentionally does not perform AI claim matching, evidence
 grading, multi-paper comparison, automatic disease hypotheses, or treatment
 recommendations. The local suite covers query redaction, provider parsing and
 failure paths, scoped persistence, cache/retry behavior, confirmation, and
-workspace isolation. The latest local result is `328 passed, 3 skipped`; the
+workspace isolation. The latest local result is `341 passed, 3 skipped`; the
 PostgreSQL migration and row-lock checks remain conditional on
 `GRAPHMIND_TEST_POSTGRES_URL`.
