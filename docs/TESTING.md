@@ -14,11 +14,11 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
 
 The exact count can change as tests are added. The latest local result is
-`266 passed, 1 skipped`.
+`293 passed, 3 skipped`.
 
-The skipped test is the PostgreSQL migration check when
-`GRAPHMIND_TEST_POSTGRES_URL` is not set. GitHub Actions supplies PostgreSQL 16
-and runs that test explicitly.
+The three skipped checks are the PostgreSQL migration test and two PostgreSQL
+row-lock tests when `GRAPHMIND_TEST_POSTGRES_URL` is not set. GitHub Actions
+supplies PostgreSQL 16 and runs these checks explicitly.
 
 If you are starting from a fresh environment:
 
@@ -29,6 +29,20 @@ python -m venv ../.venv
 cd ..
 PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
+
+The test suite sets `ENVIRONMENT=test`, `AUTH_REQUIRED=false`, and the public
+development placeholder explicitly in its isolated environment. This keeps
+the account-free test workflow intentional while the application defaults stay
+secure. To check the runtime guard directly:
+
+```bash
+PYTHONPATH=backend .venv/bin/python -m pytest backend/tests/test_config.py
+```
+
+For a production-style startup, set `ENVIRONMENT=production`,
+`AUTH_REQUIRED=true`, and a private `SECRET_KEY` with at least 32 characters.
+The API and Celery module both refuse to start when these settings are missing
+or unsafe.
 
 ## Current Test Files
 
@@ -61,6 +75,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 | `backend/tests/test_medical_repository.py` | Scoped profile/section replacement, cleanup, and deleted-document guard |
 | `backend/tests/test_medical_api.py` | User/workspace scope on the medical analysis endpoint |
 | `backend/tests/test_medical_ai_insights.py` | Bounded evidence context, provider output, citation/safety validation, versioned persistence, and stale-result handling |
+| `backend/tests/test_config.py` | Runtime environment, authentication, and JWT secret safety guards |
 
 ## Running Specific Tests
 
@@ -98,7 +113,10 @@ Check the production-style auth boundary:
 
 ```bash
 cd backend
-AUTH_REQUIRED=true ../.venv/bin/python -m uvicorn app.main:app --port 8001
+ENVIRONMENT=production \
+AUTH_REQUIRED=true \
+SECRET_KEY="$(../.venv/bin/python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
+../.venv/bin/python -m uvicorn app.main:app --port 8001
 ```
 
 In another terminal, an anonymous document request should return `401`:

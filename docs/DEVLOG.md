@@ -1528,3 +1528,14 @@ outside this phase.
 2. Add a separately configured GPT/OpenAI provider with a clear external-data setting.
 3. Add workspace and paper-detail navigation to the frontend.
 4. Add multi-paper evidence comparison only after single-paper citations remain stable.
+
+## 2026-09 — Secure Runtime Auth Configuration
+
+The runtime auth configuration now fails closed. `AUTH_REQUIRED` defaults to
+true and `SECRET_KEY` defaults to empty; only explicit development or test
+environments may opt into the account-free local fallback and public placeholder
+key. Startup validates the environment, auth mode, and secret length before
+creating directories or running database migrations. The Celery app applies the
+same check so a standalone worker cannot start with weaker settings than the
+API. The full backend suite passes with `293 passed, 3 skipped`; the skipped
+checks are the optional PostgreSQL cases when no test database URL is configured.

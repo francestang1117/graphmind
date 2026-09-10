@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
 import pytest
@@ -154,6 +156,15 @@ def test_auth_required_rejects_anonymous_access(monkeypatch):
     assert response.status_code == 401
     assert response.json()["detail"] == "Authentication required"
     assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_explicit_local_anonymous_mode_returns_dev_user(monkeypatch):
+    monkeypatch.setattr(auth.settings, "ENVIRONMENT", "development")
+    monkeypatch.setattr(auth.settings, "AUTH_REQUIRED", False)
+
+    user = asyncio.run(auth.current_user_or_dev(None))
+
+    assert user.id == "local-dev"
 
 
 def test_auth_required_accepts_registered_user(monkeypatch):

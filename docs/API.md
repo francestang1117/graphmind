@@ -1,7 +1,11 @@
 # API Reference
 
 Base URL: `http://localhost:8000/api/v1`  
-Auth: `Authorization: Bearer <access_token>` when `AUTH_REQUIRED=true`. In local development the same routes can fall back to the `local-dev` user while `AUTH_REQUIRED=false`.  
+Auth: `Authorization: Bearer <access_token>` is required by default. Only an
+explicit `ENVIRONMENT=development` or `ENVIRONMENT=test` configuration may set
+`AUTH_REQUIRED=false` and use the local `local-dev` fallback. Staging,
+production, and unknown environments must keep authentication enabled and use
+a private `SECRET_KEY` with at least 32 characters.
 Interactive docs: `http://localhost:8000/docs`
 
 ---

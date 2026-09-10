@@ -16,6 +16,11 @@ _TEST_ROOT = Path(tempfile.mkdtemp(prefix="graphmind-pytest-"))
 _TEST_DB = _TEST_ROOT / "graphmind.sqlite3"
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB}"
 os.environ["UPLOAD_DIR"] = str(_TEST_ROOT / "uploads")
+# Keep the test process explicit about its local, account-free auth mode. The
+# runtime defaults are intentionally secure and require this test override.
+os.environ["ENVIRONMENT"] = "test"
+os.environ["AUTH_REQUIRED"] = "false"
+os.environ["SECRET_KEY"] = "dev-only-change-me-before-deploy"
 # Keep no-Redis ticket tests explicit; production cases override the environment.
 os.environ["WEBSOCKET_TICKET_MEMORY_FALLBACK"] = "true"
 

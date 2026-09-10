@@ -48,7 +48,7 @@ provide a diagnosis or treatment recommendation.
   and parser warnings
 - Evidence-backed medical insight runs for research papers and guidelines, with
   bounded source context, citation validation, PII redaction, and safety checks
-- 266 backend tests covering the current core modules
+- 293 backend tests covering the current core modules
 
 ## Project Status
 
