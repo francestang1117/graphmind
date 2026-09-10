@@ -49,6 +49,7 @@ QUEUED = "queued"
 RUNNING = "running"
 SUCCEEDED = "succeeded"
 FAILED = "failed"
+EXTERNAL_PROVIDERS = {"openai"}
 
 
 class AnalysisRepository:
@@ -96,6 +97,7 @@ class AnalysisRepository:
         timeout_seconds: int = 30,
         max_output_tokens: int = 5000,
         provider_retry_count: int = 2,
+        external_processing_confirmed: bool = False,
         force: bool = False,
     ) -> tuple[dict[str, Any], bool]:
         """Create one run for the current parsed source, or reuse it.
@@ -104,6 +106,14 @@ class AnalysisRepository:
         can produce different sections from the same bytes, so the key also
         includes a snapshot of the persisted analysis input.
         """
+        if (
+            provider.strip().lower() in EXTERNAL_PROVIDERS
+            and not external_processing_confirmed
+        ):
+            raise MedicalInsightError(
+                "External processing must be confirmed before creating a run.",
+                code="external_processing_confirmation_required",
+            )
         self._require_available()
         key = ""
         now = _utc_now()
@@ -170,6 +180,11 @@ class AnalysisRepository:
                     .with_for_update()
                 ).first()
                 if row:
+                    if (
+                        external_processing_confirmed
+                        and not row.external_processing_confirmed_at
+                    ):
+                        row.external_processing_confirmed_at = now
                     if row.status == SUCCEEDED:
                         db.commit()
                         return _run_payload(db, row), False
@@ -193,6 +208,8 @@ class AnalysisRepository:
                     row.timeout_seconds = max(1, int(timeout_seconds or 1))
                     row.max_output_tokens = max(256, int(max_output_tokens or 256))
                     row.provider_retry_count = max(0, int(provider_retry_count or 0))
+                    if external_processing_confirmed:
+                        row.external_processing_confirmed_at = now
                     row.created_at = now
                     row.started_at = None
                     row.completed_at = None
@@ -223,6 +240,9 @@ class AnalysisRepository:
                     timeout_seconds=max(1, int(timeout_seconds or 1)),
                     max_output_tokens=max(256, int(max_output_tokens or 256)),
                     provider_retry_count=max(0, int(provider_retry_count or 0)),
+                    external_processing_confirmed_at=(
+                        now if external_processing_confirmed else None
+                    ),
                     attempt_count=0,
                     last_heartbeat_at=None,
                     lease_expires_at=now + timedelta(seconds=_queue_lease_seconds()),
@@ -248,6 +268,12 @@ class AnalysisRepository:
                     )
                 ).first()
                 if row:
+                    if (
+                        external_processing_confirmed
+                        and not row.external_processing_confirmed_at
+                    ):
+                        row.external_processing_confirmed_at = now
+                        db.commit()
                     return _run_payload(db, row), False
             raise MedicalInsightError(
                 "Could not create the medical insight run.",
@@ -876,6 +902,9 @@ def _run_dict(row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
         "timeout_seconds": row.timeout_seconds,
         "max_output_tokens": row.max_output_tokens,
         "provider_retry_count": row.provider_retry_count,
+        "external_processing_confirmed_at": _iso(
+            row.external_processing_confirmed_at
+        ),
         "attempt_count": row.attempt_count or 0,
         "last_heartbeat_at": _iso(row.last_heartbeat_at),
         "lease_expires_at": _iso(row.lease_expires_at),

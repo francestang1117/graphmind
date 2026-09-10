@@ -260,6 +260,30 @@ def test_context_builder_reserves_space_across_paper_sections():
     assert "context_truncated" in context.warnings
 
 
+def test_context_builder_uses_the_full_budget_to_finish_reserved_chunks():
+    context = ContextBuilder().build(
+        [
+            {
+                "id": "results",
+                "text": "result " * 80,
+                "section_type": "results",
+            },
+            {
+                "id": "methods",
+                "text": "method " * 10,
+                "section_type": "methods",
+            },
+        ],
+        max_input_tokens=100,
+    )
+
+    assert context.coverage_complete
+    assert context.total_tokens == 90
+    assert sum(item.token_count for item in context.evidence) == 90
+    assert not any(item.truncated for item in context.evidence)
+    assert "context_truncated" not in context.warnings
+
+
 class _Responses:
     def __init__(self, outcomes):
         self.outcomes = list(outcomes)
@@ -400,6 +424,86 @@ def test_support_validator_rejects_overstated_claims(source, claim, expected):
 
     assert not validation.valid
     assert any(expected in error for error in validation.errors)
+
+
+@pytest.mark.parametrize(
+    ("source", "claim"),
+    [
+        (
+            "Treatment may be associated with lower risk.",
+            "This association does not prove that treatment causes lower risk.",
+        ),
+        (
+            "Treatment may be associated with lower risk.",
+            "These findings do not prove that treatment causes lower risk.",
+        ),
+        (
+            "治疗与较低风险相关。",
+            "这种相关性不能证明治疗导致风险降低。",
+        ),
+        (
+            "There was no statistically significant difference between groups.",
+            "This does not prove that the treatment is ineffective.",
+        ),
+        (
+            "两组差异无统计学意义。",
+            "这不代表治疗无效。",
+        ),
+    ],
+)
+def test_support_validator_allows_correct_negative_boundaries(source, claim):
+    context = _context(("EVIDENCE_001", "results"))
+    context.evidence[0] = EvidenceItem(
+        **{**context.evidence[0].__dict__, "text": source}
+    )
+    payload = _report("EVIDENCE_001").model_dump()
+    payload["what_it_does_not_mean"] = [
+        {
+            "id": "boundary_001",
+            "statement": claim,
+            "plain_explanation": claim,
+            "evidence_ids": ["EVIDENCE_001"],
+            "evidence_level": "reported_in_document",
+            "interpretation_type": "inference",
+        }
+    ]
+
+    validation = validate_support(MedicalInsightReport.model_validate(payload), context)
+
+    assert validation.valid, validation.errors
+
+
+def test_support_validator_checks_each_chinese_sentence_for_overstatement():
+    context = _context(("EVIDENCE_001", "results"))
+    context.evidence[0] = EvidenceItem(
+        **{**context.evidence[0].__dict__, "text": "治疗与较低风险相关。"}
+    )
+    payload = _report("EVIDENCE_001").model_dump()
+    payload["key_findings"][0]["statement"] = "相关性不能证明因果。治疗导致风险降低。"
+
+    validation = validate_support(MedicalInsightReport.model_validate(payload), context)
+
+    assert not validation.valid
+    assert any("association into causation" in error for error in validation.errors)
+
+
+def test_analyzer_rejects_fabricated_not_reported_method_values():
+    invalid = _report("EVIDENCE_001").model_dump()
+    invalid["study_methods"]["sample_size"] = {
+        "value": "900 patients",
+        "support_status": "not_reported",
+        "evidence_ids": [],
+    }
+    provider = FakeMedicalAIProvider(payloads=[invalid, invalid])
+
+    with pytest.raises(MedicalInsightValidationError):
+        MedicalInsightAnalyzer(provider=provider).run(
+            [{"id": "chunk-1", "text": "The result was reported.", "section_type": "results"}],
+            document_kind="research_paper",
+            language="en",
+        )
+
+    assert len(provider.calls) == 2
 
 
 def test_redact_sensitive_fields_removes_chinese_and_english_names():
@@ -748,6 +852,7 @@ def test_repository_versions_and_returns_external_provider_parameters():
             "timeout_seconds": 45,
             "max_output_tokens": 3000,
             "provider_retry_count": 1,
+            "external_processing_confirmed": True,
         }
 
         first, created = repository.create_or_reuse(**common)
@@ -756,6 +861,7 @@ def test_repository_versions_and_returns_external_provider_parameters():
         assert first["timeout_seconds"] == 45
         assert first["max_output_tokens"] == 3000
         assert first["provider_retry_count"] == 1
+        assert first["external_processing_confirmed_at"]
 
         changed, created = repository.create_or_reuse(
             **{**common, "max_output_tokens": 3500}
@@ -764,6 +870,31 @@ def test_repository_versions_and_returns_external_provider_parameters():
         assert created
         assert changed["run_id"] != first["run_id"]
         assert changed["max_output_tokens"] == 3500
+    finally:
+        engine.dispose()
+
+
+def test_repository_rejects_unconfirmed_external_provider_runs():
+    engine, sessions, repository = _repository()
+    try:
+        _paper_rows(sessions)
+
+        with pytest.raises(MedicalInsightError) as exc:
+            repository.create_or_reuse(
+                document_id="document-1",
+                user_id="user-1",
+                workspace_id="workspace-1",
+                source_hash="a" * 64,
+                requested_by="user-1",
+                provider="openai",
+                model_name="test-model",
+                prompt_version="medical-insights-v2",
+                schema_version="medical-insights-v2",
+            )
+
+        assert exc.value.code == "external_processing_confirmation_required"
+        with sessions() as db:
+            assert db.scalars(select(MedicalAnalysisRunRecord)).all() == []
     finally:
         engine.dispose()
 

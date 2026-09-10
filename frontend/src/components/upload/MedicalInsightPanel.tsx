@@ -3,15 +3,61 @@ import axios from "axios";
 import { AlertCircle, CheckCircle2, FileSearch, Loader2, RefreshCw, X } from "lucide-react";
 import {
   getCurrentMedicalInsights,
+  getMedicalInsightConfig,
   getMedicalInsightRun,
   reanalyzeMedicalInsights,
   startMedicalInsights,
   type MedicalInsightEvidence,
   type MedicalInsightFinding,
   type MedicalInsightAttribute,
+  type MedicalInsightConfig,
   type MedicalInsightReport,
   type MedicalInsightRun,
 } from "../../services/api";
+
+function consentStorageKey(
+  config: MedicalInsightConfig,
+  documentId: string,
+  workspaceId?: string | null,
+) {
+  return [
+    "graphmind.medical-insight-consent.v1",
+    workspaceId || "default",
+    documentId,
+    config.provider,
+    config.model_name,
+    config.redact_pii ? "redacted" : "unredacted",
+  ].join(":");
+}
+
+function savedExternalConsent(
+  config: MedicalInsightConfig,
+  documentId: string,
+  workspaceId?: string | null,
+) {
+  try {
+    return window.localStorage.getItem(
+      consentStorageKey(config, documentId, workspaceId),
+    ) === "confirmed";
+  } catch {
+    return false;
+  }
+}
+
+function saveExternalConsent(
+  config: MedicalInsightConfig,
+  documentId: string,
+  workspaceId?: string | null,
+) {
+  try {
+    window.localStorage.setItem(
+      consentStorageKey(config, documentId, workspaceId),
+      "confirmed",
+    );
+  } catch {
+    // The explicit confirmation still applies to this open browser session.
+  }
+}
 
 interface Props {
   documentId: string;
@@ -278,10 +324,39 @@ function ReportView({
 
 export default function MedicalInsightPanel({ documentId, title, workspaceId, onClose }: Props) {
   const [run, setRun] = useState<MedicalInsightRun | null>(null);
+  const [analysisConfig, setAnalysisConfig] = useState<MedicalInsightConfig | null>(null);
   const [loading, setLoading] = useState(true);
+  const [configLoading, setConfigLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [selectedEvidence, setSelectedEvidence] = useState<MedicalInsightEvidence | null>(null);
+  const [externalConsent, setExternalConsent] = useState(false);
+  const [showExternalConfirmation, setShowExternalConfirmation] = useState(false);
+  const [pendingReanalysis, setPendingReanalysis] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    getMedicalInsightConfig()
+      .then((config) => {
+        if (!active) return;
+        setAnalysisConfig(config);
+        setExternalConsent(
+          config.requires_confirmation
+          && savedExternalConsent(config, documentId, workspaceId),
+        );
+      })
+      .catch(() => {
+        if (active) setError("Could not load the medical analysis configuration.");
+      })
+      .finally(() => {
+        if (active) setConfigLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [documentId, workspaceId]);
 
   useEffect(() => {
     let active = true;
@@ -343,20 +418,41 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     [run?.evidence],
   );
 
-  const runAnalysis = async (reanalyze = false) => {
+  const executeAnalysis = async (reanalyze: boolean, confirmed: boolean) => {
     setStarting(true);
     setError("");
     setSelectedEvidence(null);
     try {
       const nextRun = reanalyze
-        ? await reanalyzeMedicalInsights(documentId, workspaceId)
-        : await startMedicalInsights(documentId, workspaceId);
+        ? await reanalyzeMedicalInsights(documentId, workspaceId, confirmed)
+        : await startMedicalInsights(documentId, workspaceId, confirmed);
       setRun(nextRun);
     } catch {
       setError("Could not start the medical insight. Check that this is a parsed paper or guideline.");
     } finally {
       setStarting(false);
     }
+  };
+
+  const runAnalysis = (reanalyze = false) => {
+    if (!analysisConfig?.enabled || !analysisConfig.configured) {
+      setError("Medical analysis is not configured on the server.");
+      return;
+    }
+    if (analysisConfig.requires_confirmation && !externalConsent) {
+      setPendingReanalysis(reanalyze);
+      setShowExternalConfirmation(true);
+      return;
+    }
+    void executeAnalysis(reanalyze, externalConsent);
+  };
+
+  const confirmExternalAnalysis = () => {
+    if (!analysisConfig) return;
+    saveExternalConsent(analysisConfig, documentId, workspaceId);
+    setExternalConsent(true);
+    setShowExternalConfirmation(false);
+    void executeAnalysis(pendingReanalysis, true);
   };
 
   const report = run?.report;
@@ -374,7 +470,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
               className="row-action"
               type="button"
               onClick={() => runAnalysis(true)}
-              disabled={starting}
+              disabled={starting || configLoading}
               aria-label="Re-analyze document"
               title="Re-analyze document"
             >
@@ -387,14 +483,54 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
         </div>
       </header>
 
-      {loading && (
+      {analysisConfig?.external_processing && (
+        <div className="insight-provider-notice insight-provider-notice-before">
+          <strong>{readable(analysisConfig.provider)} · {analysisConfig.model_name}</strong>
+          <span>
+            Analysis sends selected {analysisConfig.redact_pii ? "PII-redacted " : "unredacted "}
+            document excerpts to this external provider. API keys remain on the server.
+          </span>
+          {!analysisConfig.configured && <span>The provider is not fully configured.</span>}
+        </div>
+      )}
+
+      {showExternalConfirmation && analysisConfig && (
+        <div
+          className="insight-external-confirmation"
+          role="dialog"
+          aria-label="Confirm external document processing"
+        >
+          <strong>Send selected excerpts for analysis?</strong>
+          <p>
+            {readable(analysisConfig.provider)} will receive selected {analysisConfig.redact_pii ? "PII-redacted" : "unredacted"} passages from this document using {analysisConfig.model_name}.
+          </p>
+          <div className="insight-confirm-actions">
+            <button
+              type="button"
+              className="insight-retry"
+              onClick={() => setShowExternalConfirmation(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="insight-primary-action"
+              onClick={confirmExternalAnalysis}
+            >
+              Confirm and analyze
+            </button>
+          </div>
+        </div>
+      )}
+
+      {(loading || configLoading) && (
         <div className="parsed-state">
           <Loader2 className="spin" size={18} />
           Loading medical insight...
         </div>
       )}
 
-      {!loading && !run && !error && (
+      {!loading && !configLoading && !run && !error && (
         <div className="insight-empty">
           <FileSearch size={18} />
           <p>Generate a cited summary for this research paper or guideline.</p>

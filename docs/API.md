@@ -277,6 +277,22 @@ to an evidence ID from the current document. The default provider is the local
 external model. Set `MEDICAL_AI_PROVIDER=openai`, `MEDICAL_AI_MODEL`, and the
 server-side `MEDICAL_AI_OPENAI_API_KEY` to enable it explicitly.
 
+The frontend first reads `GET /api/v1/medical-insights/config`. When that
+response identifies an external provider, the user must confirm the disclosed
+provider, model, excerpt scope, and PII-redaction state before analysis starts.
+External start and re-analysis requests must then include:
+
+```json
+{
+  "external_processing_confirmed": true
+}
+```
+
+The backend rejects an unconfirmed external request with
+`external_processing_confirmation_required` and records the confirmation time
+on the accepted analysis run. Provider credentials are never returned by the
+configuration endpoint.
+
 ```bash
 curl -X POST \
   "http://localhost:8000/api/v1/documents/<document_id>/medical-insights?workspace_id=$WORKSPACE_ID"

@@ -170,6 +170,7 @@ export interface MedicalInsightRun {
   timeout_seconds?: number;
   max_output_tokens?: number;
   provider_retry_count?: number;
+  external_processing_confirmed_at?: string;
   attempt_count?: number;
   last_heartbeat_at?: string;
   lease_expires_at?: string;
@@ -186,6 +187,17 @@ export interface MedicalInsightRun {
   validation_status?: string;
   warnings?: string[];
   evidence?: MedicalInsightEvidence[];
+}
+
+export interface MedicalInsightConfig {
+  enabled: boolean;
+  configured: boolean;
+  provider: string;
+  model_name: string;
+  external_processing: boolean;
+  requires_confirmation: boolean;
+  sends_selected_excerpts: boolean;
+  redact_pii: boolean;
 }
 
 export interface JobProgress {
@@ -398,11 +410,12 @@ export const getDocumentOpenUrl = (filename: string, workspaceId?: string | null
 export const startMedicalInsights = (
   documentId: string,
   workspaceId?: string | null,
+  externalProcessingConfirmed = false,
 ): Promise<MedicalInsightRun> =>
   http
     .post<MedicalInsightRun>(
       `/documents/${encodeURIComponent(documentId)}/medical-insights`,
-      {},
+      { external_processing_confirmed: externalProcessingConfirmed },
       workspaceParams(workspaceId),
     )
     .then((r) => r.data);
@@ -410,14 +423,18 @@ export const startMedicalInsights = (
 export const reanalyzeMedicalInsights = (
   documentId: string,
   workspaceId?: string | null,
+  externalProcessingConfirmed = false,
 ): Promise<MedicalInsightRun> =>
   http
     .post<MedicalInsightRun>(
       `/documents/${encodeURIComponent(documentId)}/medical-insights/reanalyze`,
-      {},
+      { external_processing_confirmed: externalProcessingConfirmed },
       workspaceParams(workspaceId),
     )
     .then((r) => r.data);
+
+export const getMedicalInsightConfig = (): Promise<MedicalInsightConfig> =>
+  http.get<MedicalInsightConfig>("/medical-insights/config").then((r) => r.data);
 
 export const getMedicalInsightRun = (
   runId: string,

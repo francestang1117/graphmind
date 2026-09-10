@@ -434,7 +434,7 @@ button {
   width: 100%;
   height: 38px;
   margin: 14px 0 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line);
   border-radius: 7px;
   background: var(--surface);
   color: var(--text);
@@ -1534,6 +1534,45 @@ button {
   background: rgba(96, 165, 250, 0.06);
   font-size: 10px;
   line-height: 1.45;
+}
+
+.insight-provider-notice-before {
+  display: grid;
+  gap: 3px;
+  margin: 10px 0 0;
+}
+
+.insight-provider-notice-before strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.insight-external-confirmation {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+
+.insight-external-confirmation > strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.insight-external-confirmation > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.insight-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .insight-report-section p {

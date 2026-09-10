@@ -148,6 +148,7 @@ class ContextBuilder:
                 "raw": raw_chunk,
                 "metadata": metadata,
                 "text": text,
+                "token_count": _estimate_tokens(text),
                 "section_type": section_type,
                 "section": section,
                 "index": index,
@@ -156,33 +157,57 @@ class ContextBuilder:
 
         candidates.sort(key=lambda value: (value[0], value[1]))
         budget = max(1, int(max_input_tokens or 1))
-        selected: list[EvidenceItem] = []
-        selected_indexes: set[int] = set()
         warnings = _warning_codes(source_warnings or [])
         redacted = title_redacted
-        truncated = False
-        skipped = False
+        total_tokens = sum(candidate[2]["token_count"] for candidate in candidates)
+        allowances: dict[int, int] = {}
         remaining = budget
 
-        def add_candidate(candidate: dict[str, Any], allowance: int) -> None:
-            nonlocal redacted, remaining, truncated, skipped
-            index = candidate["index"]
-            if index in selected_indexes:
-                return
-            if remaining <= 0:
-                skipped = True
-                return
-            allowed = max(1, min(remaining, allowance))
-            source_text = candidate["text"]
-            source_tokens = _estimate_tokens(source_text)
-            item_truncated = source_tokens > allowed
-            text = _truncate_text(source_text, allowed) if item_truncated else source_text
-            if not text:
-                skipped = True
-                return
-            token_count = _estimate_tokens(text)
-            truncated = truncated or item_truncated
+        if total_tokens <= budget:
+            allowances = {
+                candidate["index"]: candidate["token_count"]
+                for _priority, _index, candidate in candidates
+            }
+            remaining -= total_tokens
+        else:
+            # Reserve one share for each useful section, then spend the rest
+            # by priority. A later pass can extend a partially selected chunk.
+            first_by_section: dict[str, dict[str, Any]] = {}
+            for _priority, _index, candidate in candidates:
+                section_type = candidate["section_type"]
+                if section_type in {"references", "reference", "bibliography"}:
+                    continue
+                first_by_section.setdefault(section_type, candidate)
+            section_candidates = list(first_by_section.values())
+            for position, candidate in enumerate(section_candidates):
+                if remaining <= 0:
+                    break
+                sections_left = len(section_candidates) - position
+                share = max(1, remaining // max(1, sections_left))
+                granted = min(candidate["token_count"], share, remaining)
+                allowances[candidate["index"]] = granted
+                remaining -= granted
 
+            for _priority, _index, candidate in candidates:
+                if remaining <= 0:
+                    break
+                current = allowances.get(candidate["index"], 0)
+                granted = min(candidate["token_count"] - current, remaining)
+                if granted > 0:
+                    allowances[candidate["index"]] = current + granted
+                    remaining -= granted
+
+        selected: list[EvidenceItem] = []
+        for _priority, index, candidate in candidates:
+            allowed = allowances.get(index, 0)
+            if allowed <= 0:
+                continue
+            item_truncated = candidate["token_count"] > allowed
+            text = (
+                _truncate_text(candidate["text"], allowed)
+                if item_truncated
+                else candidate["text"]
+            )
             if redact_pii:
                 text, changed = redact_sensitive_fields(text)
                 redacted = redacted or changed
@@ -234,33 +259,11 @@ class ContextBuilder:
                         )
                     ),
                     text=text,
-                    token_count=token_count,
+                    token_count=_estimate_tokens(text),
                     source_index=index,
                     truncated=item_truncated,
                 )
             )
-            selected_indexes.add(index)
-            remaining = max(0, remaining - token_count)
-
-        # Give each non-reference section a share before spending the rest on
-        # high-priority findings. This prevents a long Results section from
-        # crowding Methods, population, and limitations out of the analysis.
-        first_by_section: dict[str, dict[str, Any]] = {}
-        for _priority, _index, candidate in candidates:
-            section_type = candidate["section_type"]
-            if section_type in {"references", "reference", "bibliography"}:
-                continue
-            first_by_section.setdefault(section_type, candidate)
-        section_candidates = list(first_by_section.values())
-        for position, candidate in enumerate(section_candidates):
-            sections_left = len(section_candidates) - position
-            add_candidate(candidate, max(1, remaining // max(1, sections_left)))
-
-        for _priority, _index, candidate in candidates:
-            if remaining <= 0:
-                skipped = skipped or candidate["index"] not in selected_indexes
-                continue
-            add_candidate(candidate, remaining)
 
         selected.sort(key=lambda item: item.source_index)
         # Evidence ids follow source order in the prompt, which makes the UI
@@ -286,7 +289,7 @@ class ContextBuilder:
 
         if redacted:
             warnings.append("pii_redacted")
-        if truncated or skipped or len(selected) < len(candidates):
+        if any(item.truncated for item in selected) or len(selected) < len(candidates):
             warnings.append("context_truncated")
         all_sections = list(dict.fromkeys(candidate[2]["section_type"] for candidate in candidates))
         included_sections = list(dict.fromkeys(item.section_type for item in selected))
@@ -300,7 +303,7 @@ class ContextBuilder:
             evidence=selected,
             warnings=warnings,
             total_chunks=len(candidates),
-            total_tokens=sum(_estimate_tokens(candidate[2]["text"]) for candidate in candidates),
+            total_tokens=total_tokens,
             max_input_tokens=budget,
             included_sections=included_sections,
             omitted_sections=omitted_sections,

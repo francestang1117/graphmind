@@ -1556,3 +1556,11 @@ version, context coverage, and omitted sections. It also tells users when
 selected redacted excerpts were sent to the configured provider. Live model
 verification remains an opt-in manual check with public Chinese and English
 papers; CI uses simulated responses and never needs an API key.
+
+The follow-up review tightened four boundaries before merge. Method attributes
+marked `not_reported` now accept only the fixed missing-value text and no
+citations. Claim checks understand negated causal and no-effect statements in
+English and Chinese. Context selection can extend a section's reserved excerpt
+with the remaining budget instead of discarding usable capacity. External
+processing is disclosed before the request, requires an explicit API flag, and
+stores the confirmation timestamp on the run.

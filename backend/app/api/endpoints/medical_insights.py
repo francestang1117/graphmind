@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
 from app.api.workspace_scope import normalize_workspace_id, resolve_workspace_id
@@ -24,6 +25,11 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 SUPPORTED_DOCUMENT_KINDS = {"research_paper", "guideline"}
+EXTERNAL_PROVIDERS = {"openai"}
+
+
+class MedicalInsightStartRequest(BaseModel):
+    external_processing_confirmed: bool = False
 
 
 def _user_id(user: UserRecord) -> str:
@@ -34,6 +40,7 @@ def _user_id(user: UserRecord) -> str:
 async def start_medical_insights(
     document_id: str,
     background_tasks: BackgroundTasks,
+    request: MedicalInsightStartRequest | None = None,
     workspace_id: str | None = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> JSONResponse:
@@ -43,6 +50,9 @@ async def start_medical_insights(
         background_tasks,
         user,
         workspace_id=workspace_id,
+        external_processing_confirmed=bool(
+            request and request.external_processing_confirmed
+        ),
         force=False,
     )
 
@@ -51,6 +61,7 @@ async def start_medical_insights(
 async def reanalyze_medical_insights(
     document_id: str,
     background_tasks: BackgroundTasks,
+    request: MedicalInsightStartRequest | None = None,
     workspace_id: str | None = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> JSONResponse:
@@ -60,8 +71,36 @@ async def reanalyze_medical_insights(
         background_tasks,
         user,
         workspace_id=workspace_id,
+        external_processing_confirmed=bool(
+            request and request.external_processing_confirmed
+        ),
         force=True,
     )
+
+
+@router.get("/medical-insights/config")
+async def get_medical_insight_config(
+    _user: UserRecord = Depends(current_user_or_dev),
+) -> dict[str, Any]:
+    """Expose the analysis boundary without returning provider credentials."""
+    provider_name = settings.MEDICAL_AI_PROVIDER.strip().lower()
+    configured = True
+    model_name = settings.MEDICAL_AI_MODEL
+    try:
+        model_name = get_provider(provider_name, model_name).model_name
+    except MedicalInsightError:
+        configured = False
+    external_processing = provider_name in EXTERNAL_PROVIDERS
+    return {
+        "enabled": settings.MEDICAL_AI_ENABLED,
+        "configured": configured,
+        "provider": provider_name,
+        "model_name": model_name,
+        "external_processing": external_processing,
+        "requires_confirmation": external_processing,
+        "sends_selected_excerpts": external_processing,
+        "redact_pii": settings.MEDICAL_AI_REDACT_PII,
+    }
 
 
 @router.get("/medical-analysis-runs/{run_id}")
@@ -120,6 +159,7 @@ async def _start_analysis(
     user: UserRecord,
     *,
     workspace_id: str | None,
+    external_processing_confirmed: bool,
     force: bool,
 ) -> JSONResponse:
     if not settings.MEDICAL_AI_ENABLED:
@@ -168,6 +208,21 @@ async def _start_analysis(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         ) from exc
 
+    if (
+        provider_name in EXTERNAL_PROVIDERS
+        and not external_processing_confirmed
+    ):
+        raise AppError(
+            "Confirm external processing before starting this analysis.",
+            code="external_processing_confirmation_required",
+            status_code=status.HTTP_409_CONFLICT,
+            details={
+                "provider": provider_name,
+                "model_name": configured_provider.model_name,
+                "redact_pii": settings.MEDICAL_AI_REDACT_PII,
+            },
+        )
+
     try:
         run, created = medical_analysis_repository.create_or_reuse(
             document_id=document_id,
@@ -185,6 +240,7 @@ async def _start_analysis(
             timeout_seconds=settings.MEDICAL_AI_TIMEOUT_SECONDS,
             max_output_tokens=settings.MEDICAL_AI_MAX_OUTPUT_TOKENS,
             provider_retry_count=settings.MEDICAL_AI_PROVIDER_RETRY_COUNT,
+            external_processing_confirmed=external_processing_confirmed,
             force=force,
         )
     except MedicalInsightError as exc:

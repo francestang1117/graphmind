@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 InterpretationType = Literal[
@@ -19,6 +19,7 @@ SupportStatus = Literal[
     "not_reported",
     "uncertain",
 ]
+NOT_REPORTED_VALUE = "Not reported in the selected source evidence."
 
 
 class _StrictModel(BaseModel):
@@ -48,9 +49,20 @@ class MedicalTermExplanation(_StrictModel):
 
 
 class EvidenceAttribute(_StrictModel):
-    value: str = "Not reported in the selected source evidence."
+    value: str = NOT_REPORTED_VALUE
     support_status: SupportStatus = "not_reported"
     evidence_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_not_reported_state(self) -> Self:
+        if self.support_status == "not_reported" and (
+            self.value != NOT_REPORTED_VALUE or self.evidence_ids
+        ):
+            raise ValueError(
+                "not_reported attributes must use the fixed missing-value text "
+                "and cannot cite evidence"
+            )
+        return self
 
 
 class StudyMethods(_StrictModel):

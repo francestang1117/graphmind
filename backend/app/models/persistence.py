@@ -376,6 +376,10 @@ class MedicalAnalysisRunRecord(Base):
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=30)
     max_output_tokens: Mapped[int] = mapped_column(Integer, default=5000)
     provider_retry_count: Mapped[int] = mapped_column(Integer, default=2)
+    external_processing_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     attempt_count: Mapped[int] = mapped_column(Integer, default=0)
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

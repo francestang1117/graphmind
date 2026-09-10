@@ -28,6 +28,15 @@ _CAUSAL_CLAIM = re.compile(
     r"(?:导致|造成|引起|预防了|治愈了|证明了)",
     re.I,
 )
+_NEGATED_CAUSAL_CLAIM = re.compile(
+    r"\b(?:(?:do(?:es)?|did|can(?:not|'t)?|could|should|is|are|was|were)\s+not|"
+    r"cannot|can't)\s+(?:prove|establish|show|demonstrate|mean)\b.{0,60}"
+    r"\b(?:caus(?:e|es|ed|al)|lead(?:s)?\s+to|result(?:s|ed)?\s+in)\b|"
+    r"\bno evidence (?:that|of)\b.{0,60}\b(?:caus(?:e|es|ed|al)|lead(?:s)?\s+to)\b|"
+    r"(?:不能|无法|并不|不代表|并不意味着).{0,20}(?:证明|证实|表明|说明|意味着)?"
+    r".{0,30}(?:因果|导致|造成|引起)",
+    re.I | re.S,
+)
 _ASSOCIATION_SOURCE = re.compile(
     r"\b(?:associated with|association|correlated with|correlation|linked to)\b|"
     r"(?:相关|关联|相关性)",
@@ -61,6 +70,13 @@ _NO_EFFECT_CLAIM = re.compile(
     r"(?:证明无效|没有任何效果|完全无效)",
     re.I,
 )
+_NEGATED_NO_EFFECT_CLAIM = re.compile(
+    r"\b(?:(?:do(?:es)?|did|can(?:not|'t)?|could|should|is|are|was|were)\s+not|"
+    r"cannot|can't)\s+(?:prove|establish|show|demonstrate|mean)\b.{0,60}"
+    r"\b(?:ineffective|no effect)\b|"
+    r"(?:不能|无法|并不|不代表|并不意味着).{0,30}(?:无效|没有(?:任何)?效果)",
+    re.I | re.S,
+)
 _SPECULATIVE_SOURCE = re.compile(
     r"\b(?:may|might|could|suggests?|hypothes(?:is|ize|ized)|possibly)\b|"
     r"(?:可能|或许|提示|推测|假设)",
@@ -69,6 +85,12 @@ _SPECULATIVE_SOURCE = re.compile(
 _CERTAIN_CLAIM = re.compile(
     r"\b(?:proves?|establishes?|confirms?|demonstrates conclusively)\b|"
     r"(?:证实了|证明了|明确表明|确定)",
+    re.I,
+)
+_NEGATED_CERTAIN_CLAIM = re.compile(
+    r"\b(?:(?:do(?:es)?|did|can(?:not|'t)?|could|should|is|are|was|were)\s+not|"
+    r"cannot|can't)\s+(?:prove|establish|confirm|show|demonstrate|mean)\b|"
+    r"(?:不能|无法|并不|不代表|并不意味着).{0,20}(?:证明|证实|确认|表明|说明|意味着)",
     re.I,
 )
 
@@ -93,7 +115,14 @@ def validate_support(
         ]
         if missing_numbers:
             errors.append(f"{label} contains numbers or units not found in its evidence")
-        if _CAUSAL_CLAIM.search(claim_text) and _ASSOCIATION_SOURCE.search(source_text):
+        if (
+            _ASSOCIATION_SOURCE.search(source_text)
+            and _has_unnegated_claim(
+                claim_text,
+                _CAUSAL_CLAIM,
+                _NEGATED_CAUSAL_CLAIM,
+            )
+        ):
             errors.append(f"{label} turns an association into causation")
         if (
             _PRECLINICAL_SOURCE.search(source_text)
@@ -101,9 +130,23 @@ def validate_support(
             and not _NEGATED_HUMAN_CLAIM.search(claim_text)
         ):
             errors.append(f"{label} turns preclinical evidence into human efficacy")
-        if _NON_SIGNIFICANT_SOURCE.search(source_text) and _NO_EFFECT_CLAIM.search(claim_text):
+        if (
+            _NON_SIGNIFICANT_SOURCE.search(source_text)
+            and _has_unnegated_claim(
+                claim_text,
+                _NO_EFFECT_CLAIM,
+                _NEGATED_NO_EFFECT_CLAIM,
+            )
+        ):
             errors.append(f"{label} treats a non-significant result as proof of no effect")
-        if _SPECULATIVE_SOURCE.search(source_text) and _CERTAIN_CLAIM.search(claim_text):
+        if (
+            _SPECULATIVE_SOURCE.search(source_text)
+            and _has_unnegated_claim(
+                claim_text,
+                _CERTAIN_CLAIM,
+                _NEGATED_CERTAIN_CLAIM,
+            )
+        ):
             errors.append(f"{label} states a speculative source as established fact")
 
     return SupportValidation(valid=not errors, errors=list(dict.fromkeys(errors)))
@@ -134,3 +177,14 @@ def _finding_text(item: EvidenceFinding) -> str:
 
 def _numbers(text: str) -> set[str]:
     return {re.sub(r"\s+", "", match.group(0)).lower() for match in _NUMBER.finditer(text)}
+
+
+def _has_unnegated_claim(
+    text: str,
+    claim_pattern: re.Pattern[str],
+    negated_pattern: re.Pattern[str],
+) -> bool:
+    for sentence in re.split(r"[。！？]+|(?<=[.!?])\s+|[\n;；]+", text):
+        if claim_pattern.search(sentence) and not negated_pattern.search(sentence):
+            return True
+    return False

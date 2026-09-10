@@ -201,6 +201,12 @@ records the provider, model, prompt/schema versions, timeout, token budgets,
 retry count, source snapshot, and coverage. Do not place real patient data in
 manual provider tests.
 
+Before the first external analysis, confirm that the UI names the provider and
+model and explains whether selected excerpts are PII-redacted. Cancelling the
+confirmation must not create a run. Direct API calls without
+`external_processing_confirmed=true` must return `409`, and accepted runs must
+include `external_processing_confirmed_at`.
+
 Before release, manually analyze one public English paper and one public
 Chinese paper. Confirm that numeric findings match the cited quote, missing
 sample or comparator fields say they were not reported, every finding opens a
