@@ -33,6 +33,7 @@ _WORKSPACE_TABLES = (
     "processing_jobs",
     "medical_document_profiles",
     "document_sections",
+    "literature_search_runs",
 )
 
 
@@ -47,6 +48,7 @@ def upgrade_persistence_schema(engine) -> None:
         _ensure_medical_document_columns(connection)
         _ensure_medical_tables(connection)
         _ensure_medical_ai_tables(connection)
+        _ensure_literature_tables(connection)
         _ensure_workspace_columns(connection)
         changed = _move_legacy_document_ids(connection)
         seeded = _seed_default_workspaces(connection)
@@ -75,6 +77,7 @@ def _upgrade_sqlite(engine) -> None:
                 _ensure_medical_document_columns(connection)
                 _ensure_medical_tables(connection)
                 _ensure_medical_ai_tables(connection)
+                _ensure_literature_tables(connection)
                 _ensure_workspace_columns(connection)
                 changed = _move_legacy_document_ids(connection)
                 seeded = _seed_default_workspaces(connection)
@@ -406,6 +409,138 @@ def _ensure_medical_ai_tables(connection) -> None:
         )
 
 
+def _ensure_literature_tables(connection) -> None:
+    """Create the cached PubMed search tables for existing databases."""
+    if not _has_table(connection, "documents"):
+        return
+
+    timestamp_type = (
+        "DATETIME"
+        if connection.dialect.name == "sqlite"
+        else "TIMESTAMP WITH TIME ZONE"
+    )
+
+    if not _has_table(connection, "literature_articles"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE literature_articles (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                source VARCHAR(64) NOT NULL,
+                external_id VARCHAR(128) NOT NULL,
+                doi VARCHAR(255),
+                pmcid VARCHAR(64),
+                title TEXT NOT NULL,
+                abstract TEXT NOT NULL,
+                journal VARCHAR(512) NOT NULL,
+                publication_date VARCHAR(32) NOT NULL,
+                publication_year INTEGER,
+                authors_json TEXT NOT NULL,
+                publication_types_json TEXT NOT NULL,
+                mesh_terms_json TEXT NOT NULL,
+                language VARCHAR(32) NOT NULL,
+                source_url VARCHAR(512) NOT NULL,
+                retraction_status VARCHAR(32) NOT NULL,
+                metadata_hash VARCHAR(64) NOT NULL,
+                fetched_at {timestamp_type},
+                created_at {timestamp_type} NOT NULL,
+                updated_at {timestamp_type} NOT NULL,
+                CONSTRAINT uq_literature_articles_source_external
+                    UNIQUE (source, external_id)
+            )
+            """
+        )
+
+    if not _has_table(connection, "literature_search_runs"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE literature_search_runs (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255),
+                question TEXT NOT NULL,
+                normalized_query TEXT NOT NULL,
+                query_hash VARCHAR(64) NOT NULL,
+                provider VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                date_from VARCHAR(32),
+                date_to VARCHAR(32),
+                study_types_json TEXT NOT NULL,
+                sort VARCHAR(32) NOT NULL,
+                max_results INTEGER NOT NULL,
+                result_count INTEGER NOT NULL,
+                error_code VARCHAR(80) NOT NULL,
+                error_message TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                attempt_count INTEGER NOT NULL,
+                external_search_confirmed_at {timestamp_type},
+                last_heartbeat_at {timestamp_type},
+                lease_expires_at {timestamp_type},
+                started_at {timestamp_type},
+                completed_at {timestamp_type},
+                fetched_at {timestamp_type},
+                created_at {timestamp_type} NOT NULL,
+                updated_at {timestamp_type} NOT NULL,
+                CONSTRAINT uq_literature_search_runs_scope_query_provider
+                    UNIQUE (user_id, workspace_id, document_id, query_hash, provider),
+                CONSTRAINT fk_literature_search_runs_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+            )
+            """
+        )
+    elif not _has_column(connection, "literature_search_runs", "warnings_json"):
+        connection.exec_driver_sql(
+            "ALTER TABLE literature_search_runs "
+            "ADD COLUMN warnings_json TEXT NOT NULL DEFAULT '[]'"
+        )
+
+    if not _has_table(connection, "literature_search_results"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE literature_search_results (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                search_run_id VARCHAR(64) NOT NULL,
+                article_id VARCHAR(64) NOT NULL,
+                provider_rank INTEGER NOT NULL,
+                matched_terms_json TEXT NOT NULL,
+                selected_for_analysis BOOLEAN NOT NULL,
+                created_at {timestamp_type} NOT NULL,
+                CONSTRAINT uq_literature_search_results_run_article
+                    UNIQUE (search_run_id, article_id),
+                CONSTRAINT fk_literature_search_results_run
+                    FOREIGN KEY (search_run_id)
+                    REFERENCES literature_search_runs(id) ON DELETE CASCADE,
+                CONSTRAINT fk_literature_search_results_article
+                    FOREIGN KEY (article_id)
+                    REFERENCES literature_articles(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+    indexes = (
+        ("ix_literature_articles_source", "literature_articles", "source"),
+        ("ix_literature_articles_external_id", "literature_articles", "external_id"),
+        ("ix_literature_articles_doi", "literature_articles", "doi"),
+        ("ix_literature_articles_pmcid", "literature_articles", "pmcid"),
+        ("ix_literature_articles_publication_year", "literature_articles", "publication_year"),
+        ("ix_literature_articles_retraction_status", "literature_articles", "retraction_status"),
+        ("ix_literature_articles_metadata_hash", "literature_articles", "metadata_hash"),
+        ("ix_literature_search_runs_user_id", "literature_search_runs", "user_id"),
+        ("ix_literature_search_runs_workspace_id", "literature_search_runs", "workspace_id"),
+        ("ix_literature_search_runs_document_id", "literature_search_runs", "document_id"),
+        ("ix_literature_search_runs_query_hash", "literature_search_runs", "query_hash"),
+        ("ix_literature_search_runs_provider", "literature_search_runs", "provider"),
+        ("ix_literature_search_runs_status", "literature_search_runs", "status"),
+        ("ix_literature_search_runs_lease_expires_at", "literature_search_runs", "lease_expires_at"),
+        ("ix_literature_search_results_run_id", "literature_search_results", "search_run_id"),
+        ("ix_literature_search_results_article_id", "literature_search_results", "article_id"),
+    )
+    for name, table, column in indexes:
+        connection.exec_driver_sql(
+            f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"
+        )
+
+
 def _ensure_workspace_columns(connection) -> None:
     """Add the nullable column first; existing rows are filled below."""
     for table in _WORKSPACE_TABLES:
@@ -557,6 +692,7 @@ def _clean_sqlite_orphans(connection) -> None:
         ("graph_edges", "source_document_id"),
         ("medical_document_profiles", "document_id"),
         ("document_sections", "document_id"),
+        ("literature_search_runs", "document_id"),
     ):
         if not _has_table(connection, table) or not _has_column(connection, table, column):
             continue
@@ -621,6 +757,7 @@ def _move_legacy_document_ids(connection) -> int:
         ("processing_jobs", "document_id"),
         ("medical_document_profiles", "document_id"),
         ("document_sections", "document_id"),
+        ("literature_search_runs", "document_id"),
     )
     for old_id, new_id in replacements.items():
         for table, column in references:

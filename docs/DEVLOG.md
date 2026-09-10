@@ -1572,3 +1572,39 @@ does not excuse a later causal claim. External-processing consent now carries a
 fingerprint of the provider, resolved model, excerpt scope, and redaction mode.
 If the server configuration changes after the disclosure is shown, the stale
 request is rejected and the frontend reloads the terms before asking again.
+
+## 2026-09 - V2 PR7: PubMed Literature Search Foundation
+
+The next V2 layer is a bounded way to find public medical literature without
+pretending that a search result is already evidence for a user's document. A
+new query builder extracts a small set of explainable disease, symptom, gene,
+and treatment terms, removes direct identifiers, supports date and study-type
+filters, and produces a fingerprint for the exact query shown to the user.
+
+The API now has preview, confirmed start, polling, and latest-run endpoints.
+The preview discloses that only the reviewed query terms go to PubMed; the
+uploaded file, parsed chunks, and document text stay inside GraphMind. Starting
+without confirmation or with a stale fingerprint is rejected before any
+external request is made.
+
+The PubMed provider uses the official ESearch and batch EFetch endpoints. It
+normalizes PMID, DOI, PMCID, title, abstract, journal, dates, authors,
+publication types, MeSH terms, language, and retraction/correction state. It
+uses HTTPS, does not follow redirects, keeps credentials and query text out of
+logs, applies bounded retries and response limits, and rejects malformed or
+unsafe XML responses.
+
+Search runs and ranked result links are persisted within the user/workspace/
+document boundary. Fresh runs can be reused through a TTL, while queued and
+running runs carry leases so a lost worker becomes retryable instead of waiting
+forever. Public article metadata is cached separately from the document scope.
+Document deletion removes its runs and result links, and the existing document
+permission checks are used for preview, start, latest, and polling.
+
+The first version intentionally does not perform AI claim matching, evidence
+grading, multi-paper comparison, automatic disease hypotheses, or treatment
+recommendations. The local suite covers query redaction, provider parsing and
+failure paths, scoped persistence, cache/retry behavior, confirmation, and
+workspace isolation. The latest local result is `328 passed, 3 skipped`; the
+PostgreSQL migration and row-lock checks remain conditional on
+`GRAPHMIND_TEST_POSTGRES_URL`.

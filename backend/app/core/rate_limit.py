@@ -113,6 +113,7 @@ search_limit = limiter.limit(settings.RATE_LIMIT_SEARCH)
 graph_read_limit = limiter.limit(settings.RATE_LIMIT_GRAPH_READ)
 video_limit = limiter.limit(settings.RATE_LIMIT_VIDEO)
 scrape_limit = limiter.limit(settings.RATE_LIMIT_SCRAPE)
+literature_limit = limiter.limit(settings.RATE_LIMIT_LITERATURE)
 
 # Backward-compatible constants for older imports/tests.
 LIMIT_UPLOAD = settings.RATE_LIMIT_UPLOAD
@@ -120,3 +121,4 @@ LIMIT_SEARCH = settings.RATE_LIMIT_SEARCH
 LIMIT_GRAPH_READ = settings.RATE_LIMIT_GRAPH_READ
 LIMIT_CHAT = settings.RATE_LIMIT_CHAT
 LIMIT_SCRAPE = settings.RATE_LIMIT_SCRAPE
+LIMIT_LITERATURE = settings.RATE_LIMIT_LITERATURE

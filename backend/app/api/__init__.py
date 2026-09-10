@@ -7,6 +7,7 @@ from app.api.endpoints import (
     documents,
     graph,
     jobs,
+    literature,
     medical_insights,
     scraper,
     search,
@@ -23,4 +24,5 @@ router.include_router(chat.router, prefix="/chat", tags=["chat"])
 router.include_router(scraper.router, prefix="/scraper", tags=["scraper"])
 router.include_router(jobs.router, prefix="/jobs", tags=["jobs"])
 router.include_router(workspaces.router, prefix="/workspaces", tags=["workspaces"])
+router.include_router(literature.router, tags=["literature"])
 router.include_router(medical_insights.router, tags=["medical-insights"])

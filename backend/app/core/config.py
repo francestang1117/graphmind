@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_GRAPH_READ: str = "120/minute"
     RATE_LIMIT_VIDEO: str = "5/hour"
     RATE_LIMIT_SCRAPE: str = "10/hour"
+    RATE_LIMIT_LITERATURE: str = "10/hour;50/day"
     TRUSTED_PROXY_IPS: List[str] = ["127.0.0.1", "::1"]
 
     METRICS_ENABLED: bool = True
@@ -96,6 +97,19 @@ class Settings(BaseSettings):
     MEDICAL_AI_OPENAI_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = ""
+
+    # Literature search sends only confirmed, redacted query terms to PubMed.
+    # It never sends the uploaded document itself.
+    LITERATURE_SEARCH_ENABLED: bool = True
+    PUBMED_BASE_URL: str = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+    PUBMED_API_KEY: str = ""
+    PUBMED_TOOL: str = "graphmind"
+    PUBMED_EMAIL: str = ""
+    PUBMED_TIMEOUT_SECONDS: int = 15
+    PUBMED_MAX_RESULTS: int = 50
+    PUBMED_CACHE_TTL_SECONDS: int = 86400
+    PUBMED_MAX_RESPONSE_BYTES: int = 5242880
+    PUBMED_RETRY_COUNT: int = 2
 
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
