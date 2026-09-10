@@ -7,6 +7,7 @@ import pytest
 from app.services.medical.literature.rate_limiter import (
     PubMedRateLimitUnavailable,
     PubMedRateLimiter,
+    get_pubmed_rate_limiter,
 )
 
 
@@ -49,3 +50,18 @@ def test_rate_limiter_fails_closed_when_redis_is_unavailable() -> None:
 
     with pytest.raises(PubMedRateLimitUnavailable):
         asyncio.run(limiter.acquire())
+
+
+def test_default_limiter_factory_does_not_share_an_async_client() -> None:
+    assert get_pubmed_rate_limiter() is not get_pubmed_rate_limiter()
+
+
+def test_local_fallback_can_be_used_across_event_loops() -> None:
+    limiter = PubMedRateLimiter(
+        redis_client=_BrokenRedis(),
+        requests_per_second=100,
+        strict=False,
+    )
+
+    asyncio.run(limiter.acquire())
+    asyncio.run(limiter.acquire())

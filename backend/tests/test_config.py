@@ -82,3 +82,31 @@ def test_safe_production_config_passes():
     )
 
     validate_runtime_config(config)
+
+
+def test_production_literature_search_cannot_disable_rate_limiting():
+    config = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        AUTH_REQUIRED=True,
+        SECRET_KEY="x" * 64,
+        LITERATURE_SEARCH_ENABLED=True,
+        PUBMED_RATE_LIMIT_ENABLED=False,
+    )
+
+    with pytest.raises(RuntimeError, match="PUBMED_RATE_LIMIT_ENABLED"):
+        validate_runtime_config(config)
+
+
+def test_production_literature_search_requires_redis_coordination():
+    config = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        AUTH_REQUIRED=True,
+        SECRET_KEY="x" * 64,
+        LITERATURE_SEARCH_ENABLED=True,
+        PUBMED_RATE_LIMIT_REDIS_REQUIRED=False,
+    )
+
+    with pytest.raises(RuntimeError, match="PUBMED_RATE_LIMIT_REDIS_REQUIRED"):
+        validate_runtime_config(config)

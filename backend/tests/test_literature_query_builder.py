@@ -79,6 +79,44 @@ def test_unknown_disease_query_keeps_only_the_disease_term(
         assert leaked_value.casefold() not in query.normalized_query.casefold()
 
 
+@pytest.mark.parametrize(
+    "question",
+    [
+        "张三戈谢病有什么新研究？",
+        "关于某人的戈谢病有什么新研究？",
+    ],
+)
+def test_ambiguous_chinese_disease_text_fails_closed(question: str) -> None:
+    with pytest.raises(LiteratureQueryError, match="No medical concepts"):
+        build_literature_query(question)
+
+
+@pytest.mark.parametrize("marker", ["患", "罹患", "确诊为", "病例为", "关于"])
+def test_explicit_chinese_disease_capture_excludes_the_narrative(marker: str) -> None:
+    query = build_literature_query(f"{marker}戈谢病有什么新研究？")
+
+    assert [concept.normalized for concept in query.detected_concepts] == ["戈谢病"]
+    assert "患" not in query.normalized_query
+    assert "罹患" not in query.normalized_query
+
+
+@pytest.mark.parametrize("question", [
+    "What treatments exist for glaucoma?",
+    "What is a regular software release?",
+])
+def test_short_gene_alias_does_not_match_an_english_substring(question: str) -> None:
+    with pytest.raises(LiteratureQueryError, match="No medical concepts"):
+        build_literature_query(question)
+
+
+@pytest.mark.parametrize("question", ["What is known about GLA gene?", "What is GLA mutation?"])
+def test_bare_gene_symbol_requires_a_word_boundary(question: str) -> None:
+    query = build_literature_query(question)
+
+    assert [concept.normalized for concept in query.detected_concepts] == ["GLA"]
+    assert '"GLA"[Title/Abstract]' in query.normalized_query
+
+
 def test_build_query_rejects_unsupported_or_uninformative_questions() -> None:
     with pytest.raises(LiteratureQueryError, match="No medical concepts"):
         build_literature_query("How should I organize my software project?")

@@ -45,6 +45,12 @@ _STOP_WORDS = {
     "on",
     "or",
     "research",
+    "treatment",
+    "treatments",
+    "therapy",
+    "therapies",
+    "medication",
+    "medications",
     "the",
     "this",
     "what",
@@ -158,9 +164,7 @@ _GENERIC_ENGLISH_DISEASE = re.compile(
     r"(?:disease|syndrome|cancer|carcinoma|leukemia|lymphoma|disorder))\b",
     re.IGNORECASE,
 )
-_GENERIC_CJK_DISEASE = re.compile(r"[\u4e00-\u9fff]{2,12}(?:病|症|癌|炎|综合征)")
 _ENGLISH_WORD = re.compile(r"\b[A-Za-z][A-Za-z-]{2,}\b")
-_CJK_TERM = re.compile(r"[\u4e00-\u9fff]{2,12}")
 _ENGLISH_DISEASE_MARKERS = {
     "disease",
     "syndrome",
@@ -212,10 +216,11 @@ _ENGLISH_DISEASE_CONTEXT_WORDS = {
     "what",
     "with",
 }
-_CJK_DISEASE_CONTEXT = re.compile(
-    r"患者|病人|患有|得了|诊断为|诊断是|诊断|病例|病历|姓名"
+_EXPLICIT_CJK_DISEASE = re.compile(
+    r"(?:患有|罹患|患(?!者)|得了|确诊(?:为|是)?|诊断(?:为|是)?|"
+    r"病例(?:为|是)?|关于|有关|针对)\s*"
+    r"(?P<term>[\u4e00-\u9fff]{2,12}(?:病|症|癌|炎|综合征))"
 )
-_CJK_DISEASE_SEPARATORS = re.compile(r"[\s,，。；;:：、/|（）()]+")
 
 _STUDY_TYPE_TERMS = {
     "systematic_review": '"Systematic Review"[Publication Type]',
@@ -330,7 +335,6 @@ def redact_sensitive_text(text: str) -> tuple[str, list[str]]:
 
 
 def _extract_concepts(question: str) -> list[DetectedConcept]:
-    lowered = question.casefold()
     concepts: list[DetectedConcept] = []
     seen: set[str] = set()
     occupied_spans: list[tuple[int, int]] = []
@@ -339,7 +343,7 @@ def _extract_concepts(question: str) -> list[DetectedConcept]:
         if rule.normalized in seen:
             continue
         for alias in rule.aliases:
-            match = re.search(re.escape(alias), lowered, flags=re.IGNORECASE)
+            match = _find_alias_match(question, rule, alias)
             if match:
                 concepts.append(
                     DetectedConcept(
@@ -352,9 +356,16 @@ def _extract_concepts(question: str) -> list[DetectedConcept]:
                 occupied_spans.append((match.start(), match.end()))
                 break
 
-    for pattern in (_GENERIC_ENGLISH_DISEASE, _GENERIC_CJK_DISEASE):
+    for pattern in (_GENERIC_ENGLISH_DISEASE, _EXPLICIT_CJK_DISEASE):
         for match in pattern.finditer(question):
-            raw_value = clean_text(match.group(0))
+            if pattern is _EXPLICIT_CJK_DISEASE:
+                raw_value = clean_text(match.group("term"))
+                term_start = match.start("term")
+                term_end = match.end("term")
+            else:
+                raw_value = clean_text(match.group(0))
+                term_start = match.start()
+                term_end = match.end()
             value = (
                 _safe_english_disease_term(raw_value)
                 if pattern is _GENERIC_ENGLISH_DISEASE
@@ -364,7 +375,7 @@ def _extract_concepts(question: str) -> list[DetectedConcept]:
                 continue
             normalized = value
             overlaps_known = any(
-                match.start() < end and match.end() > start
+                term_start < end and term_end > start
                 for start, end in occupied_spans
             )
             if (
@@ -382,11 +393,12 @@ def _extract_concepts(question: str) -> list[DetectedConcept]:
                 )
             )
             seen.add(normalized.casefold())
+            occupied_spans.append((term_start, term_end))
 
     # A small fallback keeps uncommon but clearly medical questions usable,
     # while still avoiding a raw free-form case narrative in the query.
     if not concepts:
-        for token in [*_ENGLISH_WORD.findall(question), *_CJK_TERM.findall(question)]:
+        for token in _ENGLISH_WORD.findall(question):
             normalized = clean_text(token)
             if normalized.casefold() in _STOP_WORDS or len(normalized) < 2:
                 continue
@@ -403,6 +415,16 @@ def _extract_concepts(question: str) -> list[DetectedConcept]:
                 break
 
     return concepts[:8]
+
+
+def _find_alias_match(question: str, rule: _ConceptRule, alias: str) -> re.Match[str] | None:
+    """Match English aliases as words so short gene symbols cannot hit substrings."""
+    if rule.concept_type == "gene" and alias == "GLA":
+        return re.search(r"(?<![A-Za-z0-9])GLA(?![A-Za-z0-9])", question)
+    if re.search(r"[A-Za-z]", alias):
+        pattern = r"(?<![A-Za-z0-9])" + re.escape(alias) + r"(?![A-Za-z0-9])"
+        return re.search(pattern, question, flags=re.IGNORECASE)
+    return re.search(re.escape(alias), question)
 
 
 def _safe_english_disease_term(value: str) -> str | None:
@@ -437,26 +459,11 @@ def _safe_english_disease_term(value: str) -> str | None:
 
 
 def _safe_cjk_disease_term(value: str) -> str | None:
-    """Extract only the disease suffix from a Chinese case narrative."""
-    if not value or not re.search(r"(?:病|症|癌|炎|综合征)$", value):
-        return None
-
-    context_matches = list(_CJK_DISEASE_CONTEXT.finditer(value))
-    candidate = value[context_matches[-1].end() :] if context_matches else value
-    candidate = re.sub(r"^[有的是]+", "", candidate)
-    pieces = [clean_text(piece) for piece in _CJK_DISEASE_SEPARATORS.split(candidate)]
-    pieces = [piece for piece in pieces if piece]
-    if pieces:
-        candidate = next(
-            (piece for piece in reversed(pieces) if re.search(r"(?:病|症|癌|炎|综合征)$", piece)),
-            pieces[-1],
-        )
-    elif not context_matches and "的" in candidate:
-        candidate = candidate.rsplit("的", 1)[-1]
-
-    if "的" in candidate:
-        candidate = candidate.rsplit("的", 1)[-1]
+    """Accept only the exact disease term captured after an explicit marker."""
+    candidate = clean_text(value)
     if not re.fullmatch(r"[\u4e00-\u9fff]{2,12}(?:病|症|癌|炎|综合征)", candidate):
+        return None
+    if any(fragment in candidate for fragment in ("的", "患", "罹", "诊断", "确诊", "病例")):
         return None
     return candidate
 

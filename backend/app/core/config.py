@@ -184,6 +184,18 @@ def validate_runtime_config(config: Settings | None = None) -> None:
     if not is_local and not runtime.AUTH_REQUIRED:
         problems.append("AUTH_REQUIRED must be true outside development and test.")
 
+    if not is_local and runtime.LITERATURE_SEARCH_ENABLED:
+        if not runtime.PUBMED_RATE_LIMIT_ENABLED:
+            problems.append(
+                "PUBMED_RATE_LIMIT_ENABLED must be true outside development and test "
+                "when literature search is enabled."
+            )
+        if not runtime.PUBMED_RATE_LIMIT_REDIS_REQUIRED:
+            problems.append(
+                "PUBMED_RATE_LIMIT_REDIS_REQUIRED must be true outside development "
+                "and test when literature search is enabled."
+            )
+
     if runtime.AUTH_REQUIRED or not is_local:
         if not secret:
             problems.append("SECRET_KEY must not be empty.")

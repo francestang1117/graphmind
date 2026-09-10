@@ -94,8 +94,10 @@ class PubMedProvider:
         )
         self.transport = transport
         self._rate_limiter = rate_limiter
-        if self._rate_limiter is None and min_request_interval is None:
-            self._rate_limiter = get_pubmed_rate_limiter()
+        self._use_default_rate_limiter = (
+            self._rate_limiter is None and min_request_interval is None
+        )
+        self._owns_rate_limiter = False
         self.sleep = sleep
         self.jitter = jitter
         self.min_request_interval = float(min_request_interval or 0)
@@ -137,6 +139,15 @@ class PubMedProvider:
                 code="literature_provider_mismatch",
             )
 
+        if self._use_default_rate_limiter:
+            self._rate_limiter = get_pubmed_rate_limiter()
+            self._owns_rate_limiter = True
+        try:
+            return await self._search_impl(query)
+        finally:
+            await self._release_rate_limiter()
+
+    async def _search_impl(self, query: LiteratureQuery) -> LiteratureSearchPage:
         fetched_at = datetime.now(timezone.utc)
         warnings: list[str] = []
         params: dict[str, str | int] = {
@@ -195,6 +206,16 @@ class PubMedProvider:
                 fetched_at=fetched_at,
                 warnings=list(dict.fromkeys(warnings)),
             )
+
+    async def _release_rate_limiter(self) -> None:
+        if not self._owns_rate_limiter:
+            return
+        limiter = self._rate_limiter
+        self._rate_limiter = None
+        self._owns_rate_limiter = False
+        close = getattr(limiter, "aclose", None)
+        if close is not None:
+            await close()
 
     async def _request_json(
         self,

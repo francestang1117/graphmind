@@ -299,19 +299,30 @@ def test_pubmed_provider_accepts_an_official_external_dtd_declaration() -> None:
     assert warnings == []
 
 
-def test_multiple_provider_instances_share_the_default_global_limiter(monkeypatch) -> None:
+def test_each_search_gets_a_fresh_default_limiter(monkeypatch) -> None:
     class RecordingLimiter:
         def __init__(self) -> None:
             self.calls: list[bool] = []
+            self.closed = False
 
         async def acquire(self, *, has_api_key: bool = False) -> None:
             self.calls.append(has_api_key)
 
+        async def aclose(self) -> None:
+            self.closed = True
+
     limiter = RecordingLimiter()
+    limiters = [limiter]
+
+    def make_limiter() -> RecordingLimiter:
+        if limiters[0] is limiter and limiter.calls:
+            limiters.append(RecordingLimiter())
+        return limiters[-1]
+
     monkeypatch.setattr(
         pubmed_provider_module,
         "get_pubmed_rate_limiter",
-        lambda: limiter,
+        make_limiter,
     )
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -321,15 +332,10 @@ def test_multiple_provider_instances_share_the_default_global_limiter(monkeypatc
             request=request,
         )
 
-    async def run() -> None:
-        providers = [
-            PubMedProvider(
-                transport=httpx.MockTransport(handler),
-            )
-            for _ in range(2)
-        ]
-        await asyncio.gather(*(provider.search(_query()) for provider in providers))
+    provider = PubMedProvider(transport=httpx.MockTransport(handler))
+    asyncio.run(provider.search(_query()))
+    asyncio.run(provider.search(_query()))
 
-    asyncio.run(run())
-
-    assert limiter.calls == [False, False]
+    assert len(limiters) == 2
+    assert [item.calls for item in limiters] == [[False], [False]]
+    assert all(item.closed for item in limiters)

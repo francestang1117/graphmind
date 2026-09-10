@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+import inspect
 import logging
 import time
 from typing import Any
@@ -93,9 +94,11 @@ class PubMedRateLimiter:
         self.wall_clock = wall_clock
         self.monotonic_clock = monotonic_clock
         self.redis_key = "graphmind:pubmed:rate:v1"
-        self._redis_unavailable = False
+        self._redis_is_owned = redis_client is None
+        self._redis_client_loop: asyncio.AbstractEventLoop | None = None
         self._warned_fallback = False
-        self._local_lock = asyncio.Lock()
+        self._local_lock: asyncio.Lock | None = None
+        self._local_lock_loop: asyncio.AbstractEventLoop | None = None
         self._last_local_request_at = 0.0
 
     async def acquire(self, *, has_api_key: bool = False) -> None:
@@ -121,8 +124,7 @@ class PubMedRateLimiter:
                         return
                     await self.sleep(min(max(wait_for, 0.01), 10.0))
             except Exception as exc:
-                self.redis_client = None
-                self._redis_unavailable = True
+                await self._discard_redis_client()
                 if self.strict:
                     raise PubMedRateLimitUnavailable from exc
 
@@ -134,9 +136,17 @@ class PubMedRateLimiter:
         await self._acquire_local(rate)
 
     async def _get_redis_client(self) -> Any | None:
+        if self.redis_client is not None and not self._redis_is_owned:
+            return self.redis_client
+
+        current_loop = asyncio.get_running_loop()
+        if self.redis_client is not None and self._redis_client_loop is not current_loop:
+            # An async Redis client must not survive the asyncio.run() call
+            # used by the short-lived Celery task event loop.
+            await self._discard_redis_client(close=False)
         if self.redis_client is not None:
             return self.redis_client
-        if self._redis_unavailable:
+        if not self._redis_is_owned:
             return None
         try:
             import redis.asyncio as aioredis
@@ -147,13 +157,37 @@ class PubMedRateLimiter:
                 socket_connect_timeout=0.5,
                 socket_timeout=0.5,
             )
+            self._redis_client_loop = current_loop
         except Exception:
-            self._redis_unavailable = True
             return None
         return self.redis_client
 
+    async def _discard_redis_client(self, *, close: bool = True) -> None:
+        client = self.redis_client
+        self.redis_client = None
+        self._redis_client_loop = None
+        if not close or not self._redis_is_owned or client is None:
+            return
+        close_method = getattr(client, "aclose", None)
+        if close_method is None:
+            return
+        try:
+            result = close_method()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            log.debug("Unable to close the PubMed Redis client", exc_info=True)
+
+    async def aclose(self) -> None:
+        """Close the event-loop-bound Redis client owned by this limiter."""
+        await self._discard_redis_client()
+
     async def _acquire_local(self, rate: int) -> None:
         interval = 1.0 / max(1, rate)
+        current_loop = asyncio.get_running_loop()
+        if self._local_lock is None or self._local_lock_loop is not current_loop:
+            self._local_lock = asyncio.Lock()
+            self._local_lock_loop = current_loop
         async with self._local_lock:
             now = self.monotonic_clock()
             wait_for = interval - (now - self._last_local_request_at)
@@ -171,12 +205,11 @@ def _bucket_result(result: Any) -> tuple[bool, float]:
     return bool(result), 0.0
 
 
-_default_limiter: PubMedRateLimiter | None = None
-
-
 def get_pubmed_rate_limiter() -> PubMedRateLimiter:
-    """Return the process singleton used when a provider has no test override."""
-    global _default_limiter
-    if _default_limiter is None:
-        _default_limiter = PubMedRateLimiter()
-    return _default_limiter
+    """Create a limiter for one provider/search lifecycle.
+
+    The Redis token bucket key is shared across processes. The async client is
+    intentionally not shared in Python, because Celery runs each task through
+    a short-lived event loop.
+    """
+    return PubMedRateLimiter()
