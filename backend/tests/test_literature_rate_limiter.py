@@ -7,6 +7,7 @@ import pytest
 from app.services.medical.literature.rate_limiter import (
     PubMedRateLimitUnavailable,
     PubMedRateLimiter,
+    _bucket_result,
     get_pubmed_rate_limiter,
 )
 
@@ -79,6 +80,15 @@ def test_rate_limiter_fails_closed_when_redis_is_unavailable() -> None:
 
     with pytest.raises(PubMedRateLimitUnavailable):
         asyncio.run(limiter.acquire())
+
+
+@pytest.mark.parametrize(
+    "result",
+    [None, [1], [2, 0], [0, "not-a-number"], [0, float("nan")]],
+)
+def test_bucket_result_rejects_malformed_redis_responses(result: object) -> None:
+    with pytest.raises(ValueError):
+        _bucket_result(result)
 
 
 def test_default_limiter_factory_does_not_share_an_async_client() -> None:

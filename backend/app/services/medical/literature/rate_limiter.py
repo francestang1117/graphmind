@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 import inspect
 import logging
+import math
 import time
 from typing import Any
 
@@ -199,12 +200,16 @@ class PubMedRateLimiter:
 
 
 def _bucket_result(result: Any) -> tuple[bool, float]:
-    if isinstance(result, (list, tuple)) and len(result) >= 2:
-        try:
-            return bool(int(result[0])), max(0.0, float(result[1]))
-        except (TypeError, ValueError):
-            return False, 1.0
-    return bool(result), 0.0
+    if not isinstance(result, (list, tuple)) or len(result) != 2:
+        raise ValueError("Unexpected PubMed rate-limit response shape")
+    try:
+        granted = int(result[0])
+        wait_for_ms = float(result[1])
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Non-numeric PubMed rate-limit response") from exc
+    if granted not in (0, 1) or not math.isfinite(wait_for_ms) or wait_for_ms < 0:
+        raise ValueError("Invalid PubMed rate-limit response values")
+    return bool(granted), wait_for_ms
 
 
 def get_pubmed_rate_limiter() -> PubMedRateLimiter:

@@ -1642,11 +1642,13 @@ while reading.
 
 Each search creates and closes its own Redis client, so a short-lived
 `asyncio.run()` event loop cannot be reused by a later worker task. Client
-failures can be retried instead of permanently poisoning the process. The
-Redis-backed token bucket remains shared by API processes and Celery workers;
-outside development and test, loss of Redis coordination fails the search and
-startup rejects attempts to disable either the limiter or its Redis requirement.
+failures can be retried instead of permanently poisoning the process. Malformed
+token-bucket responses fail closed instead of being treated as a near-zero
+wait. The Redis-backed token bucket remains shared by API processes and Celery
+workers; outside development and test, loss of Redis coordination fails the
+search and startup rejects attempts to disable either the limiter or its Redis
+requirement.
 The DOI and journal storage limits now match the normalized metadata model, and
 the newest sort uses the official `pub_date` value. The local backend suite is
-now `368 passed, 3 skipped`; PostgreSQL migration and row-lock checks remain
+now `373 passed, 3 skipped`; PostgreSQL migration and row-lock checks remain
 conditional on `GRAPHMIND_TEST_POSTGRES_URL`.

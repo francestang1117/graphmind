@@ -58,7 +58,7 @@ provide a diagnosis or treatment recommendation.
 - Privacy-bounded PubMed search with query preview, explicit confirmation,
   normalized metadata, retraction/correction flags, scoped caching, worker
   leases, and Redis-coordinated request pacing
-- 368 backend tests covering the current core modules
+- 373 backend tests covering the current core modules
 
 ## Project Status
 
