@@ -12,6 +12,30 @@ from app.services.medical.terminology.loader import DiseaseOntology, DiseaseOnto
 
 RESOURCE_DIR = Path(__file__).resolve().parents[1] / "app/services/medical/terminology/resources"
 
+EXPECTED_MESH_NAMES = {
+    "mesh:D000544": "Alzheimer Disease",
+    "mesh:D000690": "Amyotrophic Lateral Sclerosis",
+    "mesh:D000795": "Fabry disease",
+    "mesh:D001943": "Breast Neoplasms",
+    "mesh:D003920": "Diabetes Mellitus",
+    "mesh:D004675": "Encephalitis",
+    "mesh:D005776": "Gaucher disease",
+    "mesh:D005901": "Glaucoma",
+    "mesh:D006073": "Gout",
+    "mesh:D006816": "Huntington Disease",
+    "mesh:D006973": "Hypertension",
+    "mesh:D008113": "Liver cancer",
+    "mesh:D008175": "Lung Neoplasms",
+    "mesh:D008457": "Measles",
+    "mesh:D008545": "Melanoma",
+    "mesh:D009136": "Muscular Dystrophies",
+    "mesh:D010300": "Parkinson Disease",
+    "mesh:D012507": "Sarcoidosis",
+    "mesh:D013274": "Stomach cancer",
+    "mesh:D020388": "Duchenne Muscular Dystrophy",
+    "mesh:D035583": "Rare Diseases",
+}
+
 
 def test_default_ontology_has_versioned_integrity_metadata() -> None:
     ontology = DiseaseOntology.from_directory(RESOURCE_DIR)
@@ -21,6 +45,17 @@ def test_default_ontology_has_versioned_integrity_metadata() -> None:
     assert ontology.manifest.alias_count == sum(len(item.aliases) for item in ontology.concepts)
     assert ontology.data_sha256 == ontology.manifest.sha256
     assert ontology.get("mesh:D006816").preferred_name_zh == "亨廷顿病"
+
+
+def test_default_seed_has_reviewed_mesh_id_name_pairs() -> None:
+    ontology = DiseaseOntology.from_directory(RESOURCE_DIR)
+
+    assert {
+        concept.concept_id: concept.preferred_name_en
+        for concept in ontology.concepts
+    } == EXPECTED_MESH_NAMES
+    assert ontology.get("mesh:D000795").mesh_id == "D000795"
+    assert ontology.get("mesh:D005776").mesh_id == "D005776"
 
 
 def test_checksum_mismatch_rejects_the_package(tmp_path) -> None:

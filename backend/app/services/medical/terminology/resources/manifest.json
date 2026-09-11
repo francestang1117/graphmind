@@ -1,21 +1,29 @@
 {
   "schema_version": 1,
-  "ontology_version": "curated-seed-2026.09.1",
+  "ontology_version": "curated-seed-2026.09.2",
   "mesh_release": "seed",
   "orphanet_release": "",
   "generated_at": "2026-09-12T00:00:00Z",
   "data_file": "disease_concepts.jsonl.gz",
   "record_count": 21,
-  "alias_count": 54,
-  "sha256": "94b156d41182d1af369304a112f642c7b39bd6dabfa0f187bde09138011f148e",
+  "alias_count": 57,
+  "sha256": "9544f9bfb92e065bd642f73cb0a5f369fd3faf26f7eed7c8d77d8715d3ac6285",
   "sources": [
     {
-      "name": "GraphMind curated seed",
-      "license_url": "https://github.com/francestang1117/graphmind"
+      "name": "GraphMind curated aliases",
+      "source_url": "https://github.com/francestang1117/graphmind/blob/main/backend/data/curated_zh_disease_aliases.yaml",
+      "license_url": "https://github.com/francestang1117/graphmind",
+      "release": "curated",
+      "file_sha256": "47684f73958bc7f6e859521a5a7cab7a751c2b0207385448f558b12d5faabf9b",
+      "file_name": "curated_zh_disease_aliases.yaml"
     },
     {
-      "name": "MeSH terminology reference",
-      "license_url": "https://www.ncbi.nlm.nih.gov/mesh/"
+      "name": "GraphMind curated disease seed",
+      "source_url": "https://github.com/francestang1117/graphmind/blob/main/backend/data/curated_disease_concepts.jsonl",
+      "license_url": "https://github.com/francestang1117/graphmind",
+      "release": "curated",
+      "file_sha256": "a53ea22ef68010f92446d291f1b9e3c46dc7166be93972c60335e38ed050b798",
+      "file_name": "curated_disease_concepts.jsonl"
     }
   ]
 }

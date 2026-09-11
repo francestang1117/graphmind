@@ -1678,8 +1678,27 @@ replay the same query contract after a restart. Existing symptom, gene, and
 drug rules remain available as the legacy non-disease boundary.
 
 `backend/scripts/build_disease_ontology.py` builds the package only from local
-operator-supplied MeSH/Orphanet files and curated aliases. It sorts records,
-uses fixed gzip parameters, writes a checksum manifest, and validates the
-result before reporting success. The PR8 local suite covers package integrity,
-deterministic builds, exact matching, privacy, ambiguity confirmation, API
-selection, migration, and worker restoration.
+operator-supplied MeSH/Orphanet files, the checked-in curated seed, and curated
+aliases. MeSH XML is restricted to Descriptor Records with a `C...` TreeNumber;
+Orphadata XML reads the standard child `OrphaCode` element and its synonyms.
+Each explicit input must produce at least one usable record. The builder sorts
+records, uses fixed gzip parameters, writes per-input file names and SHA-256
+digests alongside source URL/release/license metadata, and validates the result
+before reporting success. The checked-in package can be rebuilt with:
+
+```bash
+PYTHONPATH=backend .venv/bin/python backend/scripts/build_disease_ontology.py \
+  --curated-seed backend/data/curated_disease_concepts.jsonl \
+  --zh-aliases backend/data/curated_zh_disease_aliases.yaml \
+  --output backend/app/services/medical/terminology/resources \
+  --ontology-version curated-seed-2026.09.2 \
+  --mesh-release seed \
+  --generated-at 2026-09-12T00:00:00Z
+```
+
+The PR8 local suite covers package integrity, official MeSH ID golden pairs,
+deterministic builds, real-shaped MeSH and Orphadata XML, exact matching,
+privacy, ambiguity confirmation, API selection, migration, and worker
+restoration. The backend suite is now `405 passed, 3 skipped`; the remaining
+skips are environment-dependent PostgreSQL checks when no test database URL is
+configured.

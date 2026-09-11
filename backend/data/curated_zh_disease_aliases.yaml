@@ -1,7 +1,7 @@
 # Human-reviewed aliases are deliberately separate from the generated data.
 # Do not place patient text or free-form user queries in this file.
 concepts:
-  - concept_id: mesh:D005205
+  - concept_id: mesh:D000795
     preferred_name_en: Fabry disease
     preferred_name_zh: 法布雷病
     aliases:

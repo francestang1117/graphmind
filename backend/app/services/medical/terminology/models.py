@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -67,6 +68,17 @@ class OntologySource(BaseModel):
 
     name: str = Field(min_length=1, max_length=120)
     license_url: str = Field(min_length=1, max_length=512)
+    source_url: str = Field(default="", max_length=512)
+    release: str = Field(default="", max_length=64)
+    file_sha256: str = Field(default="", max_length=64)
+    file_name: str = Field(default="", max_length=255)
+
+    @field_validator("file_sha256")
+    @classmethod
+    def validate_file_sha256(cls, value: str) -> str:
+        if value and not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+            raise ValueError("source file checksum must be a SHA-256 digest")
+        return value
 
 
 class OntologyManifest(BaseModel):

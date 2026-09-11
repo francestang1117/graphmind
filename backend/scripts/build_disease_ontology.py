@@ -33,6 +33,28 @@ from app.services.medical.terminology.pubmed_mapper import pubmed_terms_for_conc
 DEFAULT_GENERATED_AT = "1970-01-01T00:00:00Z"
 DEFAULT_DATA_FILE = "disease_concepts.jsonl.gz"
 DEFAULT_LICENSE_URL = "https://github.com/francestang1117/graphmind"
+_SOURCE_METADATA = {
+    "mesh": {
+        "name": "MeSH Descriptor Records",
+        "source_url": "https://www.nlm.nih.gov/mesh/download_data.html",
+        "license_url": "https://www.nlm.nih.gov/databases/download/terms_and_conditions.html",
+    },
+    "orphanet": {
+        "name": "Orphadata",
+        "source_url": "https://www.orphadata.com/",
+        "license_url": "https://www.orphadata.com/",
+    },
+    "curated_seed": {
+        "name": "GraphMind curated disease seed",
+        "source_url": "https://github.com/francestang1117/graphmind/blob/main/backend/data/curated_disease_concepts.jsonl",
+        "license_url": DEFAULT_LICENSE_URL,
+    },
+    "curated_aliases": {
+        "name": "GraphMind curated aliases",
+        "source_url": "https://github.com/francestang1117/graphmind/blob/main/backend/data/curated_zh_disease_aliases.yaml",
+        "license_url": DEFAULT_LICENSE_URL,
+    },
+}
 _SHORT_ALIAS = re.compile(r"^[A-Za-z][A-Za-z0-9-]{1,7}$")
 
 
@@ -56,6 +78,7 @@ def build_ontology(
     output: str | Path,
     mesh_file: str | Path | None = None,
     orphanet_file: str | Path | None = None,
+    curated_seed_file: str | Path | None = None,
     zh_aliases: str | Path | None = None,
     ontology_version: str = "local-build-1",
     mesh_release: str = "",
@@ -64,20 +87,36 @@ def build_ontology(
 ) -> dict[str, Any]:
     """Build, validate, and return a summary for one ontology package."""
     drafts: dict[str, _ConceptDraft] = {}
-    source_paths: list[Path] = []
+    source_specs: list[tuple[Path, str]] = []
 
     if mesh_file:
         path = Path(mesh_file).expanduser().resolve()
-        source_paths.append(path)
-        _load_source_file(path, drafts, source_kind="mesh")
+        source_specs.append((path, "mesh"))
+        _require_source_records(
+            _load_source_file(path, drafts, source_kind="mesh"),
+            "MeSH",
+        )
     if orphanet_file:
         path = Path(orphanet_file).expanduser().resolve()
-        source_paths.append(path)
-        _load_source_file(path, drafts, source_kind="orphanet")
+        source_specs.append((path, "orphanet"))
+        _require_source_records(
+            _load_source_file(path, drafts, source_kind="orphanet"),
+            "Orphanet",
+        )
+    if curated_seed_file:
+        path = Path(curated_seed_file).expanduser().resolve()
+        source_specs.append((path, "curated_seed"))
+        _require_source_records(
+            _load_source_file(path, drafts, source_kind="curated_seed"),
+            "curated seed",
+        )
     if zh_aliases:
         path = Path(zh_aliases).expanduser().resolve()
-        source_paths.append(path)
-        _load_curated_aliases(path, drafts)
+        source_specs.append((path, "curated_aliases"))
+        _require_source_records(
+            _load_curated_aliases(path, drafts),
+            "curated aliases",
+        )
 
     if not drafts:
         raise ValueError("at least one local ontology source file is required")
@@ -103,7 +142,11 @@ def build_ontology(
         "record_count": len(concepts),
         "alias_count": sum(len(item.aliases) for item in concepts),
         "sha256": digest,
-        "sources": _source_manifest(source_paths),
+        "sources": _source_manifest(
+            source_specs,
+            mesh_release=mesh_release,
+            orphanet_release=orphanet_release,
+        ),
     }
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
@@ -118,16 +161,16 @@ def _load_source_file(
     drafts: dict[str, _ConceptDraft],
     *,
     source_kind: str,
-) -> None:
+) -> int:
     if not path.is_file():
         raise ValueError(f"ontology source does not exist: {path}")
     suffix = path.suffix.casefold()
     if suffix == ".xml":
         if source_kind == "mesh":
-            _load_mesh_xml(path, drafts)
-        else:
-            _load_orphanet_xml(path, drafts)
-        return
+            return _load_mesh_xml(path, drafts)
+        if source_kind == "orphanet":
+            return _load_orphanet_xml(path, drafts)
+        raise ValueError(f"{source_kind} sources do not support XML")
     if suffix in {".yaml", ".yml"}:
         values = yaml.safe_load(path.read_text(encoding="utf-8"))
     elif suffix == ".json":
@@ -138,14 +181,17 @@ def _load_source_file(
             for line in path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-    for value in _as_records(values):
+    records = _as_records(values)
+    for value in records:
         _merge_record(drafts, value, default_source=source_kind)
+    return len(records)
 
 
-def _load_curated_aliases(path: Path, drafts: dict[str, _ConceptDraft]) -> None:
+def _load_curated_aliases(path: Path, drafts: dict[str, _ConceptDraft]) -> int:
     values = yaml.safe_load(path.read_text(encoding="utf-8"))
     records = values.get("concepts", values) if isinstance(values, dict) else values
-    for value in _as_records(records):
+    values = _as_records(records)
+    for value in values:
         if not isinstance(value, dict):
             raise ValueError("curated aliases must contain object records")
         concept_id = str(value.get("concept_id") or "").strip()
@@ -153,22 +199,36 @@ def _load_curated_aliases(path: Path, drafts: dict[str, _ConceptDraft]) -> None:
             raise ValueError("curated alias record is missing concept_id")
         draft = drafts.setdefault(concept_id, _ConceptDraft(concept_id))
         if value.get("preferred_name_en"):
-            draft.preferred_name_en = str(value["preferred_name_en"]).strip()
+            preferred_name_en = str(value["preferred_name_en"]).strip()
+            if (
+                draft.preferred_name_en
+                and normalize_terminology_text(draft.preferred_name_en)
+                != normalize_terminology_text(preferred_name_en)
+            ):
+                raise ValueError(
+                    f"curated preferred name conflicts for {concept_id}"
+                )
+            draft.preferred_name_en = draft.preferred_name_en or preferred_name_en
         if value.get("preferred_name_zh"):
             draft.preferred_name_zh = str(value["preferred_name_zh"]).strip()
         for alias in value.get("aliases", []):
             draft.aliases.append(_alias_value(alias, source="curated"))
+    return len(values)
 
 
-def _load_mesh_xml(path: Path, drafts: dict[str, _ConceptDraft]) -> None:
+def _load_mesh_xml(path: Path, drafts: dict[str, _ConceptDraft]) -> int:
     root = ET.parse(path).getroot()
+    accepted = 0
     for record in root.iter():
         if _local_name(record.tag) != "DescriptorRecord":
+            continue
+        if not _is_mesh_disease_record(record):
             continue
         mesh_id = _first_text(record, "DescriptorUI")
         preferred = _first_text(record, "DescriptorName", "String")
         if not mesh_id or not preferred:
             continue
+        accepted += 1
         concept_id = f"mesh:{mesh_id}"
         draft = drafts.setdefault(concept_id, _ConceptDraft(concept_id))
         draft.mesh_id = mesh_id
@@ -180,17 +240,22 @@ def _load_mesh_xml(path: Path, drafts: dict[str, _ConceptDraft]) -> None:
             value = _first_text(term, "String")
             if value and normalize_terminology_text(value) != normalize_terminology_text(preferred):
                 draft.aliases.append(_alias_value(value, language="en", alias_type="synonym", source="mesh"))
+    return accepted
 
 
-def _load_orphanet_xml(path: Path, drafts: dict[str, _ConceptDraft]) -> None:
+def _load_orphanet_xml(path: Path, drafts: dict[str, _ConceptDraft]) -> int:
     root = ET.parse(path).getroot()
+    accepted = 0
     for record in root.iter():
         if _local_name(record.tag) != "Disorder":
             continue
-        code = str(record.attrib.get("orphaCode") or "").strip()
+        code = _first_text(record, "OrphaCode") or str(
+            record.attrib.get("orphaCode") or ""
+        ).strip()
         preferred = _first_text(record, "Name")
         if not code or not preferred:
             continue
+        accepted += 1
         concept_id = f"orpha:{code}"
         draft = drafts.setdefault(concept_id, _ConceptDraft(concept_id))
         draft.orpha_code = code
@@ -199,9 +264,19 @@ def _load_orphanet_xml(path: Path, drafts: dict[str, _ConceptDraft]) -> None:
         for synonym in record.iter():
             if _local_name(synonym.tag) != "Synonym":
                 continue
-            value = _first_text(synonym, "")
+            value = _first_text(synonym)
             if value:
                 draft.aliases.append(_alias_value(value, language="en", alias_type="synonym", source="orphanet"))
+    return accepted
+
+
+def _is_mesh_disease_record(record: ET.Element) -> bool:
+    """Keep Descriptor Records under the MeSH Diseases tree only."""
+    return any(
+        "".join(element.itertext()).strip().startswith("C")
+        for element in record.iter()
+        if _local_name(element.tag) == "TreeNumber"
+    )
 
 
 def _finalize_concepts(drafts: dict[str, _ConceptDraft]) -> tuple[DiseaseConcept, ...]:
@@ -288,9 +363,17 @@ def _merge_record(
     draft = drafts.setdefault(concept_id, _ConceptDraft(concept_id))
     draft.mesh_id = draft.mesh_id or mesh_id
     draft.orpha_code = draft.orpha_code or orpha_code
-    draft.preferred_name_en = str(
-        value.get("preferred_name_en") or value.get("name") or draft.preferred_name_en
+    incoming_preferred_name = str(
+        value.get("preferred_name_en") or value.get("name") or ""
     ).strip()
+    if incoming_preferred_name:
+        if (
+            draft.preferred_name_en
+            and normalize_terminology_text(draft.preferred_name_en)
+            != normalize_terminology_text(incoming_preferred_name)
+        ):
+            raise ValueError(f"preferred name conflicts for {concept_id}")
+        draft.preferred_name_en = draft.preferred_name_en or incoming_preferred_name
     draft.preferred_name_zh = str(value.get("preferred_name_zh") or draft.preferred_name_zh).strip()
     if value.get("pubmed_terms"):
         draft.pubmed_terms = [str(item) for item in value["pubmed_terms"]]
@@ -402,21 +485,64 @@ def _gzip_deterministically(data: bytes) -> bytes:
     return output.getvalue()
 
 
-def _source_manifest(paths: Iterable[Path]) -> list[dict[str, str]]:
-    values = [
+def _require_source_records(count: int, source_name: str) -> None:
+    if count <= 0:
+        raise ValueError(f"{source_name} source produced no usable records")
+
+
+def _source_manifest(
+    specs: Iterable[tuple[Path, str]],
+    *,
+    mesh_release: str,
+    orphanet_release: str,
+) -> list[dict[str, str]]:
+    values: list[dict[str, str]] = []
+    for path, source_kind in sorted(specs, key=lambda item: (item[1], item[0].name)):
+        metadata = _SOURCE_METADATA.get(
+            source_kind,
+            {
+                "name": source_kind,
+                "source_url": "",
+                "license_url": DEFAULT_LICENSE_URL,
+            },
+        )
+        release = {
+            "mesh": mesh_release,
+            "orphanet": orphanet_release,
+            "curated_seed": "curated",
+            "curated_aliases": "curated",
+        }.get(source_kind, "")
+        values.append(
+            {
+                "name": metadata["name"],
+                "source_url": metadata["source_url"],
+                "license_url": metadata["license_url"],
+                "release": release,
+                "file_sha256": _sha256_file(path),
+                "file_name": path.name,
+            }
+        )
+    return values or [
         {
-            "name": path.name,
+            "name": "GraphMind curated input",
+            "source_url": "",
             "license_url": DEFAULT_LICENSE_URL,
+            "release": "curated",
+            "file_sha256": "",
+            "file_name": "",
         }
-        for path in sorted(paths, key=lambda item: item.name)
     ]
-    return values or [{"name": "GraphMind curated input", "license_url": DEFAULT_LICENSE_URL}]
+
+
+def _sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mesh-file", type=Path)
     parser.add_argument("--orphanet-file", type=Path)
+    parser.add_argument("--curated-seed", type=Path)
     parser.add_argument("--zh-aliases", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--ontology-version", default="local-build-1")
@@ -432,6 +558,7 @@ def main() -> int:
         output=args.output,
         mesh_file=args.mesh_file,
         orphanet_file=args.orphanet_file,
+        curated_seed_file=args.curated_seed,
         zh_aliases=args.zh_aliases,
         ontology_version=args.ontology_version,
         mesh_release=args.mesh_release,

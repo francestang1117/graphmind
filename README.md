@@ -59,8 +59,9 @@ provide a diagnosis or treatment recommendation.
   normalized metadata, retraction/correction flags, scoped caching, worker
   leases, and Redis-coordinated request pacing
 - Versioned local disease ontology with exact alias matching, privacy-bounded
-  Chinese disease handling, and explicit confirmation for ambiguous aliases
-- 399 backend tests covering the current core modules
+  Chinese disease handling, explicit confirmation for ambiguous aliases, and
+  auditable MeSH/curated source checksums
+- 405 backend tests covering the current core modules
 
 ## Project Status
 
@@ -219,6 +220,22 @@ Current backend coverage includes upload validation/storage, parsers, entity
 extraction, graph/search/chat pipeline pieces, auth, rate limiting, Sentry,
 metrics, WebSocket progress, job history, cleanup behavior, and the PubMed
 query/provider/persistence boundaries.
+
+Rebuild the checked-in local disease package from its reviewable seed inputs:
+
+```bash
+PYTHONPATH=backend .venv/bin/python backend/scripts/build_disease_ontology.py \
+  --curated-seed backend/data/curated_disease_concepts.jsonl \
+  --zh-aliases backend/data/curated_zh_disease_aliases.yaml \
+  --output backend/app/services/medical/terminology/resources \
+  --ontology-version curated-seed-2026.09.2 \
+  --mesh-release seed \
+  --generated-at 2026-09-12T00:00:00Z
+```
+
+The builder is offline. Every explicit input must produce at least one usable
+record; the output manifest records each input file name and SHA-256 together
+with its source URL, release, and license URL.
 
 Build the frontend:
 
