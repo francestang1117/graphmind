@@ -7,10 +7,19 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from collections.abc import Iterable
 
 from app.services.medical.literature.exceptions import LiteratureQueryError
 from app.services.medical.literature.models import DetectedConcept, LiteratureQuery, LiteratureSort
 from app.services.medical.literature.normalizer import clean_text
+from app.services.medical.terminology import (
+    ConceptSelection,
+    DiseaseOntology,
+    DiseaseMatchError,
+    DiseaseMatcher,
+    get_default_ontology,
+)
+from app.services.medical.terminology.normalizer import normalize_match_text
 
 
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
@@ -27,36 +36,10 @@ _LAB_OR_RECORD_ID = re.compile(
     r")"
     r")"
 )
-
-_STOP_WORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "can",
-    "does",
-    "for",
-    "from",
-    "have",
-    "how",
-    "is",
-    "new",
-    "of",
-    "on",
-    "or",
-    "research",
-    "treatment",
-    "treatments",
-    "therapy",
-    "therapies",
-    "medication",
-    "medications",
-    "the",
-    "this",
-    "what",
-    "with",
-}
-
+_UNRESOLVED_CJK_DISEASE = re.compile(
+    r"[\u3400-\u4dbf\u4e00-\u9fff]{1,24}"
+    r"(?:病|症|癌|炎|瘤|综合征|肌营养不良)"
+)
 
 @dataclass(frozen=True)
 class _ConceptRule:
@@ -67,90 +50,6 @@ class _ConceptRule:
 
 
 _CONCEPT_RULES = (
-    _ConceptRule(
-        "condition",
-        "Fabry disease",
-        ("法布雷病", "fabry disease", "fabry's disease"),
-        ('"Fabry Disease"[MeSH Terms]', '"Fabry disease"[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Diabetes Mellitus",
-        ("糖尿病", "diabetes mellitus", "diabetes"),
-        ('"Diabetes Mellitus"[MeSH Terms]', 'diabetes[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Hypertension",
-        ("高血压", "hypertension"),
-        ('"Hypertension"[MeSH Terms]', 'hypertension[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Alzheimer disease",
-        ("阿尔茨海默病", "阿尔茨海默症", "alzheimer disease", "alzheimer's disease"),
-        ('"Alzheimer Disease"[MeSH Terms]', '"Alzheimer disease"[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Parkinson disease",
-        ("帕金森病", "parkinson disease", "parkinson's disease"),
-        ('"Parkinson Disease"[MeSH Terms]', '"Parkinson disease"[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Breast Cancer",
-        ("乳腺癌", "乳癌", "breast cancer"),
-        ('"Breast Neoplasms"[MeSH Terms]', '"breast cancer"[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Lung Cancer",
-        ("肺癌", "lung cancer"),
-        ('"Lung Neoplasms"[MeSH Terms]', '"lung cancer"[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Rare Disease",
-        ("罕见病", "rare disease", "rare diseases"),
-        ('"Rare Diseases"[MeSH Terms]', '"rare disease"[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Gaucher disease",
-        ("戈谢病", "gaucher disease", "gaucher's disease"),
-        ('"Gaucher Disease"[MeSH Terms]', '"Gaucher disease"[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Stomach cancer",
-        ("胃癌", "stomach cancer", "gastric cancer"),
-        ('"Stomach Neoplasms"[MeSH Terms]', '"gastric cancer"[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Liver cancer",
-        ("肝癌", "liver cancer", "hepatocellular carcinoma"),
-        ('"Liver Neoplasms"[MeSH Terms]', '"liver cancer"[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Encephalitis",
-        ("脑炎", "encephalitis"),
-        ('"Encephalitis"[MeSH Terms]', 'encephalitis[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Measles",
-        ("麻疹", "measles"),
-        ('"Measles"[MeSH Terms]', 'measles[Title/Abstract]'),
-    ),
-    _ConceptRule(
-        "condition",
-        "Gout",
-        ("痛风", "gout"),
-        ('"Gout"[MeSH Terms]', 'gout[Title/Abstract]'),
-    ),
     _ConceptRule(
         "organ_or_symptom",
         "renal function",
@@ -195,63 +94,6 @@ _CONCEPT_RULES = (
     ),
 )
 
-_GENERIC_ENGLISH_DISEASE = re.compile(
-    r"\b([A-Z][A-Za-z0-9-]{2,}(?:\s+[A-Za-z0-9-]{2,}){0,4}\s+"
-    r"(?:disease|syndrome|cancer|carcinoma|leukemia|lymphoma|disorder))\b",
-    re.IGNORECASE,
-)
-_ENGLISH_WORD = re.compile(r"\b[A-Za-z][A-Za-z-]{2,}\b")
-_ENGLISH_DISEASE_MARKERS = {
-    "disease",
-    "syndrome",
-    "cancer",
-    "carcinoma",
-    "leukemia",
-    "lymphoma",
-    "disorder",
-}
-_ENGLISH_DISEASE_CONTEXT_WORDS = {
-    "a",
-    "about",
-    "after",
-    "an",
-    "and",
-    "are",
-    "case",
-    "cases",
-    "cause",
-    "causes",
-    "caused",
-    "causing",
-    "diagnosed",
-    "diagnosis",
-    "does",
-    "for",
-    "from",
-    "had",
-    "has",
-    "have",
-    "history",
-    "in",
-    "is",
-    "known",
-    "new",
-    "of",
-    "on",
-    "patient",
-    "patients",
-    "person",
-    "reported",
-    "research",
-    "study",
-    "suffered",
-    "suffering",
-    "the",
-    "this",
-    "to",
-    "what",
-    "with",
-}
 _STUDY_TYPE_TERMS = {
     "systematic_review": '"Systematic Review"[Publication Type]',
     "systematic review": '"Systematic Review"[Publication Type]',
@@ -272,6 +114,8 @@ _STUDY_TYPE_TERMS = {
 def build_literature_query(
     question: str,
     *,
+    ontology: DiseaseOntology | None = None,
+    concept_selections: Iterable[ConceptSelection] | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
     study_types: list[str] | None = None,
@@ -279,7 +123,12 @@ def build_literature_query(
     max_results: int = 20,
     provider: str = "pubmed",
 ) -> LiteratureQuery:
-    """Extract safe concepts and return the exact query shown for confirmation."""
+    """Extract safe concepts and return the exact query shown for confirmation.
+
+    Disease aliases are resolved locally before any PubMed clause is built.
+    Ambiguous aliases return a previewable query object without an external
+    query or fingerprint until the user selects a candidate.
+    """
     raw_question = str(question or "").strip()
     if not raw_question:
         raise LiteratureQueryError(
@@ -308,15 +157,61 @@ def build_literature_query(
         )
 
     sanitized_question, _redactions = redact_sensitive_text(raw_question)
-    concepts = _extract_concepts(sanitized_question)
-    if not concepts:
+    if ontology is None:
+        try:
+            ontology = get_default_ontology()
+        except Exception as exc:
+            raise LiteratureQueryError(
+                "The local disease ontology is unavailable.",
+                code="literature_ontology_unavailable",
+            ) from exc
+    selections = tuple(concept_selections or ())
+    try:
+        resolution = DiseaseMatcher(ontology).resolve(sanitized_question, selections)
+    except DiseaseMatchError as exc:
+        raise LiteratureQueryError(
+            "The selected disease concept is not valid for this question.",
+            code="literature_invalid_concept_selection",
+        ) from exc
+    if _has_unresolved_cjk_disease(sanitized_question, resolution.matches):
+        raise LiteratureQueryError(
+            "No medical concepts could be identified in the question.",
+            code="literature_no_medical_concepts",
+        )
+    concepts = _ontology_detected_concepts(resolution.matches, selections, ontology)
+    concepts.extend(_extract_concepts(sanitized_question))
+    if not concepts and not resolution.unresolved_matches:
         raise LiteratureQueryError(
             "No medical concepts could be identified in the question.",
             code="literature_no_medical_concepts",
         )
 
     normalized_types = _normalize_study_types(study_types or [])
-    clauses = [_concept_clause(concept) for concept in concepts]
+    selected_concept_ids = [
+        concept.concept_id
+        for concept in concepts
+        if concept.concept_id and concept.source == "local_ontology"
+    ]
+    selected_concept_ids = list(dict.fromkeys(selected_concept_ids))
+    if resolution.unresolved_matches:
+        return LiteratureQuery(
+            question=sanitized_question,
+            sanitized_question=sanitized_question,
+            redacted_fields=_redactions,
+            detected_concepts=concepts,
+            resolution_status="needs_confirmation",
+            ambiguous_concepts=list(resolution.unresolved_matches),
+            ontology_version=ontology.version,
+            selected_concept_ids=selected_concept_ids,
+            date_from=date_from,
+            date_to=date_to,
+            study_types=normalized_types,
+            sort=sort,
+            max_results=int(max_results),
+            provider=provider,
+        )
+
+    clauses = [_concept_clause(concept, ontology=ontology) for concept in concepts]
     clauses.extend(_STUDY_TYPE_TERMS[item] for item in normalized_types)
     if date_from or date_to:
         clauses.append(_date_clause(date_from, date_to))
@@ -329,6 +224,8 @@ def build_literature_query(
         study_types=normalized_types,
         sort=sort,
         max_results=int(max_results),
+        ontology_version=ontology.version,
+        selected_concept_ids=selected_concept_ids,
     )
     return LiteratureQuery(
         question=sanitized_question,
@@ -342,6 +239,8 @@ def build_literature_query(
         sort=sort,
         max_results=int(max_results),
         provider=provider,
+        ontology_version=ontology.version,
+        selected_concept_ids=selected_concept_ids,
         query_hash=fingerprint,
     )
 
@@ -365,11 +264,15 @@ def redact_sensitive_text(text: str) -> tuple[str, list[str]]:
 
 
 def _extract_concepts(question: str) -> list[DetectedConcept]:
+    """Extract only the non-disease rules retained for the legacy boundary."""
     concepts: list[DetectedConcept] = []
     seen: set[str] = set()
-    occupied_spans: list[tuple[int, int]] = []
 
-    for rule in sorted(_CONCEPT_RULES, key=lambda item: max(map(len, item.aliases)), reverse=True):
+    for rule in sorted(
+        (item for item in _CONCEPT_RULES if item.concept_type != "condition"),
+        key=lambda item: max(map(len, item.aliases)),
+        reverse=True,
+    ):
         if rule.normalized in seen:
             continue
         for alias in rule.aliases:
@@ -380,62 +283,62 @@ def _extract_concepts(question: str) -> list[DetectedConcept]:
                         type=rule.concept_type,
                         original=question[match.start() : match.end()],
                         normalized=rule.normalized,
+                        source="legacy_rule",
+                        matched_alias=alias,
+                        match_type="exact",
                     )
                 )
                 seen.add(rule.normalized)
-                occupied_spans.append((match.start(), match.end()))
-                break
-
-    for pattern in (_GENERIC_ENGLISH_DISEASE,):
-        for match in pattern.finditer(question):
-            raw_value = clean_text(match.group(0))
-            term_start = match.start()
-            term_end = match.end()
-            value = _safe_english_disease_term(raw_value)
-            if not value:
-                continue
-            normalized = value
-            overlaps_known = any(
-                term_start < end and term_end > start
-                for start, end in occupied_spans
-            )
-            if (
-                overlaps_known
-                or normalized.casefold() in seen
-                or len(value) > 120
-                or any(word.casefold() in _STOP_WORDS for word in value.split())
-            ):
-                continue
-            concepts.append(
-                DetectedConcept(
-                    type="condition",
-                    original=value,
-                    normalized=normalized,
-                )
-            )
-            seen.add(normalized.casefold())
-            occupied_spans.append((term_start, term_end))
-
-    # Keep the fallback English-only. Unrecognized Chinese text is not safe to
-    # infer from because a name and a disease can be adjacent without spaces.
-    if not concepts:
-        for token in _ENGLISH_WORD.findall(question):
-            normalized = clean_text(token)
-            if normalized.casefold() in _STOP_WORDS or len(normalized) < 2:
-                continue
-            if not _looks_medical(normalized):
-                continue
-            key = normalized.casefold()
-            if key in seen:
-                continue
-            concepts.append(
-                DetectedConcept(type="keyword", original=normalized, normalized=normalized)
-            )
-            seen.add(key)
-            if len(concepts) == 5:
                 break
 
     return concepts[:8]
+
+
+def _ontology_detected_concepts(
+    matches: Iterable,
+    selections: Iterable[ConceptSelection],
+    ontology: DiseaseOntology,
+) -> list[DetectedConcept]:
+    selection_map = {selection.match_id: selection.concept_id for selection in selections}
+    concepts: list[DetectedConcept] = []
+    seen: set[str] = set()
+    for match in matches:
+        if match.status == "needs_confirmation":
+            selected_id = selection_map.get(match.match_id)
+            if selected_id is None:
+                continue
+        else:
+            selected_id = match.candidates[0].concept_id
+        candidate = next(
+            (item for item in match.candidates if item.concept_id == selected_id),
+            None,
+        )
+        concept = ontology.get(selected_id)
+        if candidate is None or concept is None or concept.concept_id in seen:
+            continue
+        concepts.append(
+            DetectedConcept(
+                type="condition",
+                original=match.matched_text,
+                normalized=concept.preferred_name_en,
+                concept_id=concept.concept_id,
+                source="local_ontology",
+                source_code=concept.mesh_id or concept.orpha_code or concept.concept_id,
+                matched_alias=candidate.matched_alias,
+                match_type="dictionary",
+                ontology_version=ontology.version,
+            )
+        )
+        seen.add(concept.concept_id)
+    return concepts
+
+
+def _has_unresolved_cjk_disease(question: str, matches: Iterable) -> bool:
+    """Reject likely unknown Chinese disease names before mixing other rules."""
+    remaining = normalize_match_text(question)
+    for match in sorted(matches, key=lambda item: len(item.normalized_text), reverse=True):
+        remaining = remaining.replace(match.normalized_text, " ", 1)
+    return _UNRESOLVED_CJK_DISEASE.search(remaining) is not None
 
 
 def _find_alias_match(question: str, rule: _ConceptRule, alias: str) -> re.Match[str] | None:
@@ -448,70 +351,15 @@ def _find_alias_match(question: str, rule: _ConceptRule, alias: str) -> re.Match
     return re.search(re.escape(alias), question)
 
 
-def _safe_english_disease_term(value: str) -> str | None:
-    """Keep a disease phrase, never the narrative that introduced it."""
-    tokens = value.split()
-    if len(tokens) < 2 or tokens[-1].casefold() not in _ENGLISH_DISEASE_MARKERS:
-        return None
-
-    context_index = max(
-        (
-            index
-            for index, token in enumerate(tokens[:-1])
-            if token.casefold().strip(".,;:()") in _ENGLISH_DISEASE_CONTEXT_WORDS
-        ),
-        default=-1,
-    )
-    if context_index >= 0:
-        tokens = tokens[context_index + 1 :]
-    elif len(tokens) > 2:
-        # Without a narrative boundary, a multi-word free-form match could be
-        # a person's name followed by a disease. Prefer no search to leakage.
-        if all(token[:1].isupper() and token.isalpha() for token in tokens[:-1]):
-            return None
-        return None
-
-    if not tokens or any(
-        token.casefold().strip(".,;:()") in _ENGLISH_DISEASE_CONTEXT_WORDS
-        for token in tokens[:-1]
-    ):
-        return None
-    return clean_text(" ".join(tokens))
-
-
-def _looks_medical(token: str) -> bool:
-    lowered = token.casefold()
-    return any(
-        hint in lowered
-        for hint in (
-            "disease",
-            "syndrome",
-            "cancer",
-            "tumor",
-            "patient",
-            "symptom",
-            "treatment",
-            "therapy",
-            "drug",
-            "renal",
-            "kidney",
-            "blood",
-            "liver",
-            "heart",
-            "gene",
-            "病",
-            "症",
-            "癌",
-            "炎",
-            "治疗",
-            "患者",
-            "肾",
-            "肝",
-        )
-    )
-
-
-def _concept_clause(concept: DetectedConcept) -> str:
+def _concept_clause(concept: DetectedConcept, *, ontology: DiseaseOntology) -> str:
+    if concept.source == "local_ontology" and concept.concept_id:
+        ontology_concept = ontology.get(concept.concept_id)
+        if ontology_concept is None:
+            raise LiteratureQueryError(
+                "The selected disease concept is no longer available.",
+                code="literature_concept_not_found",
+            )
+        return " OR ".join(ontology_concept.pubmed_terms)
     rule = next(
         (item for item in _CONCEPT_RULES if item.normalized == concept.normalized),
         None,
@@ -551,6 +399,8 @@ def _query_fingerprint(
     normalized_query: str,
     *,
     provider: str,
+    ontology_version: str,
+    selected_concept_ids: list[str],
     date_from: date | None,
     date_to: date | None,
     study_types: list[str],
@@ -560,6 +410,8 @@ def _query_fingerprint(
     payload = {
         "provider": provider.strip().lower(),
         "query": normalized_query,
+        "ontology_version": ontology_version,
+        "selected_concept_ids": sorted(selected_concept_ids),
         "date_from": date_from.isoformat() if date_from else None,
         "date_to": date_to.isoformat() if date_to else None,
         "study_types": list(study_types),

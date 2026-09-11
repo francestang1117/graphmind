@@ -1653,3 +1653,33 @@ The DOI and journal storage limits now match the normalized metadata model, and
 the newest sort uses the official `pub_date` value. The local backend suite is
 now `373 passed, 3 skipped`; PostgreSQL migration and row-lock checks remain
 conditional on `GRAPHMIND_TEST_POSTGRES_URL`.
+
+## 2026-09 - V2 PR8: Local Disease Ontology
+
+Disease names are now resolved by a versioned, read-only local ontology before
+the literature provider can be called. The package carries a manifest,
+checksum, source metadata, deterministic gzip JSONL records, MeSH-backed query
+templates, and a small curated seed that includes common and rare disease
+aliases. `MEDICAL_ONTOLOGY_DIR` can point to a reviewed replacement package;
+production startup rejects a missing or corrupt package when literature search
+is enabled.
+
+The query builder no longer guesses disease phrases from free-form text.
+Exact Chinese and English aliases become standard PubMed terms, while unknown
+Chinese text fails closed and short or ambiguous aliases such as `ALS` return
+safe candidates for explicit selection. Match IDs are stable for a given
+ontology version, and display labels retain the user's original spelling.
+
+The preview API exposes `resolution_status`, candidates, ontology version, and
+selected concept IDs. A search cannot create a run or contact PubMed until all
+ambiguous aliases are resolved and the user confirms the resulting fingerprint.
+Search runs persist terminology provenance and detected concepts so workers
+replay the same query contract after a restart. Existing symptom, gene, and
+drug rules remain available as the legacy non-disease boundary.
+
+`backend/scripts/build_disease_ontology.py` builds the package only from local
+operator-supplied MeSH/Orphanet files and curated aliases. It sorts records,
+uses fixed gzip parameters, writes a checksum manifest, and validates the
+result before reporting success. The PR8 local suite covers package integrity,
+deterministic builds, exact matching, privacy, ambiguity confirmation, API
+selection, migration, and worker restoration.

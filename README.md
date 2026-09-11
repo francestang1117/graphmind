@@ -58,7 +58,9 @@ provide a diagnosis or treatment recommendation.
 - Privacy-bounded PubMed search with query preview, explicit confirmation,
   normalized metadata, retraction/correction flags, scoped caching, worker
   leases, and Redis-coordinated request pacing
-- 373 backend tests covering the current core modules
+- Versioned local disease ontology with exact alias matching, privacy-bounded
+  Chinese disease handling, and explicit confirmation for ambiguous aliases
+- 399 backend tests covering the current core modules
 
 ## Project Status
 
@@ -74,7 +76,7 @@ provide a diagnosis or treatment recommendation.
 | Persistence | Partial | Workspaces, documents, parsed chunks/entities, graph nodes/edges, users, and jobs |
 | V2 research boundary | PR1 complete | Account-owned workspaces and workspace-scoped document-derived data |
 | V2 medical analysis | PR5 implementation | Local or OpenAI single-document interpretation with traceable evidence and coverage |
-| V2 literature search | PR7 implementation | Confirmed PubMed query terms, official metadata/abstracts, scoped runs, and cache |
+| V2 literature search | PR8 implementation | Versioned local disease matching, confirmed PubMed terms, official metadata/abstracts, scoped runs, and cache |
 | Observability | Working MVP | Prometheus metrics and optional Sentry |
 | File storage backend | Working MVP | Local by default; optional S3/MinIO keeps a local parser cache |
 | Authentication | Working MVP | Email/password, optional GitHub OAuth, user-scoped workspaces |

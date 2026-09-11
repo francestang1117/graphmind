@@ -21,6 +21,7 @@ from app.services.medical.literature.models import LiteratureQuery
 from app.services.medical.literature.pubmed_provider import PubMedProvider
 from app.services.medical.literature.query_builder import build_literature_query
 from app.services.medical.literature.repository import literature_repository
+from app.services.medical.terminology.models import ConceptSelection
 from app.tasks.literature_search import run_literature_search, run_literature_search_once
 
 log = logging.getLogger(__name__)
@@ -38,6 +39,7 @@ class LiteratureSearchRequest(BaseModel):
     max_results: int = Field(default=20, ge=1, le=50)
     external_search_confirmed: bool = False
     query_fingerprint: str | None = Field(default=None, min_length=64, max_length=64)
+    concept_selections: list[ConceptSelection] = Field(default_factory=list, max_length=16)
 
     @model_validator(mode="after")
     def validate_dates(self) -> "LiteratureSearchRequest":
@@ -170,6 +172,7 @@ def _build_query(body: LiteratureSearchRequest) -> LiteratureQuery:
             study_types=body.study_types,
             sort=body.sort,
             max_results=body.max_results,
+            concept_selections=body.concept_selections,
         )
     except LiteratureError as exc:
         raise _api_error(
@@ -184,8 +187,12 @@ def _preview_payload(query: LiteratureQuery, document_id: str, workspace_id: str
         "workspace_id": workspace_id,
         "question": query.question,
         "detected_concepts": [item.model_dump() for item in query.detected_concepts],
+        "resolution_status": query.resolution_status,
+        "ambiguous_concepts": [item.model_dump() for item in query.ambiguous_concepts],
+        "ontology_version": query.ontology_version,
+        "selected_concept_ids": query.selected_concept_ids,
         "redacted_fields": query.redacted_fields,
-        "pubmed_query": query.normalized_query,
+        "pubmed_query": query.normalized_query if query.resolution_status == "ready" else None,
         "query_fingerprint": query.query_hash,
         "external_data": {
             "provider": "pubmed",
@@ -204,6 +211,13 @@ def _require_confirmation(
     workspace_id: str,
 ) -> None:
     disclosure = _preview_payload(query, document_id, workspace_id)
+    if query.resolution_status != "ready":
+        raise AppError(
+            "Choose a disease concept before starting the external search.",
+            code="literature_concept_confirmation_required",
+            status_code=status.HTTP_409_CONFLICT,
+            details=disclosure,
+        )
     if not body.external_search_confirmed:
         raise AppError(
             "Confirm the PubMed query before starting the external search.",

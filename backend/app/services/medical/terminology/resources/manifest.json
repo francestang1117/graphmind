@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "ontology_version": "curated-seed-2026.09.1",
+  "mesh_release": "seed",
+  "orphanet_release": "",
+  "generated_at": "2026-09-12T00:00:00Z",
+  "data_file": "disease_concepts.jsonl.gz",
+  "record_count": 21,
+  "alias_count": 54,
+  "sha256": "94b156d41182d1af369304a112f642c7b39bd6dabfa0f187bde09138011f148e",
+  "sources": [
+    {
+      "name": "GraphMind curated seed",
+      "license_url": "https://github.com/francestang1117/graphmind"
+    },
+    {
+      "name": "MeSH terminology reference",
+      "license_url": "https://www.ncbi.nlm.nih.gov/mesh/"
+    }
+  ]
+}

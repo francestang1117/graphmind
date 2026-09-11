@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.services.medical.terminology.models import DiseaseMatch
+
 
 LiteratureSort = Literal["relevance", "newest"]
 RetractionStatus = Literal[
@@ -26,6 +28,12 @@ class DetectedConcept(BaseModel):
     type: str
     original: str
     normalized: str
+    concept_id: str | None = None
+    source: str | None = None
+    source_code: str | None = None
+    matched_alias: str | None = None
+    match_type: str | None = None
+    ontology_version: str | None = None
 
 
 class LiteratureQuery(BaseModel):
@@ -34,15 +42,19 @@ class LiteratureQuery(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     sanitized_question: str = Field(default="", max_length=500)
     redacted_fields: list[str] = Field(default_factory=list, max_length=8)
-    normalized_query: str = Field(min_length=1, max_length=4000)
+    normalized_query: str = Field(default="", max_length=4000)
     detected_concepts: list[DetectedConcept] = Field(default_factory=list)
+    resolution_status: Literal["ready", "needs_confirmation"] = "ready"
+    ambiguous_concepts: list[DiseaseMatch] = Field(default_factory=list, max_length=16)
+    ontology_version: str | None = Field(default=None, max_length=64)
+    selected_concept_ids: list[str] = Field(default_factory=list, max_length=16)
     date_from: date | None = None
     date_to: date | None = None
     study_types: list[str] = Field(default_factory=list, max_length=8)
     sort: LiteratureSort = "relevance"
     max_results: int = Field(default=20, ge=1, le=50)
     provider: str = "pubmed"
-    query_hash: str = Field(min_length=64, max_length=64)
+    query_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class LiteratureArticle(BaseModel):

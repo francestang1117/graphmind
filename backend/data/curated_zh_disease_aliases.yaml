@@ -1,0 +1,56 @@
+# Human-reviewed aliases are deliberately separate from the generated data.
+# Do not place patient text or free-form user queries in this file.
+concepts:
+  - concept_id: mesh:D005205
+    preferred_name_en: Fabry disease
+    preferred_name_zh: 法布雷病
+    aliases:
+      - text: 法布雷病
+        language: zh-Hans
+        alias_type: preferred
+  - concept_id: mesh:D003920
+    preferred_name_en: Diabetes Mellitus
+    preferred_name_zh: 糖尿病
+    aliases:
+      - text: 糖尿病
+        language: zh-Hans
+        alias_type: preferred
+  - concept_id: mesh:D006816
+    preferred_name_en: Huntington Disease
+    preferred_name_zh: 亨廷顿病
+    aliases:
+      - text: 亨廷顿病
+        language: zh-Hans
+        alias_type: preferred
+  - concept_id: mesh:D008545
+    preferred_name_en: Melanoma
+    preferred_name_zh: 黑色素瘤
+    aliases:
+      - text: 黑色素瘤
+        language: zh-Hans
+        alias_type: preferred
+  - concept_id: mesh:D012507
+    preferred_name_en: Sarcoidosis
+    preferred_name_zh: 结节病
+    aliases:
+      - text: 结节病
+        language: zh-Hans
+        alias_type: preferred
+  - concept_id: mesh:D020388
+    preferred_name_en: Duchenne Muscular Dystrophy
+    preferred_name_zh: 杜氏肌营养不良
+    aliases:
+      - text: 杜氏肌营养不良
+        language: zh-Hans
+        alias_type: preferred
+  - concept_id: mesh:D000690
+    preferred_name_en: Amyotrophic Lateral Sclerosis
+    preferred_name_zh: 肌萎缩侧索硬化
+    aliases:
+      - text: 肌萎缩侧索硬化
+        language: zh-Hans
+        alias_type: preferred
+      - text: ALS
+        language: en
+        alias_type: abbreviation
+        resolution: confirmation_required

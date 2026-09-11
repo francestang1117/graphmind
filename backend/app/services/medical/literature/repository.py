@@ -91,6 +91,11 @@ class LiteratureRepository:
                 "A source document is required for literature search.",
                 code="literature_document_required",
             )
+        if query.resolution_status != "ready" or not query.query_hash:
+            raise LiteratureError(
+                "Choose a disease concept before starting the literature search.",
+                code="literature_concept_confirmation_required",
+            )
 
         now = _utc_now()
         cache_ttl = max(0, int(
@@ -142,6 +147,10 @@ class LiteratureRepository:
                     row.study_types_json = _dump_json(query.study_types)
                     row.sort = query.sort
                     row.max_results = query.max_results
+                    row.ontology_version = query.ontology_version or "legacy"
+                    row.detected_concepts_json = _dump_json(
+                        [concept.model_dump() for concept in query.detected_concepts]
+                    )
                     row.status = QUEUED
                     row.result_count = 0
                     row.error_code = ""
@@ -177,6 +186,10 @@ class LiteratureRepository:
                         study_types_json=_dump_json(query.study_types),
                         sort=query.sort,
                         max_results=query.max_results,
+                        ontology_version=query.ontology_version or "legacy",
+                        detected_concepts_json=_dump_json(
+                            [concept.model_dump() for concept in query.detected_concepts]
+                        ),
                         result_count=0,
                         error_code="",
                         error_message="",
@@ -667,6 +680,9 @@ def _run_dict(
 ) -> dict[str, Any]:
     if not row:
         return {}
+    detected_concepts = _loads_json(row.detected_concepts_json, [])
+    if not isinstance(detected_concepts, list):
+        detected_concepts = []
     payload = {
         "run_id": row.id,
         "user_id": row.user_id,
@@ -682,6 +698,15 @@ def _run_dict(
         "study_types": _loads_json(row.study_types_json, []),
         "sort": row.sort,
         "max_results": row.max_results,
+        "ontology_version": row.ontology_version or "legacy",
+        "detected_concepts": detected_concepts,
+        "selected_concept_ids": [
+            item.get("concept_id")
+            for item in detected_concepts
+            if isinstance(item, dict)
+            and item.get("source") == "local_ontology"
+            and item.get("concept_id")
+        ],
         "result_count": row.result_count,
         "warnings": _loads_json(row.warnings_json, []),
         "error_code": row.error_code or "",

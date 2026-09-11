@@ -9,7 +9,7 @@ from typing import Any
 
 from app.core.celery_app import celery_app
 from app.services.medical.literature.exceptions import LiteratureError
-from app.services.medical.literature.models import LiteratureQuery
+from app.services.medical.literature.models import DetectedConcept, LiteratureQuery
 from app.services.medical.literature.pubmed_provider import PubMedProvider
 from app.services.medical.literature.repository import (
     FAILED,
@@ -97,11 +97,23 @@ def run_literature_search_once(run_id: str) -> dict[str, Any]:
 
 
 def _query_from_run(run: dict[str, Any]) -> LiteratureQuery:
+    detected_concepts = []
+    for value in run.get("detected_concepts") or []:
+        try:
+            detected_concepts.append(DetectedConcept.model_validate(value))
+        except (TypeError, ValueError):
+            # A legacy run may not have provenance fields. The persisted
+            # normalized query is still safe to replay, but malformed metadata
+            # must not take the worker down before the provider call.
+            continue
     return LiteratureQuery(
         question=run.get("question") or "medical research question",
         sanitized_question=run.get("question") or "",
         normalized_query=run["normalized_query"],
-        detected_concepts=[],
+        detected_concepts=detected_concepts,
+        resolution_status="ready",
+        ontology_version=run.get("ontology_version"),
+        selected_concept_ids=list(run.get("selected_concept_ids") or []),
         date_from=_parse_date(run.get("date_from")),
         date_to=_parse_date(run.get("date_to")),
         study_types=list(run.get("study_types") or []),
