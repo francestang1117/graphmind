@@ -2,8 +2,8 @@
 
 This project currently has backend tests for upload, validation, parsing, auth,
 search, graph construction, chat, persistence, rate limiting, virus scanning,
-WebSocket progress, medical document analysis, citation validation, and safety
-boundaries.
+WebSocket progress, medical document analysis, citation validation, safety
+boundaries, and the PubMed literature-search boundary.
 
 ## Quick Start
 
@@ -14,7 +14,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
 
 The exact count can change as tests are added. The latest local result is
-`320 passed, 3 skipped`.
+`373 passed, 3 skipped`.
 
 The three skipped checks are the PostgreSQL migration test and two PostgreSQL
 row-lock tests when `GRAPHMIND_TEST_POSTGRES_URL` is not set. GitHub Actions
@@ -75,6 +75,12 @@ or unsafe.
 | `backend/tests/test_medical_repository.py` | Scoped profile/section replacement, cleanup, and deleted-document guard |
 | `backend/tests/test_medical_api.py` | User/workspace scope on the medical analysis endpoint |
 | `backend/tests/test_medical_ai_insights.py` | Bounded evidence context, provider output, citation/safety validation, versioned persistence, and stale-result handling |
+| `backend/tests/test_literature_query_builder.py` | Explainable concept extraction, PII redaction, filters, and safe query fingerprints |
+| `backend/tests/test_literature_provider.py` | Mocked PubMed ESearch/EFetch, metadata normalization, retries, size limits, XML safety, and retraction flags |
+| `backend/tests/test_literature_repository.py` | Scoped run lifecycle, cache reuse, lease recovery, idempotency, and deletion cleanup |
+| `backend/tests/test_literature_rate_limiter.py` | Redis token-bucket pacing and fail-closed production behavior |
+| `backend/tests/test_literature_api.py` | Preview confirmation, stale fingerprints, queueing, and workspace isolation |
+| `backend/tests/test_literature_search_task.py` | Worker claim, provider success, and safe failure persistence |
 | `backend/tests/test_config.py` | Runtime environment, authentication, and JWT secret safety guards |
 
 ## Running Specific Tests
@@ -235,6 +241,42 @@ sample or comparator fields say they were not reported, every finding opens a
 source location, and incomplete section coverage is visible. This live check
 is deliberately separate from CI so CI never requires an API key.
 
+Test the PubMed search boundary with a synthetic or non-identifying source
+document. Set `PUBMED_TOOL=graphmind` and, preferably, `PUBMED_EMAIL` in
+`backend/.env`. An NCBI API key is optional. First preview the query:
+
+```bash
+curl -X POST \
+  "http://localhost:8000/api/v1/documents/<document_id>/literature-search/preview?workspace_id=<workspace_id>" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"What is known about Fabry disease?","max_results":5}'
+```
+
+Review `pubmed_query`, `detected_concepts`, `redacted_fields`, and
+`external_data`. Copy `query_fingerprint` into a confirmed start request:
+
+```bash
+curl -X POST \
+  "http://localhost:8000/api/v1/documents/<document_id>/literature-search?workspace_id=<workspace_id>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question":"What is known about Fabry disease?",
+    "max_results":5,
+    "external_search_confirmed":true,
+    "query_fingerprint":"<fingerprint-from-preview>"
+  }'
+```
+
+Poll the returned `run_id` with `GET /api/v1/literature-search-runs/<run_id>`.
+Confirm the final rows contain PMID, title, abstract when available, the
+official PubMed URL, and a normal/retracted/corrected/notices status. The run's
+`normalized_query` should contain only the reviewed terms. A request without
+confirmation, with a changed fingerprint, or from another workspace must not
+contact PubMed. In a multi-worker deployment, the provider uses the shared
+Redis PubMed token bucket; staging and production fail closed if that
+coordination service is unavailable. CI uses `httpx.MockTransport`; it never
+calls the external service.
+
 Check database-backed parsed artifacts:
 
 ```bash
@@ -277,3 +319,5 @@ parsed, open, and delete endpoints with the stored filename.
   in this repo right now.
 - Medical analysis tests use synthetic or public text. Do not add real patient
   records or identifiable clinical documents to the repository.
+- Literature provider tests use mocked NCBI responses. Do not put patient names,
+  record numbers, or clinical narratives in a literature-search question.

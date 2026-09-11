@@ -32,6 +32,7 @@ GraphMind/
 │   │   │       ├── documents_with_markdown.py
 │   │   │       ├── graph.py
 │   │   │       ├── jobs.py
+│   │   │       ├── literature.py
 │   │   │       ├── scraper.py
 │   │   │       ├── search.py
 │   │   │       ├── websocket.py
@@ -66,17 +67,27 @@ GraphMind/
 │   │   │   │   ├── paper_structure_parser.py
 │   │   │   │   ├── repository.py
 │   │   │   │   ├── section_normalizer.py
-│   │   │   │   └── ai/
+│   │   │   │   ├── ai/
+│   │   │   │   │   ├── __init__.py
+│   │   │   │   │   ├── analyzer.py
+│   │   │   │   │   ├── analysis_repository.py
+│   │   │   │   │   ├── citation_validator.py
+│   │   │   │   │   ├── context_builder.py
+│   │   │   │   │   ├── exceptions.py
+│   │   │   │   │   ├── models.py
+│   │   │   │   │   ├── prompt_builder.py
+│   │   │   │   │   ├── provider.py
+│   │   │   │   │   └── safety_validator.py
+│   │   │   │   └── literature/
 │   │   │   │       ├── __init__.py
-│   │   │   │       ├── analyzer.py
-│   │   │   │       ├── analysis_repository.py
-│   │   │   │       ├── citation_validator.py
-│   │   │   │       ├── context_builder.py
 │   │   │   │       ├── exceptions.py
 │   │   │   │       ├── models.py
-│   │   │   │       ├── prompt_builder.py
+│   │   │   │       ├── normalizer.py
 │   │   │   │       ├── provider.py
-│   │   │   │       └── safety_validator.py
+│   │   │   │       ├── pubmed_provider.py
+│   │   │   │       ├── query_builder.py
+│   │   │   │       ├── rate_limiter.py
+│   │   │   │       └── repository.py
 │   │   │   ├── parsed_artifact_repository.py
 │   │   │   ├── persistence_service.py
 │   │   │   ├── qa_engine.py
@@ -88,6 +99,7 @@ GraphMind/
 │   │   ├── tasks/
 │   │   │   ├── __init__.py
 │   │   │   ├── medical_analysis.py
+│   │   │   ├── literature_search.py
 │   │   │   └── process_document.py
 │   │   └── utils/
 │   │       └── file_validator.py
@@ -110,6 +122,12 @@ GraphMind/
 │       ├── test_medical_classifier.py
 │       ├── test_medical_repository.py
 │       ├── test_medical_ai_insights.py
+│       ├── test_literature_api.py
+│       ├── test_literature_provider.py
+│       ├── test_literature_query_builder.py
+│       ├── test_literature_rate_limiter.py
+│       ├── test_literature_repository.py
+│       ├── test_literature_search_task.py
 │       ├── test_parsed_artifact_repository.py
 │       ├── test_paper_structure_parser.py
 │       ├── test_persistence_service.py
@@ -166,7 +184,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `main.py` wires the FastAPI app, CORS, lifespan startup, rate limiting, API
   error handlers, `/api/v1/*` routes, and the WebSocket router.
 - `api/__init__.py` registers the active REST routers: auth, documents, graph,
-  search, chat, scraper, jobs, workspaces, and medical insights.
+  search, chat, scraper, jobs, workspaces, medical insights, and literature
+  search.
 - `documents.py` is the active upload/list/detail/delete/open-file API. It uses
   validation, optional virus scanning, content-hash deduplication, storage, parse
   caching, user scoping, and stable application error codes.
@@ -176,6 +195,9 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `services/medical/` classifies medical documents, normalizes paper headings,
   builds page-aware sections and chunks, stores the resulting analysis, and
   provides the evidence-backed insight modules under `services/medical/ai/`.
+- `services/medical/literature/` builds privacy-bounded PubMed queries, calls
+  the official E-utilities endpoints, normalizes public metadata, coordinates
+  request pacing through Redis, and persists scoped search runs and result links.
 - `auth.py` handles email/password login, GitHub OAuth, JWT access tokens,
   HttpOnly refresh cookies, and the optional local-dev workspace.
 - `workspaces.py` creates and lists account-owned research projects. The
@@ -249,6 +271,9 @@ SQLite files, and virtual environments are intentionally left out of this map.
   validates citations and safety, and stores only successful versioned reports.
 - `tasks/medical_analysis.py` runs one scoped insight job through Celery or the
   local background fallback. A failed insight does not fail the source document.
+- `tasks/literature_search.py` runs one confirmed PubMed search with a bounded
+  retryable worker lease and fencing token, then saves only normalized public
+  metadata.
 - `web_scraper.py` fetches public web pages, strips noisy HTML, and stores the
   readable result as a normal Markdown document.
 - `virus_scanner.py` is the ClamAV integration wrapper. Scanning is optional and
@@ -299,6 +324,8 @@ The backend currently has tests for:
   persistence, and the medical analysis API
 - bounded medical insight context, citation validation, safety checks, versioned
   results, and stale-source handling
+- privacy-bounded PubMed query preview, official metadata/abstract retrieval,
+  scoped search persistence, cache reuse, retry handling, and deletion cleanup
 
 Run the current backend suite with:
 
@@ -317,7 +344,8 @@ branch adds the first medical research workflow layers:
 - evidence-backed single-document insight runs with page/chunk citations
 - deterministic local provider, PII redaction, and medical-safety warnings
 - the frontend document-level insight panel with source evidence details
-- study cards, GPT-backed analysis, and paper-focused chat are still next
+- PubMed literature search with confirmed query terms and normalized abstracts
+- study cards, AI evidence matching, and paper-focused chat are still next
 - the frontend workspace picker and dedicated research-card pages
 - staging OAuth and `AUTH_REQUIRED=true` checks behind HTTPS and secure cookies
 
@@ -330,10 +358,9 @@ insights. The remaining gaps are:
 
 - deeper graph persistence tooling beyond the current node/edge tables
 - study cards and a dedicated research-card page
-- GPT-backed analysis and paper-focused chat
+- claim-to-literature evidence matching and paper-focused chat
 - embedded PDF page navigation from an evidence citation
 - the frontend workspace picker and full paper workflow
 - staging OAuth and `AUTH_REQUIRED=true` checks behind HTTPS
-- GPT-backed answer generation
 - richer relation extraction and graph quality tuning
 - a real Prometheus/Grafana deployment around the `/metrics` endpoint

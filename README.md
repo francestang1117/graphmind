@@ -11,8 +11,10 @@ observability, safety, and workspace boundary are working MVPs. The current V2
 branch also adds explainable medical document classification, page-aware paper
 sections, and evidence-backed single-document insights. The medical insight
 path uses a deterministic local extractor by default and can explicitly enable
-an OpenAI Responses API provider. Study cards and multi-paper comparison are
-still planned upgrades. It does not
+an OpenAI Responses API provider. The V2 path also has a privacy-bounded PubMed
+literature-search foundation: it previews explainable query terms, fetches
+official metadata and abstracts, and keeps results inside the document's
+workspace. Study cards and multi-paper comparison are still planned upgrades. It does not
 provide a diagnosis or treatment recommendation.
 
 ## What Works Today
@@ -53,7 +55,10 @@ provide a diagnosis or treatment recommendation.
 - Optional OpenAI medical insight provider with schema-constrained output,
   bounded retries, server-side credentials, and disabled response storage
 - Fails-closed runtime auth defaults and startup validation for API and workers
-- 320 backend tests covering the current core modules
+- Privacy-bounded PubMed search with query preview, explicit confirmation,
+  normalized metadata, retraction/correction flags, scoped caching, worker
+  leases, and Redis-coordinated request pacing
+- 373 backend tests covering the current core modules
 
 ## Project Status
 
@@ -69,6 +74,7 @@ provide a diagnosis or treatment recommendation.
 | Persistence | Partial | Workspaces, documents, parsed chunks/entities, graph nodes/edges, users, and jobs |
 | V2 research boundary | PR1 complete | Account-owned workspaces and workspace-scoped document-derived data |
 | V2 medical analysis | PR5 implementation | Local or OpenAI single-document interpretation with traceable evidence and coverage |
+| V2 literature search | PR7 implementation | Confirmed PubMed query terms, official metadata/abstracts, scoped runs, and cache |
 | Observability | Working MVP | Prometheus metrics and optional Sentry |
 | File storage backend | Working MVP | Local by default; optional S3/MinIO keeps a local parser cache |
 | Authentication | Working MVP | Email/password, optional GitHub OAuth, user-scoped workspaces |
@@ -143,6 +149,10 @@ Base URL: `http://localhost:8000/api/v1`
 - `GET /medical-analysis-runs/{run_id}` returns analysis status, report, and source evidence.
 - `GET /documents/{document_id}/medical-insights/latest` returns the latest successful analysis.
 - `POST /documents/{document_id}/medical-insights/reanalyze` starts a fresh source-version run.
+- `POST /documents/{document_id}/literature-search/preview` previews the safe PubMed query.
+- `POST /documents/{document_id}/literature-search` starts a confirmed PubMed search.
+- `GET /literature-search-runs/{run_id}` returns search status and normalized articles.
+- `GET /documents/{document_id}/literature-searches/latest` returns the newest scoped search.
 - `GET /documents/{filename}/open` safely previews or downloads an uploaded file.
 - `DELETE /documents/{filename}` deletes a stored document.
 - `GET /jobs/` lists recent background jobs.
@@ -169,7 +179,7 @@ GraphMind/
       api/endpoints/       Documents, jobs, graph, search, chat, scraper, auth, workspaces
       core/                Settings, DB, Celery, errors, metrics, rate limits, Sentry, workspace
       models/              SQLAlchemy persistence models
-      services/            Storage, parsing, extraction, graph, search, jobs, QA, workspaces, medical analysis
+      services/            Storage, parsing, extraction, graph, search, jobs, QA, workspaces, medical analysis, literature
       tasks/               Celery document processing and cleanup tasks
       utils/               Upload validation
     tests/                 Backend unit and integration tests
@@ -205,7 +215,8 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 
 Current backend coverage includes upload validation/storage, parsers, entity
 extraction, graph/search/chat pipeline pieces, auth, rate limiting, Sentry,
-metrics, WebSocket progress, job history, and cleanup behavior.
+metrics, WebSocket progress, job history, cleanup behavior, and the PubMed
+query/provider/persistence boundaries.
 
 Build the frontend:
 
@@ -227,7 +238,7 @@ More testing notes are in [docs/TESTING.md](docs/TESTING.md).
 
 ## Near-Term Roadmap
 
-1. Add study cards with explicit not-found states and source citations.
+1. Use the PubMed result set as an input to evidence matching and study cards.
 2. Add the workspace and paper workflow to the frontend.
 3. Build a small reviewed evaluation set for Chinese and English medical papers.
 4. Replace the local vector-search MVP with a real embedding model and vector DB.

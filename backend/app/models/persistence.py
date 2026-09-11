@@ -434,3 +434,126 @@ class MedicalAnalysisEvidenceRecord(Base):
     quoted_text: Mapped[str] = mapped_column(Text)
     character_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     character_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class LiteratureSearchRunRecord(Base):
+    """One privacy-bounded literature search requested for a document."""
+
+    __tablename__ = "literature_search_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "document_id",
+            "query_hash",
+            "provider",
+            name="uq_literature_search_runs_scope_query_provider",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    document_id: Mapped[str | None] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    question: Mapped[str] = mapped_column(Text, default="")
+    normalized_query: Mapped[str] = mapped_column(Text)
+    query_hash: Mapped[str] = mapped_column(String(64), index=True)
+    provider: Mapped[str] = mapped_column(String(64), default="pubmed", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    date_from: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    date_to: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    study_types_json: Mapped[str] = mapped_column(Text, default="[]")
+    sort: Mapped[str] = mapped_column(String(32), default="relevance")
+    max_results: Mapped[int] = mapped_column(Integer, default=20)
+    result_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str] = mapped_column(String(80), default="")
+    error_message: Mapped[str] = mapped_column(Text, default="")
+    warnings_json: Mapped[str] = mapped_column(Text, default="[]")
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    # A new random token fences off workers from earlier lease attempts. The
+    # nullable shape keeps upgrades compatible with runs created before it.
+    attempt_token: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
+    external_search_confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LiteratureArticleRecord(Base):
+    """Normalized public metadata cached from a literature provider."""
+
+    __tablename__ = "literature_articles"
+    __table_args__ = (
+        UniqueConstraint(
+            "source",
+            "external_id",
+            name="uq_literature_articles_source_external",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    source: Mapped[str] = mapped_column(String(64), default="pubmed", index=True)
+    external_id: Mapped[str] = mapped_column(String(128), index=True)
+    doi: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    pmcid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(Text, default="")
+    abstract: Mapped[str] = mapped_column(Text, default="")
+    journal: Mapped[str] = mapped_column(Text, default="")
+    publication_date: Mapped[str] = mapped_column(String(32), default="")
+    publication_year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    authors_json: Mapped[str] = mapped_column(Text, default="[]")
+    publication_types_json: Mapped[str] = mapped_column(Text, default="[]")
+    mesh_terms_json: Mapped[str] = mapped_column(Text, default="[]")
+    language: Mapped[str] = mapped_column(String(32), default="")
+    source_url: Mapped[str] = mapped_column(String(512), default="")
+    retraction_status: Mapped[str] = mapped_column(String(32), default="unknown", index=True)
+    metadata_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LiteratureSearchResultRecord(Base):
+    """The ranked article list returned by one search run."""
+
+    __tablename__ = "literature_search_results"
+    __table_args__ = (
+        UniqueConstraint(
+            "search_run_id",
+            "article_id",
+            name="uq_literature_search_results_run_article",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    search_run_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("literature_search_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    article_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("literature_articles.id", ondelete="CASCADE"),
+        index=True,
+    )
+    provider_rank: Mapped[int] = mapped_column(Integer, default=0)
+    matched_terms_json: Mapped[str] = mapped_column(Text, default="[]")
+    selected_for_analysis: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

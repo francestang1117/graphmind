@@ -2,6 +2,28 @@
 
 GraphMind is planned as a staged knowledge graph product. The current repository focuses on the first two modules: file upload and document parsing. Later phases will build graph intelligence, retrieval, AI assistance, and media generation on top of that foundation.
 
+## Current V2 Research Track
+
+The active V2 work is a medical research workflow layered on top of the
+original upload and graph MVP. The first literature-search foundation is now in
+place: a user can preview a bounded PubMed query, explicitly confirm it, and
+retrieve normalized public metadata and abstracts inside a workspace-scoped
+search run. The uploaded document is not sent to PubMed.
+
+Completed layers:
+
+- PR1: workspace ownership and document-derived data isolation
+- PR2: explainable medical document classification and paper structure parsing
+- PR3: section-aware chunks, page ranges, and medical analysis API
+- PR4/5: evidence-backed single-document insights with local and optional OpenAI providers
+- PR7: privacy-bounded PubMed search with scoped cache, worker leases, retries, and deletion cleanup
+
+Next V2 layer:
+
+- use PubMed results as candidates for claim-to-literature matching and study cards
+- add the workspace and paper workflow to the frontend
+- compare multiple papers only after individual evidence remains traceable
+
 ## Development Phases
 
 ### Phase 1: Infrastructure

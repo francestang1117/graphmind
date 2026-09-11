@@ -352,6 +352,99 @@ different workspace, unsupported medical kind, stale source version, or
 unvalidated provider response cannot become the current report. The report is
 for document understanding only and is not a diagnosis or treatment plan.
 
+### PubMed literature search
+
+The literature-search foundation turns a user's medical question into a small,
+explainable PubMed query. The document is used as the scope anchor only. The
+preview and worker send confirmed query terms and filters to the official NCBI
+E-utilities API; they do not send the uploaded file, parsed chunks, or the
+document text. This phase stores public metadata and abstracts. It does not
+match claims to papers, grade evidence, diagnose a condition, or give treatment
+advice.
+
+#### `POST /documents/{document_id}/literature-search/preview`
+
+Builds the exact query without contacting PubMed. It also returns any direct
+identifiers removed from the question, so the user can review the outbound
+data before confirming it.
+
+```bash
+curl -X POST \
+  "http://localhost:8000/api/v1/documents/<document_id>/literature-search/preview?workspace_id=<workspace_id>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "What is known about Fabry disease and renal outcomes?",
+    "date_from": "2018-01-01",
+    "study_types": ["systematic_review"],
+    "sort": "relevance",
+    "max_results": 20
+  }'
+```
+
+The response contains `pubmed_query`, `detected_concepts`,
+`redacted_fields`, and a SHA-256 `query_fingerprint`. The `external_data`
+object explicitly states that query terms are sent while document content and
+the uploaded file are not.
+
+#### `POST /documents/{document_id}/literature-search`
+
+Starts or reuses a scoped asynchronous search. Send the fingerprint from the
+preview response together with explicit confirmation:
+
+```json
+{
+  "question": "What is known about Fabry disease and renal outcomes?",
+  "date_from": "2018-01-01",
+  "study_types": ["systematic_review"],
+  "sort": "relevance",
+  "max_results": 20,
+  "external_search_confirmed": true,
+  "query_fingerprint": "<fingerprint-from-preview>"
+}
+```
+
+The endpoint returns `202` for a newly queued run and `200` when the same
+fresh successful or active run is reused. The run is scoped by user,
+workspace, document, normalized query, filters, and provider. Search requests
+are rate limited and use the configured cache TTL.
+
+#### `GET /literature-search-runs/{run_id}`
+
+Poll with the `workspace_id` until `status` is `succeeded` or `failed`:
+
+```bash
+curl "http://localhost:8000/api/v1/literature-search-runs/<run_id>?workspace_id=<workspace_id>"
+```
+
+A successful run returns normalized article records with PMID, DOI when
+available, PMCID when available, title, abstract, journal, publication date,
+authors, publication types, MeSH terms, language, the official PubMed URL,
+and `retraction_status`. The status distinguishes `normal`, `retracted`,
+`retraction_notice`, `corrected`, `correction_notice`, and
+`expression_of_concern`. A result set can include warnings such as a missing
+contact email or metadata records that PubMed could not normalize. Empty
+results are successful and include `empty_reason` when the provider returned
+no usable articles.
+
+#### `GET /documents/{document_id}/literature-searches/latest`
+
+Returns the newest search for the selected document and workspace. It uses the
+same ownership checks as the polling endpoint.
+
+The worker retries bounded network, rate-limit, and temporary NCBI failures.
+Queued or running runs with an expired lease become a visible stalled failure
+and can be submitted again. Each worker attempt has a private fencing token so
+an expired worker cannot overwrite a later attempt. Deleting a document removes
+its search runs and result links; the shared public article metadata cache is
+retained because it does not contain uploaded document content.
+
+Common API errors include `literature_no_medical_concepts` (`422`),
+`external_search_confirmation_required` (`409`),
+`external_search_query_changed` (`409`),
+`literature_provider_not_configured` (`503`), and
+`literature_search_stalled` (`503`). A different user or workspace receives
+`404` rather than a result from another scope.
+
 ### `DELETE /documents/{filename}`
 
 Deletes the stored file, soft-deletes the database document record when persistence is enabled, and clears cached parsed artifacts for that file.

@@ -1573,7 +1573,7 @@ fingerprint of the provider, resolved model, excerpt scope, and redaction mode.
 If the server configuration changes after the disclosure is shown, the stale
 request is rejected and the frontend reloads the terms before asking again.
 
-## 2026-09 — Secure Runtime Auth Configuration
+## 2026-09 - Secure Runtime Auth Configuration
 
 The runtime auth configuration now fails closed. `AUTH_REQUIRED` defaults to
 true and `SECRET_KEY` defaults to empty; only explicit development or test
@@ -1582,3 +1582,74 @@ key. Startup validates the environment, auth mode, and secret length before
 creating directories or running database migrations. The Celery app applies the
 same check so a standalone worker cannot start with weaker settings than the
 API. The full combined backend suite passes with `320 passed, 3 skipped`.
+
+## 2026-09 - V2 PR7: PubMed Literature Search Foundation
+
+The next V2 layer is a bounded way to find public medical literature without
+pretending that a search result is already evidence for a user's document. A
+new query builder extracts a small set of explainable disease, symptom, gene,
+and treatment terms, removes direct identifiers, supports date and study-type
+filters, and produces a fingerprint for the exact query shown to the user.
+
+The API now has preview, confirmed start, polling, and latest-run endpoints.
+The preview discloses that only the reviewed query terms go to PubMed; the
+uploaded file, parsed chunks, and document text stay inside GraphMind. Starting
+without confirmation or with a stale fingerprint is rejected before any
+external request is made.
+
+The PubMed provider uses the official ESearch and batch EFetch endpoints. It
+normalizes PMID, DOI, PMCID, title, abstract, journal, dates, authors,
+publication types, MeSH terms, language, and retraction/correction state. It
+uses HTTPS, does not follow redirects, keeps credentials and query text out of
+logs, applies bounded retries and response limits, and rejects malformed or
+unsafe XML responses.
+
+Search runs and ranked result links are persisted within the user/workspace/
+document boundary. Fresh runs can be reused through a TTL, while queued and
+running runs carry leases so a lost worker becomes retryable instead of waiting
+forever. Public article metadata is cached separately from the document scope.
+Document deletion removes its runs and result links, and the existing document
+permission checks are used for preview, start, latest, and polling.
+
+The first version intentionally does not perform AI claim matching, evidence
+grading, multi-paper comparison, automatic disease hypotheses, or treatment
+recommendations. The local suite covers query redaction, provider parsing and
+failure paths, scoped persistence, cache/retry behavior, confirmation, and
+workspace isolation. The latest local result is `341 passed, 3 skipped`; the
+PostgreSQL migration and row-lock checks remain conditional on
+`GRAPHMIND_TEST_POSTGRES_URL`.
+
+## 2026-09 - V2 PR7 Review Hardening
+
+The literature-search boundary now keeps unknown disease extraction privacy
+bounded. Unrecognized Chinese disease text always fails closed. Only locally
+recognized dictionary aliases are converted to normalized PubMed terms;
+relation markers never permit raw unknown Chinese text to leave GraphMind.
+English aliases use word boundaries, so the short gene symbol `GLA` cannot
+match a word such as `glaucoma`.
+
+Search workers use a monotonic attempt count and a random attempt token. The
+token is checked on heartbeat, success, and failure writes, so a worker from an
+expired lease cannot overwrite a later attempt. Repeated public PMID metadata
+uses PostgreSQL/SQLite conflict upserts, allowing concurrent searches to share
+one cache row without turning a unique-key race into a failed run.
+
+The PubMed parser now follows the official `CommentsCorrectionsList` location
+and `RefType` attribute, distinguishing retracted articles, retraction notices,
+corrections, correction notices, and expressions of concern. It accepts the
+official external DTD declaration only after rejecting internal subsets and
+entities, and streams EFetch responses so the configured byte limit is enforced
+while reading.
+
+Each search creates and closes its own Redis client, so a short-lived
+`asyncio.run()` event loop cannot be reused by a later worker task. Client
+failures can be retried instead of permanently poisoning the process. Malformed
+token-bucket responses fail closed instead of being treated as a near-zero
+wait. The Redis-backed token bucket remains shared by API processes and Celery
+workers; outside development and test, loss of Redis coordination fails the
+search and startup rejects attempts to disable either the limiter or its Redis
+requirement.
+The DOI and journal storage limits now match the normalized metadata model, and
+the newest sort uses the official `pub_date` value. The local backend suite is
+now `373 passed, 3 skipped`; PostgreSQL migration and row-lock checks remain
+conditional on `GRAPHMIND_TEST_POSTGRES_URL`.

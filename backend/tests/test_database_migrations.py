@@ -193,6 +193,9 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         "medical_document_profiles",
         "document_sections",
         "medical_analysis_runs",
+        "literature_articles",
+        "literature_search_runs",
+        "literature_search_results",
     }.issubset(
         set(inspector.get_table_names())
     )
@@ -200,6 +203,10 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         item["name"] for item in inspector.get_columns("medical_analysis_runs")
     }
     assert "external_processing_confirmed_at" in run_columns
+    literature_run_columns = {
+        item["name"] for item in inspector.get_columns("literature_search_runs")
+    }
+    assert "attempt_token" in literature_run_columns
     chunk_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_chunks")]
     entity_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_entities")]
     assert ["user_id", "workspace_id", "document_id", "chunk_index"] in chunk_uniques
