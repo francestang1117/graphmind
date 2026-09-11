@@ -1622,10 +1622,11 @@ PostgreSQL migration and row-lock checks remain conditional on
 ## 2026-09 - V2 PR7 Review Hardening
 
 The literature-search boundary now keeps unknown disease extraction privacy
-bounded. Unrecognized Chinese disease text is accepted only after explicit
-case/relation markers, and ambiguous narrative text fails closed instead of
-being copied into the external query. English aliases use word boundaries, so
-the short gene symbol `GLA` cannot match a word such as `glaucoma`.
+bounded. Unrecognized Chinese disease text always fails closed. Only locally
+recognized dictionary aliases are converted to normalized PubMed terms;
+relation markers never permit raw unknown Chinese text to leave GraphMind.
+English aliases use word boundaries, so the short gene symbol `GLA` cannot
+match a word such as `glaucoma`.
 
 Search workers use a monotonic attempt count and a random attempt token. The
 token is checked on heartbeat, success, and failure writes, so a worker from an
