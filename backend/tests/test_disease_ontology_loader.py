@@ -62,6 +62,30 @@ def test_default_seed_has_reviewed_mesh_id_name_pairs() -> None:
     assert ontology.get("mesh:D005776").mesh_id == "D005776"
 
 
+def test_replacement_package_rejects_contradictory_concept_identifiers(tmp_path) -> None:
+    resource_copy = tmp_path / "resources"
+    resource_copy.mkdir()
+    manifest = json.loads((RESOURCE_DIR / "manifest.json").read_text(encoding="utf-8"))
+    raw = gzip.decompress((RESOURCE_DIR / manifest["data_file"]).read_bytes())
+    records = [json.loads(line) for line in raw.decode("utf-8").splitlines()]
+    fabry = next(record for record in records if record["concept_id"] == "mesh:D000795")
+    fabry["mesh_id"] = "D005205"
+    rebuilt = "".join(
+        json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        + "\n"
+        for record in records
+    ).encode("utf-8")
+    replacement = gzip.compress(rebuilt, mtime=0)
+    (resource_copy / manifest["data_file"]).write_bytes(replacement)
+    manifest["sha256"] = hashlib.sha256(replacement).hexdigest()
+    (resource_copy / "manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+
+    with pytest.raises(DiseaseOntologyError, match="record"):
+        DiseaseOntology.from_directory(resource_copy)
+
+
 def test_checksum_mismatch_rejects_the_package(tmp_path) -> None:
     resource_copy = tmp_path / "resources"
     resource_copy.mkdir()

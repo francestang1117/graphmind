@@ -237,8 +237,9 @@ PYTHONPATH=backend .venv/bin/python backend/scripts/build_disease_ontology.py \
 The builder is offline. Every explicit input must produce at least one usable
 record; the output manifest records each input file name and SHA-256 together
 with its immutable source URL, revision, release, and license URL. Curated
-inputs require `--source-revision`; use a commit SHA or immutable release tag,
-never `blob/main`.
+inputs require `--source-revision`; use a full 40-character commit SHA. Keep
+release labels in the release fields rather than using a movable branch or tag
+in a source URL.
 
 Build the frontend:
 

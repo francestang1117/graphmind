@@ -25,7 +25,11 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.services.medical.terminology.loader import DiseaseOntology
-from app.services.medical.terminology.models import DiseaseAlias, DiseaseConcept
+from app.services.medical.terminology.models import (
+    DiseaseAlias,
+    DiseaseConcept,
+    validate_concept_identifiers,
+)
 from app.services.medical.terminology.normalizer import normalize_terminology_text
 from app.services.medical.terminology.pubmed_mapper import pubmed_terms_for_concept
 
@@ -56,7 +60,7 @@ _SOURCE_METADATA = {
     },
 }
 _SHORT_ALIAS = re.compile(r"^[A-Za-z][A-Za-z0-9-]{1,7}$")
-_SOURCE_REVISION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_SOURCE_REVISION = re.compile(r"^[0-9a-fA-F]{40}$")
 
 
 @dataclass
@@ -90,7 +94,7 @@ def build_ontology(
     """Build, validate, and return a summary for one ontology package."""
     source_revision = source_revision.strip()
     if source_revision and not _SOURCE_REVISION.fullmatch(source_revision):
-        raise ValueError("source_revision must be a commit SHA or release tag")
+        raise ValueError("source_revision must be a 40-character commit SHA")
     drafts: dict[str, _ConceptDraft] = {}
     source_specs: list[tuple[Path, str]] = []
 
@@ -215,7 +219,7 @@ def _load_curated_aliases(path: Path, drafts: dict[str, _ConceptDraft]) -> int:
             raise ValueError(
                 f"curated alias references unknown concept: {concept_id}"
             )
-        _validate_concept_identifiers(
+        validate_concept_identifiers(
             concept_id,
             draft.mesh_id,
             draft.orpha_code,
@@ -258,7 +262,7 @@ def _load_mesh_xml(path: Path, drafts: dict[str, _ConceptDraft]) -> int:
                 f"mesh identifier conflicts for {concept_id}: "
                 f"{draft.mesh_id} != {mesh_id}"
             )
-        _validate_concept_identifiers(concept_id, mesh_id, draft.orpha_code)
+        validate_concept_identifiers(concept_id, mesh_id, draft.orpha_code)
         draft.mesh_id = mesh_id
         draft.preferred_name_en = preferred
         draft.aliases.append(_alias_value(preferred, language="en", alias_type="preferred", source="mesh"))
@@ -291,7 +295,7 @@ def _load_orphanet_xml(path: Path, drafts: dict[str, _ConceptDraft]) -> int:
                 f"Orphanet identifier conflicts for {concept_id}: "
                 f"{draft.orpha_code} != {code}"
             )
-        _validate_concept_identifiers(concept_id, draft.mesh_id, code)
+        validate_concept_identifiers(concept_id, draft.mesh_id, code)
         draft.orpha_code = code
         draft.preferred_name_en = draft.preferred_name_en or preferred
         draft.aliases.append(_alias_value(preferred, language="en", alias_type="preferred", source="orphanet"))
@@ -322,7 +326,7 @@ def _finalize_concepts(drafts: dict[str, _ConceptDraft]) -> tuple[DiseaseConcept
     concepts: list[DiseaseConcept] = []
     for concept_id in sorted(drafts):
         draft = drafts[concept_id]
-        _validate_concept_identifiers(
+        validate_concept_identifiers(
             draft.concept_id,
             draft.mesh_id,
             draft.orpha_code,
@@ -412,7 +416,7 @@ def _merge_record(
         )
     resolved_mesh_id = draft.mesh_id or mesh_id
     resolved_orpha_code = draft.orpha_code or orpha_code
-    _validate_concept_identifiers(
+    validate_concept_identifiers(
         concept_id,
         resolved_mesh_id,
         resolved_orpha_code,
@@ -528,30 +532,6 @@ def _local_name(tag: str) -> str:
 def _clean_identifier(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
-
-
-def _validate_concept_identifiers(
-    concept_id: str,
-    mesh_id: str | None,
-    orpha_code: str | None,
-) -> None:
-    """Reject concept records whose prefixed ID disagrees with its source ID."""
-    if concept_id.startswith("mesh:"):
-        expected = concept_id.removeprefix("mesh:")
-        if not mesh_id:
-            raise ValueError(f"{concept_id} must include mesh_id")
-        if expected != mesh_id:
-            raise ValueError(
-                f"concept id {concept_id} does not match mesh_id {mesh_id}"
-            )
-    if concept_id.startswith("orpha:"):
-        expected = concept_id.removeprefix("orpha:")
-        if not orpha_code:
-            raise ValueError(f"{concept_id} must include orpha_code")
-        if expected != orpha_code:
-            raise ValueError(
-                f"concept id {concept_id} does not match orpha_code {orpha_code}"
-            )
 
 
 def _contains_cjk(value: str) -> bool:

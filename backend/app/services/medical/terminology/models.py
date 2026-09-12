@@ -5,12 +5,37 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 AliasLanguage = Literal["en", "zh-Hans", "zh-Hant", "ja"]
 AliasResolution = Literal["automatic", "confirmation_required", "blocked"]
 MatchStatus = Literal["ready", "needs_confirmation"]
+_COMMIT_SHA = re.compile(r"[0-9a-fA-F]{40}")
+
+
+def validate_concept_identifiers(
+    concept_id: str,
+    mesh_id: str | None,
+    orpha_code: str | None,
+) -> None:
+    """Reject concept records whose prefixed ID disagrees with its source ID."""
+    if concept_id.startswith("mesh:"):
+        expected = concept_id.removeprefix("mesh:")
+        if not mesh_id:
+            raise ValueError(f"{concept_id} must include mesh_id")
+        if expected != mesh_id:
+            raise ValueError(
+                f"concept id {concept_id} does not match mesh_id {mesh_id}"
+            )
+    if concept_id.startswith("orpha:"):
+        expected = concept_id.removeprefix("orpha:")
+        if not orpha_code:
+            raise ValueError(f"{concept_id} must include orpha_code")
+        if expected != orpha_code:
+            raise ValueError(
+                f"concept id {concept_id} does not match orpha_code {orpha_code}"
+            )
 
 
 class ConceptSelection(BaseModel):
@@ -60,6 +85,15 @@ class DiseaseConcept(BaseModel):
     def trim_names(cls, value: str) -> str:
         return value.strip()
 
+    @model_validator(mode="after")
+    def validate_identifiers(self) -> "DiseaseConcept":
+        validate_concept_identifiers(
+            self.concept_id,
+            self.mesh_id,
+            self.orpha_code,
+        )
+        return self
+
 
 class OntologySource(BaseModel):
     """A source record kept in the manifest for auditability."""
@@ -84,15 +118,16 @@ class OntologySource(BaseModel):
     @field_validator("source_url")
     @classmethod
     def validate_source_url(cls, value: str) -> str:
-        if "blob/main" in value:
-            raise ValueError("source URLs must identify an immutable revision")
+        match = re.search(r"github\.com/[^/]+/[^/]+/blob/([^/]+)/", value)
+        if match and not _COMMIT_SHA.fullmatch(match.group(1)):
+            raise ValueError("GitHub source URLs must identify a commit SHA")
         return value
 
     @field_validator("revision")
     @classmethod
     def validate_revision(cls, value: str) -> str:
-        if value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", value):
-            raise ValueError("source revision must be a commit SHA or release tag")
+        if value and not _COMMIT_SHA.fullmatch(value):
+            raise ValueError("source revision must be a 40-character commit SHA")
         return value
 
 
@@ -116,8 +151,8 @@ class OntologyManifest(BaseModel):
     @field_validator("source_revision")
     @classmethod
     def validate_source_revision(cls, value: str) -> str:
-        if value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", value):
-            raise ValueError("source revision must be a commit SHA or release tag")
+        if value and not _COMMIT_SHA.fullmatch(value):
+            raise ValueError("source revision must be a 40-character commit SHA")
         return value
 
 

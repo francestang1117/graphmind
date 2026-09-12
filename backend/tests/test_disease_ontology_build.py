@@ -13,6 +13,7 @@ RESOURCE_DIR = Path(__file__).resolve().parents[1] / "app/services/medical/termi
 SEED_FILE = Path(__file__).resolve().parents[1] / "data/curated_disease_concepts.jsonl"
 ALIASES_FILE = Path(__file__).resolve().parents[1] / "data/curated_zh_disease_aliases.yaml"
 CHECKED_IN_SOURCE_REVISION = "114e6da9d4ab3dfdc86af8a084def14fef7d3432"
+TEST_SOURCE_REVISION = "a" * 40
 
 
 def test_build_is_deterministic_and_marks_short_aliases(tmp_path) -> None:
@@ -47,7 +48,7 @@ def test_build_is_deterministic_and_marks_short_aliases(tmp_path) -> None:
         mesh_file=source,
         zh_aliases=aliases,
         ontology_version="test-ontology-1",
-        source_revision="test-revision",
+        source_revision=TEST_SOURCE_REVISION,
         generated_at="2026-09-12T00:00:00Z",
     )
     second = build_ontology(
@@ -55,7 +56,7 @@ def test_build_is_deterministic_and_marks_short_aliases(tmp_path) -> None:
         mesh_file=source,
         zh_aliases=aliases,
         ontology_version="test-ontology-1",
-        source_revision="test-revision",
+        source_revision=TEST_SOURCE_REVISION,
         generated_at="2026-09-12T00:00:00Z",
     )
 
@@ -116,6 +117,15 @@ def test_curated_inputs_require_an_immutable_source_revision(tmp_path) -> None:
             output=tmp_path / "output",
             curated_seed_file=SEED_FILE,
             zh_aliases=ALIASES_FILE,
+        )
+
+
+def test_curated_source_revision_rejects_movable_branch_names(tmp_path) -> None:
+    with pytest.raises(ValueError, match="40-character commit SHA"):
+        build_ontology(
+            output=tmp_path / "output",
+            curated_seed_file=SEED_FILE,
+            source_revision="dev",
         )
 
 
@@ -236,7 +246,7 @@ def test_curated_preferred_name_cannot_override_seed_name(tmp_path) -> None:
             output=tmp_path / "output",
             mesh_file=seed,
             zh_aliases=aliases,
-            source_revision="test-revision",
+            source_revision=TEST_SOURCE_REVISION,
         )
 
 
@@ -317,5 +327,5 @@ def test_curated_aliases_must_reference_an_existing_concept(tmp_path) -> None:
             output=tmp_path / "output",
             mesh_file=seed,
             zh_aliases=aliases,
-            source_revision="test-revision",
+            source_revision=TEST_SOURCE_REVISION,
         )
