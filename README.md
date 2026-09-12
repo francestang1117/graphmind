@@ -61,7 +61,7 @@ provide a diagnosis or treatment recommendation.
 - Versioned local disease ontology with exact alias matching, privacy-bounded
   Chinese disease handling, explicit confirmation for ambiguous aliases, and
   auditable MeSH/curated source checksums
-- 405 backend tests covering the current core modules
+- 412 backend tests covering the current core modules
 
 ## Project Status
 

@@ -1705,6 +1705,6 @@ the manifest; the builder requires a full 40-character commit SHA, rejects
 curated inputs without it, and rejects aliases that reference unknown concepts.
 Concept models and the runtime loader repeat the source-ID consistency check so
 replacement packages cannot bypass the build-time validation. The backend
-suite is now `410 passed, 3 skipped`; the remaining
+suite is now `412 passed, 3 skipped`; the remaining
 skips are environment-dependent PostgreSQL checks when no test database URL is
 configured.
