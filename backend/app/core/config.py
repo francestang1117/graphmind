@@ -126,6 +126,15 @@ class Settings(BaseSettings):
     # Redis is required outside local/test environments so multiple workers
     # cannot each apply an independent PubMed request budget.
     PUBMED_RATE_LIMIT_REDIS_REQUIRED: bool = True
+    # The disease terminology package is local, versioned, and read-only at
+    # runtime. Deployments may point this at a reviewed replacement package.
+    MEDICAL_ONTOLOGY_DIR: str = str(
+        Path(__file__).resolve().parents[1]
+        / "services"
+        / "medical"
+        / "terminology"
+        / "resources"
+    )
 
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
@@ -194,6 +203,18 @@ def validate_runtime_config(config: Settings | None = None) -> None:
             problems.append(
                 "PUBMED_RATE_LIMIT_REDIS_REQUIRED must be true outside development "
                 "and test when literature search is enabled."
+            )
+        try:
+            from app.services.medical.terminology.loader import DiseaseOntology
+
+            DiseaseOntology.from_directory(runtime.MEDICAL_ONTOLOGY_DIR)
+        except Exception:
+            # Keep the public startup error generic; the loader's detailed
+            # reason remains available to local diagnostics without exposing
+            # document or provider data.
+            problems.append(
+                "MEDICAL_ONTOLOGY_DIR must point to a valid local disease ontology "
+                "when literature search is enabled outside development and test."
             )
 
     if runtime.AUTH_REQUIRED or not is_local:

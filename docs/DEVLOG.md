@@ -1653,3 +1653,58 @@ The DOI and journal storage limits now match the normalized metadata model, and
 the newest sort uses the official `pub_date` value. The local backend suite is
 now `373 passed, 3 skipped`; PostgreSQL migration and row-lock checks remain
 conditional on `GRAPHMIND_TEST_POSTGRES_URL`.
+
+## 2026-09 - V2 PR8: Local Disease Ontology
+
+Disease names are now resolved by a versioned, read-only local ontology before
+the literature provider can be called. The package carries a manifest,
+checksum, source metadata, deterministic gzip JSONL records, MeSH-backed query
+templates, and a small curated seed that includes common and rare disease
+aliases. `MEDICAL_ONTOLOGY_DIR` can point to a reviewed replacement package;
+production startup rejects a missing or corrupt package when literature search
+is enabled.
+
+The query builder no longer guesses disease phrases from free-form text.
+Exact Chinese and English aliases become standard PubMed terms, while unknown
+Chinese text fails closed and short or ambiguous aliases such as `ALS` return
+safe candidates for explicit selection. Match IDs are stable for a given
+ontology version, and display labels retain the user's original spelling.
+
+The preview API exposes `resolution_status`, candidates, ontology version, and
+selected concept IDs. A search cannot create a run or contact PubMed until all
+ambiguous aliases are resolved and the user confirms the resulting fingerprint.
+Search runs persist terminology provenance and detected concepts so workers
+replay the same query contract after a restart. Existing symptom, gene, and
+drug rules remain available as the legacy non-disease boundary.
+
+`backend/scripts/build_disease_ontology.py` builds the package only from local
+operator-supplied MeSH/Orphanet files, the checked-in curated seed, and curated
+aliases. MeSH XML is restricted to Descriptor Records with a `C...` TreeNumber;
+Orphadata XML reads the standard child `OrphaCode` element and its synonyms.
+Each explicit input must produce at least one usable record. The builder sorts
+records, uses fixed gzip parameters, writes per-input file names and SHA-256
+digests alongside source URL/release/license metadata, and validates the result
+before reporting success. The checked-in package can be rebuilt with:
+
+```bash
+PYTHONPATH=backend .venv/bin/python backend/scripts/build_disease_ontology.py \
+  --curated-seed backend/data/curated_disease_concepts.jsonl \
+  --zh-aliases backend/data/curated_zh_disease_aliases.yaml \
+  --output backend/app/services/medical/terminology/resources \
+  --ontology-version curated-seed-2026.09.2 \
+  --mesh-release seed \
+  --source-revision 114e6da9d4ab3dfdc86af8a084def14fef7d3432 \
+  --generated-at 2026-09-12T00:00:00Z
+```
+
+The PR8 local suite covers package integrity, official MeSH ID golden pairs,
+deterministic builds, real-shaped MeSH and Orphadata XML, exact matching,
+privacy, ambiguity confirmation, API selection, migration, and worker
+restoration. Curated source URLs are pinned to the source revision recorded in
+the manifest; the builder requires a full 40-character commit SHA, rejects
+curated inputs without it, and rejects aliases that reference unknown concepts.
+Concept models and the runtime loader repeat the source-ID consistency check so
+replacement packages cannot bypass the build-time validation. The backend
+suite is now `412 passed, 3 skipped`; the remaining
+skips are environment-dependent PostgreSQL checks when no test database URL is
+configured.

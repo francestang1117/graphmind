@@ -38,6 +38,8 @@ def test_worker_claims_fetches_and_saves_a_search(monkeypatch) -> None:
 
     assert result["status"] == "succeeded"
     assert captured["query"].normalized_query
+    assert captured["query"].ontology_version
+    assert captured["query"].detected_concepts[0].concept_id
     assert repository.get_run(run_id, "user-a", "workspace-a")["result_count"] == 1
 
 

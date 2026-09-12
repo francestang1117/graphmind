@@ -110,3 +110,17 @@ def test_production_literature_search_requires_redis_coordination():
 
     with pytest.raises(RuntimeError, match="PUBMED_RATE_LIMIT_REDIS_REQUIRED"):
         validate_runtime_config(config)
+
+
+def test_production_literature_search_requires_a_valid_local_ontology(tmp_path):
+    config = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        AUTH_REQUIRED=True,
+        SECRET_KEY="x" * 64,
+        LITERATURE_SEARCH_ENABLED=True,
+        MEDICAL_ONTOLOGY_DIR=str(tmp_path / "missing-ontology"),
+    )
+
+    with pytest.raises(RuntimeError, match="MEDICAL_ONTOLOGY_DIR"):
+        validate_runtime_config(config)

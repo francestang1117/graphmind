@@ -97,6 +97,9 @@ def test_search_run_is_idempotent_and_success_is_cached() -> None:
     assert saved["result_count"] == 1
     assert saved["articles"][0]["external_id"] == "12345678"
     assert saved["warnings"] == ["pubmed_email_not_configured"]
+    assert saved["ontology_version"]
+    assert saved["detected_concepts"][0]["concept_id"]
+    assert saved["selected_concept_ids"] == [saved["detected_concepts"][0]["concept_id"]]
 
     reused, was_created = repository.create_or_reuse(
         query=_query(),

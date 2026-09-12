@@ -470,6 +470,8 @@ class LiteratureSearchRunRecord(Base):
     study_types_json: Mapped[str] = mapped_column(Text, default="[]")
     sort: Mapped[str] = mapped_column(String(32), default="relevance")
     max_results: Mapped[int] = mapped_column(Integer, default=20)
+    ontology_version: Mapped[str] = mapped_column(String(64), default="legacy")
+    detected_concepts_json: Mapped[str] = mapped_column(Text, default="[]")
     result_count: Mapped[int] = mapped_column(Integer, default=0)
     error_code: Mapped[str] = mapped_column(String(80), default="")
     error_message: Mapped[str] = mapped_column(Text, default="")

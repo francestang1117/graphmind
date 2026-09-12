@@ -9,6 +9,8 @@ from app.services.medical.literature.query_builder import (
     build_literature_query,
     redact_sensitive_text,
 )
+from app.services.medical.terminology.models import ConceptSelection
+from app.services.medical.terminology.loader import DiseaseOntology, get_default_ontology
 
 
 def test_build_query_extracts_known_concepts_and_filters() -> None:
@@ -118,13 +120,112 @@ def test_unrecognized_chinese_disease_text_fails_closed(question: str) -> None:
         build_literature_query(question)
 
 
-@pytest.mark.parametrize("question", [
-    "What treatments exist for glaucoma?",
-    "What is a regular software release?",
-])
-def test_short_gene_alias_does_not_match_an_english_substring(question: str) -> None:
+def test_unrecognized_chinese_disease_is_not_hidden_by_a_legacy_concept() -> None:
     with pytest.raises(LiteratureQueryError, match="No medical concepts"):
-        build_literature_query(question)
+        build_literature_query("关于青龙病和肾功能的研究")
+
+
+def test_glaucoma_is_resolved_by_the_disease_ontology() -> None:
+    query = build_literature_query("What treatments exist for glaucoma?")
+
+    assert [concept.normalized for concept in query.detected_concepts] == ["Glaucoma"]
+    assert "glaucoma[Title/Abstract]" in query.normalized_query
+
+
+def test_short_gene_alias_does_not_match_an_english_substring() -> None:
+    with pytest.raises(LiteratureQueryError, match="No medical concepts"):
+        build_literature_query("What is a regular software release?")
+
+
+@pytest.mark.parametrize(
+    ("question", "expected_term"),
+    [
+        ("What is known about Huntington disease?", "Huntington Disease"),
+        ("What is known about melanoma?", "Melanoma"),
+        ("What is known about sarcoidosis?", "Sarcoidosis"),
+        ("What is known about Duchenne muscular dystrophy?", "Duchenne Muscular Dystrophy"),
+        ("关于亨廷顿病的治疗研究", "Huntington Disease"),
+        ("关于黑色素瘤的治疗研究", "Melanoma"),
+        ("关于结节病的研究", "Sarcoidosis"),
+        ("关于杜氏肌营养不良的研究", "Duchenne Muscular Dystrophy"),
+    ],
+)
+def test_rare_disease_aliases_use_local_standard_terms(
+    question: str, expected_term: str
+) -> None:
+    query = build_literature_query(question)
+
+    assert [concept.normalized for concept in query.detected_concepts] == [expected_term]
+    assert all(concept.source == "local_ontology" for concept in query.detected_concepts)
+    assert all(concept.ontology_version == query.ontology_version for concept in query.detected_concepts)
+    assert "关于" not in query.normalized_query
+
+
+def test_longest_chinese_alias_wins_over_generic_alias() -> None:
+    query = build_literature_query("杜氏肌营养不良有哪些研究？")
+
+    assert [concept.normalized for concept in query.detected_concepts] == [
+        "Duchenne Muscular Dystrophy"
+    ]
+
+
+def test_ambiguous_abbreviation_requires_selection_before_query_generation() -> None:
+    preview = build_literature_query("What is known about ALS?")
+
+    assert preview.resolution_status == "needs_confirmation"
+    assert preview.query_hash is None
+    assert preview.normalized_query == ""
+    assert preview.ambiguous_concepts[0].matched_text == "ALS"
+    match = preview.ambiguous_concepts[0]
+    selection = ConceptSelection(
+        match_id=match.match_id,
+        concept_id=match.candidates[0].concept_id,
+    )
+
+    resolved = build_literature_query(
+        "What is known about ALS?",
+        concept_selections=[selection],
+    )
+
+    assert resolved.resolution_status == "ready"
+    assert resolved.query_hash is not None
+    assert "Amyotrophic Lateral Sclerosis" in resolved.normalized_query
+    assert "ALS[Title/Abstract]" not in resolved.normalized_query
+
+
+def test_invalid_concept_selection_is_rejected() -> None:
+    preview = build_literature_query("What is known about ALS?")
+
+    with pytest.raises(LiteratureQueryError, match="selected disease concept"):
+        build_literature_query(
+            "What is known about ALS?",
+            concept_selections=[
+                ConceptSelection(
+                    match_id=preview.ambiguous_concepts[0].match_id,
+                    concept_id="mesh:not-a-candidate",
+                )
+            ],
+        )
+
+
+def test_ontology_version_and_selection_change_the_query_fingerprint() -> None:
+    ontology = get_default_ontology()
+    alternate = DiseaseOntology(
+        manifest=ontology.manifest.model_copy(
+            update={"ontology_version": "curated-seed-test"}
+        ),
+        concepts=ontology.concepts,
+        source_path=ontology.source_path,
+        data_sha256=ontology.data_sha256,
+    )
+    first = build_literature_query("What is known about Fabry disease?", ontology=ontology)
+    second = build_literature_query(
+        "What is known about Fabry disease?", ontology=alternate
+    )
+
+    assert first.ontology_version
+    assert first.selected_concept_ids
+    assert first.query_hash != second.query_hash
 
 
 @pytest.mark.parametrize("question", ["What is known about GLA gene?", "What is GLA mutation?"])

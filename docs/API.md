@@ -382,9 +382,26 @@ curl -X POST \
 ```
 
 The response contains `pubmed_query`, `detected_concepts`,
-`redacted_fields`, and a SHA-256 `query_fingerprint`. The `external_data`
-object explicitly states that query terms are sent while document content and
-the uploaded file are not.
+`redacted_fields`, and a SHA-256 `query_fingerprint`. It also includes the
+read-only `ontology_version`, `selected_concept_ids`, and `resolution_status`.
+Only `ready` responses contain an outbound query and fingerprint. An
+ambiguous abbreviation such as `ALS` returns `needs_confirmation` with safe
+candidate records and both values set to `null`; submit the selected
+`concept_selections` in a second preview request:
+
+```json
+{
+  "question": "What is known about ALS?",
+  "concept_selections": [
+    {"match_id": "<match-id-from-preview>", "concept_id": "<candidate-id>"}
+  ]
+}
+```
+
+The local matcher uses exact, reviewed aliases only. Unknown Chinese disease
+text is rejected with `422`; it is never copied into the PubMed query. The
+`external_data` object explicitly states that only confirmed standard terms
+are sent while document content and the uploaded file are not.
 
 #### `POST /documents/{document_id}/literature-search`
 
@@ -398,6 +415,7 @@ preview response together with explicit confirmation:
   "study_types": ["systematic_review"],
   "sort": "relevance",
   "max_results": 20,
+  "concept_selections": [],
   "external_search_confirmed": true,
   "query_fingerprint": "<fingerprint-from-preview>"
 }
@@ -416,7 +434,9 @@ Poll with the `workspace_id` until `status` is `succeeded` or `failed`:
 curl "http://localhost:8000/api/v1/literature-search-runs/<run_id>?workspace_id=<workspace_id>"
 ```
 
-A successful run returns normalized article records with PMID, DOI when
+A successful run also records `ontology_version` and `detected_concepts` so a
+worker can restore the same local terminology provenance. It returns
+normalized article records with PMID, DOI when
 available, PMCID when available, title, abstract, journal, publication date,
 authors, publication types, MeSH terms, language, the official PubMed URL,
 and `retraction_status`. The status distinguishes `normal`, `retracted`,
@@ -439,6 +459,9 @@ its search runs and result links; the shared public article metadata cache is
 retained because it does not contain uploaded document content.
 
 Common API errors include `literature_no_medical_concepts` (`422`),
+`literature_invalid_concept_selection` (`422`),
+`literature_concept_confirmation_required` (`409`),
+`literature_ontology_unavailable` (`503`),
 `external_search_confirmation_required` (`409`),
 `external_search_query_changed` (`409`),
 `literature_provider_not_configured` (`503`), and

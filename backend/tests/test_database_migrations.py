@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from app.core.database import Base
-from app.core.database_migrations import upgrade_persistence_schema
+from app.core.database_migrations import _ensure_literature_tables, upgrade_persistence_schema
 from app.core.workspace import default_workspace_id
 from app.models.persistence import (
     DocumentRecord,
@@ -207,6 +207,8 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         item["name"] for item in inspector.get_columns("literature_search_runs")
     }
     assert "attempt_token" in literature_run_columns
+    assert "ontology_version" in literature_run_columns
+    assert "detected_concepts_json" in literature_run_columns
     chunk_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_chunks")]
     entity_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_entities")]
     assert ["user_id", "workspace_id", "document_id", "chunk_index"] in chunk_uniques
@@ -556,3 +558,71 @@ def test_upgrade_cleans_legacy_postgres_references():
         with cleanup_engine.begin() as db:
             db.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
         cleanup_engine.dispose()
+
+
+def test_existing_literature_runs_table_gets_ontology_provenance_columns():
+    """PR #7 tables receive the PR #8 fields without dropping search runs."""
+    engine = create_engine("sqlite:///:memory:", future=True)
+    with engine.begin() as db:
+        db.exec_driver_sql("CREATE TABLE documents (id VARCHAR(255) PRIMARY KEY)")
+        db.exec_driver_sql(
+            """
+            CREATE TABLE literature_search_runs (
+                id VARCHAR(64) PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255),
+                question TEXT NOT NULL,
+                normalized_query TEXT NOT NULL,
+                query_hash VARCHAR(64) NOT NULL,
+                provider VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                date_from VARCHAR(32),
+                date_to VARCHAR(32),
+                study_types_json TEXT NOT NULL,
+                sort VARCHAR(32) NOT NULL,
+                max_results INTEGER NOT NULL,
+                result_count INTEGER NOT NULL,
+                error_code VARCHAR(80) NOT NULL,
+                error_message TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                attempt_count INTEGER NOT NULL,
+                attempt_token VARCHAR(64),
+                external_search_confirmed_at DATETIME,
+                last_heartbeat_at DATETIME,
+                lease_expires_at DATETIME,
+                started_at DATETIME,
+                completed_at DATETIME,
+                fetched_at DATETIME,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL
+            )
+            """
+        )
+        db.exec_driver_sql(
+            """
+            INSERT INTO literature_search_runs (
+                id, user_id, workspace_id, document_id, question,
+                normalized_query, query_hash, provider, status,
+                study_types_json, sort, max_results, result_count,
+                error_code, error_message, warnings_json, attempt_count,
+                created_at, updated_at
+            ) VALUES (
+                'legacy-run', 'user-a', 'workspace-a', NULL, 'Fabry disease',
+                'fabry[Title/Abstract]', 'a', 'pubmed', 'succeeded',
+                '[]', 'relevance', 20, 0, '', '', '[]', 0,
+                '2026-09-12', '2026-09-12'
+            )
+            """
+        )
+        _ensure_literature_tables(db)
+
+    columns = {item["name"] for item in inspect(engine).get_columns("literature_search_runs")}
+    assert {"ontology_version", "detected_concepts_json"}.issubset(columns)
+    with engine.connect() as db:
+        assert db.scalar(
+            text("SELECT ontology_version FROM literature_search_runs WHERE id = 'legacy-run'")
+        ) == "legacy"
+        assert db.scalar(
+            text("SELECT detected_concepts_json FROM literature_search_runs WHERE id = 'legacy-run'")
+        ) == "[]"

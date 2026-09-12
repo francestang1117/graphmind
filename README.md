@@ -58,7 +58,10 @@ provide a diagnosis or treatment recommendation.
 - Privacy-bounded PubMed search with query preview, explicit confirmation,
   normalized metadata, retraction/correction flags, scoped caching, worker
   leases, and Redis-coordinated request pacing
-- 373 backend tests covering the current core modules
+- Versioned local disease ontology with exact alias matching, privacy-bounded
+  Chinese disease handling, explicit confirmation for ambiguous aliases, and
+  auditable MeSH/curated source checksums
+- 412 backend tests covering the current core modules
 
 ## Project Status
 
@@ -74,7 +77,7 @@ provide a diagnosis or treatment recommendation.
 | Persistence | Partial | Workspaces, documents, parsed chunks/entities, graph nodes/edges, users, and jobs |
 | V2 research boundary | PR1 complete | Account-owned workspaces and workspace-scoped document-derived data |
 | V2 medical analysis | PR5 implementation | Local or OpenAI single-document interpretation with traceable evidence and coverage |
-| V2 literature search | PR7 implementation | Confirmed PubMed query terms, official metadata/abstracts, scoped runs, and cache |
+| V2 literature search | PR8 implementation | Versioned local disease matching, confirmed PubMed terms, official metadata/abstracts, scoped runs, and cache |
 | Observability | Working MVP | Prometheus metrics and optional Sentry |
 | File storage backend | Working MVP | Local by default; optional S3/MinIO keeps a local parser cache |
 | Authentication | Working MVP | Email/password, optional GitHub OAuth, user-scoped workspaces |
@@ -217,6 +220,26 @@ Current backend coverage includes upload validation/storage, parsers, entity
 extraction, graph/search/chat pipeline pieces, auth, rate limiting, Sentry,
 metrics, WebSocket progress, job history, cleanup behavior, and the PubMed
 query/provider/persistence boundaries.
+
+Rebuild the checked-in local disease package from its reviewable seed inputs:
+
+```bash
+PYTHONPATH=backend .venv/bin/python backend/scripts/build_disease_ontology.py \
+  --curated-seed backend/data/curated_disease_concepts.jsonl \
+  --zh-aliases backend/data/curated_zh_disease_aliases.yaml \
+  --output backend/app/services/medical/terminology/resources \
+  --ontology-version curated-seed-2026.09.2 \
+  --mesh-release seed \
+  --source-revision 114e6da9d4ab3dfdc86af8a084def14fef7d3432 \
+  --generated-at 2026-09-12T00:00:00Z
+```
+
+The builder is offline. Every explicit input must produce at least one usable
+record; the output manifest records each input file name and SHA-256 together
+with its immutable source URL, revision, release, and license URL. Curated
+inputs require `--source-revision`; use a full 40-character commit SHA. Keep
+release labels in the release fields rather than using a movable branch or tag
+in a source URL.
 
 Build the frontend:
 

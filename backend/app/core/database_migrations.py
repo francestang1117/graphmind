@@ -462,6 +462,8 @@ def _ensure_literature_tables(connection) -> None:
                 normalized_query TEXT NOT NULL,
                 query_hash VARCHAR(64) NOT NULL,
                 provider VARCHAR(64) NOT NULL,
+                ontology_version VARCHAR(64) NOT NULL DEFAULT 'legacy',
+                detected_concepts_json TEXT NOT NULL DEFAULT '[]',
                 status VARCHAR(32) NOT NULL,
                 date_from VARCHAR(32),
                 date_to VARCHAR(32),
@@ -499,6 +501,16 @@ def _ensure_literature_tables(connection) -> None:
             connection.exec_driver_sql(
                 "ALTER TABLE literature_search_runs "
                 "ADD COLUMN attempt_token VARCHAR(64)"
+            )
+        if not _has_column(connection, "literature_search_runs", "ontology_version"):
+            connection.exec_driver_sql(
+                "ALTER TABLE literature_search_runs "
+                "ADD COLUMN ontology_version VARCHAR(64) NOT NULL DEFAULT 'legacy'"
+            )
+        if not _has_column(connection, "literature_search_runs", "detected_concepts_json"):
+            connection.exec_driver_sql(
+                "ALTER TABLE literature_search_runs "
+                "ADD COLUMN detected_concepts_json TEXT NOT NULL DEFAULT '[]'"
             )
 
     # PostgreSQL enforces VARCHAR limits while SQLite does not. Keep the
