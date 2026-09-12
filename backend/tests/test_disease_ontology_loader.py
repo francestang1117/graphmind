@@ -44,6 +44,10 @@ def test_default_ontology_has_versioned_integrity_metadata() -> None:
     assert ontology.manifest.record_count == len(ontology.concepts)
     assert ontology.manifest.alias_count == sum(len(item.aliases) for item in ontology.concepts)
     assert ontology.data_sha256 == ontology.manifest.sha256
+    assert ontology.manifest.source_revision == (
+        "114e6da9d4ab3dfdc86af8a084def14fef7d3432"
+    )
+    assert all("blob/main" not in source.source_url for source in ontology.manifest.sources)
     assert ontology.get("mesh:D006816").preferred_name_zh == "亨廷顿病"
 
 

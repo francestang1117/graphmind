@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "ontology_version": "curated-seed-2026.09.2",
+  "source_revision": "114e6da9d4ab3dfdc86af8a084def14fef7d3432",
   "mesh_release": "seed",
   "orphanet_release": "",
   "generated_at": "2026-09-12T00:00:00Z",
@@ -11,17 +12,19 @@
   "sources": [
     {
       "name": "GraphMind curated aliases",
-      "source_url": "https://github.com/francestang1117/graphmind/blob/main/backend/data/curated_zh_disease_aliases.yaml",
+      "source_url": "https://github.com/francestang1117/graphmind/blob/114e6da9d4ab3dfdc86af8a084def14fef7d3432/backend/data/curated_zh_disease_aliases.yaml",
       "license_url": "https://github.com/francestang1117/graphmind",
       "release": "curated",
+      "revision": "114e6da9d4ab3dfdc86af8a084def14fef7d3432",
       "file_sha256": "47684f73958bc7f6e859521a5a7cab7a751c2b0207385448f558b12d5faabf9b",
       "file_name": "curated_zh_disease_aliases.yaml"
     },
     {
       "name": "GraphMind curated disease seed",
-      "source_url": "https://github.com/francestang1117/graphmind/blob/main/backend/data/curated_disease_concepts.jsonl",
+      "source_url": "https://github.com/francestang1117/graphmind/blob/114e6da9d4ab3dfdc86af8a084def14fef7d3432/backend/data/curated_disease_concepts.jsonl",
       "license_url": "https://github.com/francestang1117/graphmind",
       "release": "curated",
+      "revision": "114e6da9d4ab3dfdc86af8a084def14fef7d3432",
       "file_sha256": "a53ea22ef68010f92446d291f1b9e3c46dc7166be93972c60335e38ed050b798",
       "file_name": "curated_disease_concepts.jsonl"
     }

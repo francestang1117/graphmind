@@ -46,16 +46,17 @@ _SOURCE_METADATA = {
     },
     "curated_seed": {
         "name": "GraphMind curated disease seed",
-        "source_url": "https://github.com/francestang1117/graphmind/blob/main/backend/data/curated_disease_concepts.jsonl",
+        "source_url": "https://github.com/francestang1117/graphmind/blob/{revision}/backend/data/curated_disease_concepts.jsonl",
         "license_url": DEFAULT_LICENSE_URL,
     },
     "curated_aliases": {
         "name": "GraphMind curated aliases",
-        "source_url": "https://github.com/francestang1117/graphmind/blob/main/backend/data/curated_zh_disease_aliases.yaml",
+        "source_url": "https://github.com/francestang1117/graphmind/blob/{revision}/backend/data/curated_zh_disease_aliases.yaml",
         "license_url": DEFAULT_LICENSE_URL,
     },
 }
 _SHORT_ALIAS = re.compile(r"^[A-Za-z][A-Za-z0-9-]{1,7}$")
+_SOURCE_REVISION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 @dataclass
@@ -83,9 +84,13 @@ def build_ontology(
     ontology_version: str = "local-build-1",
     mesh_release: str = "",
     orphanet_release: str = "",
+    source_revision: str = "",
     generated_at: str = DEFAULT_GENERATED_AT,
 ) -> dict[str, Any]:
     """Build, validate, and return a summary for one ontology package."""
+    source_revision = source_revision.strip()
+    if source_revision and not _SOURCE_REVISION.fullmatch(source_revision):
+        raise ValueError("source_revision must be a commit SHA or release tag")
     drafts: dict[str, _ConceptDraft] = {}
     source_specs: list[tuple[Path, str]] = []
 
@@ -118,6 +123,12 @@ def build_ontology(
             "curated aliases",
         )
 
+    if any(kind in {"curated_seed", "curated_aliases"} for _, kind in source_specs):
+        if not source_revision:
+            raise ValueError(
+                "source_revision is required for curated ontology inputs"
+            )
+
     if not drafts:
         raise ValueError("at least one local ontology source file is required")
 
@@ -135,6 +146,7 @@ def build_ontology(
     manifest = {
         "schema_version": 1,
         "ontology_version": ontology_version,
+        "source_revision": source_revision,
         "mesh_release": mesh_release,
         "orphanet_release": orphanet_release,
         "generated_at": generated_at,
@@ -146,6 +158,7 @@ def build_ontology(
             source_specs,
             mesh_release=mesh_release,
             orphanet_release=orphanet_release,
+            source_revision=source_revision,
         ),
     }
     (output_dir / "manifest.json").write_text(
@@ -197,7 +210,16 @@ def _load_curated_aliases(path: Path, drafts: dict[str, _ConceptDraft]) -> int:
         concept_id = str(value.get("concept_id") or "").strip()
         if not concept_id:
             raise ValueError("curated alias record is missing concept_id")
-        draft = drafts.setdefault(concept_id, _ConceptDraft(concept_id))
+        draft = drafts.get(concept_id)
+        if draft is None:
+            raise ValueError(
+                f"curated alias references unknown concept: {concept_id}"
+            )
+        _validate_concept_identifiers(
+            concept_id,
+            draft.mesh_id,
+            draft.orpha_code,
+        )
         if value.get("preferred_name_en"):
             preferred_name_en = str(value["preferred_name_en"]).strip()
             if (
@@ -231,6 +253,12 @@ def _load_mesh_xml(path: Path, drafts: dict[str, _ConceptDraft]) -> int:
         accepted += 1
         concept_id = f"mesh:{mesh_id}"
         draft = drafts.setdefault(concept_id, _ConceptDraft(concept_id))
+        if draft.mesh_id and draft.mesh_id != mesh_id:
+            raise ValueError(
+                f"mesh identifier conflicts for {concept_id}: "
+                f"{draft.mesh_id} != {mesh_id}"
+            )
+        _validate_concept_identifiers(concept_id, mesh_id, draft.orpha_code)
         draft.mesh_id = mesh_id
         draft.preferred_name_en = preferred
         draft.aliases.append(_alias_value(preferred, language="en", alias_type="preferred", source="mesh"))
@@ -258,6 +286,12 @@ def _load_orphanet_xml(path: Path, drafts: dict[str, _ConceptDraft]) -> int:
         accepted += 1
         concept_id = f"orpha:{code}"
         draft = drafts.setdefault(concept_id, _ConceptDraft(concept_id))
+        if draft.orpha_code and draft.orpha_code != code:
+            raise ValueError(
+                f"Orphanet identifier conflicts for {concept_id}: "
+                f"{draft.orpha_code} != {code}"
+            )
+        _validate_concept_identifiers(concept_id, draft.mesh_id, code)
         draft.orpha_code = code
         draft.preferred_name_en = draft.preferred_name_en or preferred
         draft.aliases.append(_alias_value(preferred, language="en", alias_type="preferred", source="orphanet"))
@@ -288,6 +322,11 @@ def _finalize_concepts(drafts: dict[str, _ConceptDraft]) -> tuple[DiseaseConcept
     concepts: list[DiseaseConcept] = []
     for concept_id in sorted(drafts):
         draft = drafts[concept_id]
+        _validate_concept_identifiers(
+            draft.concept_id,
+            draft.mesh_id,
+            draft.orpha_code,
+        )
         preferred_en = draft.preferred_name_en or next(
             (
                 alias["text"]
@@ -361,8 +400,25 @@ def _merge_record(
     if not concept_id:
         raise ValueError("ontology record is missing concept_id")
     draft = drafts.setdefault(concept_id, _ConceptDraft(concept_id))
-    draft.mesh_id = draft.mesh_id or mesh_id
-    draft.orpha_code = draft.orpha_code or orpha_code
+    if draft.mesh_id and mesh_id and draft.mesh_id != mesh_id:
+        raise ValueError(
+            f"mesh identifier conflicts for {concept_id}: "
+            f"{draft.mesh_id} != {mesh_id}"
+        )
+    if draft.orpha_code and orpha_code and draft.orpha_code != orpha_code:
+        raise ValueError(
+            f"Orphanet identifier conflicts for {concept_id}: "
+            f"{draft.orpha_code} != {orpha_code}"
+        )
+    resolved_mesh_id = draft.mesh_id or mesh_id
+    resolved_orpha_code = draft.orpha_code or orpha_code
+    _validate_concept_identifiers(
+        concept_id,
+        resolved_mesh_id,
+        resolved_orpha_code,
+    )
+    draft.mesh_id = resolved_mesh_id
+    draft.orpha_code = resolved_orpha_code
     incoming_preferred_name = str(
         value.get("preferred_name_en") or value.get("name") or ""
     ).strip()
@@ -474,6 +530,30 @@ def _clean_identifier(value: Any) -> str | None:
     return text or None
 
 
+def _validate_concept_identifiers(
+    concept_id: str,
+    mesh_id: str | None,
+    orpha_code: str | None,
+) -> None:
+    """Reject concept records whose prefixed ID disagrees with its source ID."""
+    if concept_id.startswith("mesh:"):
+        expected = concept_id.removeprefix("mesh:")
+        if not mesh_id:
+            raise ValueError(f"{concept_id} must include mesh_id")
+        if expected != mesh_id:
+            raise ValueError(
+                f"concept id {concept_id} does not match mesh_id {mesh_id}"
+            )
+    if concept_id.startswith("orpha:"):
+        expected = concept_id.removeprefix("orpha:")
+        if not orpha_code:
+            raise ValueError(f"{concept_id} must include orpha_code")
+        if expected != orpha_code:
+            raise ValueError(
+                f"concept id {concept_id} does not match orpha_code {orpha_code}"
+            )
+
+
 def _contains_cjk(value: str) -> bool:
     return any("\u4e00" <= char <= "\u9fff" for char in value)
 
@@ -495,6 +575,7 @@ def _source_manifest(
     *,
     mesh_release: str,
     orphanet_release: str,
+    source_revision: str,
 ) -> list[dict[str, str]]:
     values: list[dict[str, str]] = []
     for path, source_kind in sorted(specs, key=lambda item: (item[1], item[0].name)):
@@ -512,12 +593,16 @@ def _source_manifest(
             "curated_seed": "curated",
             "curated_aliases": "curated",
         }.get(source_kind, "")
+        source_url = metadata["source_url"]
+        if "{revision}" in source_url:
+            source_url = source_url.format(revision=source_revision)
         values.append(
             {
                 "name": metadata["name"],
-                "source_url": metadata["source_url"],
+                "source_url": source_url,
                 "license_url": metadata["license_url"],
                 "release": release,
+                "revision": source_revision if "{revision}" in metadata["source_url"] else "",
                 "file_sha256": _sha256_file(path),
                 "file_name": path.name,
             }
@@ -528,6 +613,7 @@ def _source_manifest(
             "source_url": "",
             "license_url": DEFAULT_LICENSE_URL,
             "release": "curated",
+            "revision": "",
             "file_sha256": "",
             "file_name": "",
         }
@@ -548,6 +634,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--ontology-version", default="local-build-1")
     parser.add_argument("--mesh-release", default="")
     parser.add_argument("--orphanet-release", default="")
+    parser.add_argument("--source-revision", default="")
     parser.add_argument("--generated-at", default=DEFAULT_GENERATED_AT)
     return parser.parse_args()
 
@@ -563,6 +650,7 @@ def main() -> int:
         ontology_version=args.ontology_version,
         mesh_release=args.mesh_release,
         orphanet_release=args.orphanet_release,
+        source_revision=args.source_revision,
         generated_at=args.generated_at,
     )
     print(json.dumps(manifest, ensure_ascii=False, indent=2))

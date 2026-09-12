@@ -1693,12 +1693,16 @@ PYTHONPATH=backend .venv/bin/python backend/scripts/build_disease_ontology.py \
   --output backend/app/services/medical/terminology/resources \
   --ontology-version curated-seed-2026.09.2 \
   --mesh-release seed \
+  --source-revision 114e6da9d4ab3dfdc86af8a084def14fef7d3432 \
   --generated-at 2026-09-12T00:00:00Z
 ```
 
 The PR8 local suite covers package integrity, official MeSH ID golden pairs,
 deterministic builds, real-shaped MeSH and Orphadata XML, exact matching,
 privacy, ambiguity confirmation, API selection, migration, and worker
-restoration. The backend suite is now `405 passed, 3 skipped`; the remaining
+restoration. Curated source URLs are pinned to the source revision recorded in
+the manifest; the builder rejects curated inputs without an immutable revision
+and aliases that reference unknown concepts. The backend suite is now `405
+passed, 3 skipped`; the remaining
 skips are environment-dependent PostgreSQL checks when no test database URL is
 configured.

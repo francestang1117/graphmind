@@ -230,12 +230,15 @@ PYTHONPATH=backend .venv/bin/python backend/scripts/build_disease_ontology.py \
   --output backend/app/services/medical/terminology/resources \
   --ontology-version curated-seed-2026.09.2 \
   --mesh-release seed \
+  --source-revision 114e6da9d4ab3dfdc86af8a084def14fef7d3432 \
   --generated-at 2026-09-12T00:00:00Z
 ```
 
 The builder is offline. Every explicit input must produce at least one usable
 record; the output manifest records each input file name and SHA-256 together
-with its source URL, release, and license URL.
+with its immutable source URL, revision, release, and license URL. Curated
+inputs require `--source-revision`; use a commit SHA or immutable release tag,
+never `blob/main`.
 
 Build the frontend:
 

@@ -70,6 +70,7 @@ class OntologySource(BaseModel):
     license_url: str = Field(min_length=1, max_length=512)
     source_url: str = Field(default="", max_length=512)
     release: str = Field(default="", max_length=64)
+    revision: str = Field(default="", max_length=64)
     file_sha256: str = Field(default="", max_length=64)
     file_name: str = Field(default="", max_length=255)
 
@@ -80,6 +81,20 @@ class OntologySource(BaseModel):
             raise ValueError("source file checksum must be a SHA-256 digest")
         return value
 
+    @field_validator("source_url")
+    @classmethod
+    def validate_source_url(cls, value: str) -> str:
+        if "blob/main" in value:
+            raise ValueError("source URLs must identify an immutable revision")
+        return value
+
+    @field_validator("revision")
+    @classmethod
+    def validate_revision(cls, value: str) -> str:
+        if value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", value):
+            raise ValueError("source revision must be a commit SHA or release tag")
+        return value
+
 
 class OntologyManifest(BaseModel):
     """Integrity and provenance metadata for one immutable data package."""
@@ -88,6 +103,7 @@ class OntologyManifest(BaseModel):
 
     schema_version: int = Field(ge=1, le=1)
     ontology_version: str = Field(min_length=1, max_length=64)
+    source_revision: str = Field(default="", max_length=64)
     mesh_release: str = Field(default="", max_length=64)
     orphanet_release: str = Field(default="", max_length=64)
     generated_at: str = Field(min_length=1, max_length=64)
@@ -96,6 +112,13 @@ class OntologyManifest(BaseModel):
     alias_count: int = Field(ge=0)
     sha256: str = Field(min_length=64, max_length=64)
     sources: list[OntologySource] = Field(min_length=1, max_length=20)
+
+    @field_validator("source_revision")
+    @classmethod
+    def validate_source_revision(cls, value: str) -> str:
+        if value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", value):
+            raise ValueError("source revision must be a commit SHA or release tag")
+        return value
 
 
 class DiseaseCandidate(BaseModel):
