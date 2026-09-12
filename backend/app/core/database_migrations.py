@@ -34,6 +34,7 @@ _WORKSPACE_TABLES = (
     "medical_document_profiles",
     "document_sections",
     "literature_search_runs",
+    "literature_match_runs",
 )
 
 
@@ -94,11 +95,16 @@ def _upgrade_sqlite(engine) -> None:
                     ("processing_jobs", _needs_sqlite_jobs_rebuild),
                     ("medical_document_profiles", _needs_sqlite_profile_rebuild),
                     ("document_sections", _needs_sqlite_sections_rebuild),
+                    ("literature_search_runs", _needs_sqlite_literature_search_rebuild),
+                    ("literature_search_results", _needs_sqlite_literature_results_rebuild),
+                    ("literature_match_runs", _needs_sqlite_literature_match_rebuild),
+                    ("literature_evidence_matches", _needs_sqlite_evidence_match_rebuild),
                 )
                 for table, needs_rebuild in rebuild_checks:
                     if needs_rebuild(connection):
                         _rebuild_sqlite_table(connection, table)
                         rebuilt += 1
+                _clean_sqlite_orphans(connection)
         finally:
             connection.exec_driver_sql("PRAGMA foreign_keys=ON")
             connection.commit()
@@ -254,6 +260,122 @@ def _ensure_medical_tables(connection) -> None:
         connection.exec_driver_sql(
             f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"
         )
+
+def _ensure_literature_match_tables(connection, timestamp_type: str | None = None) -> None:
+    """Create the local finding-to-article match tables for older databases."""
+    if not _has_table(connection, "documents"):
+        return
+
+    timestamp_type = timestamp_type or (
+        "DATETIME"
+        if connection.dialect.name == "sqlite"
+        else "TIMESTAMP WITH TIME ZONE"
+    )
+    if not _has_table(connection, "literature_match_runs"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE literature_match_runs (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                analysis_run_id VARCHAR(64) NOT NULL,
+                search_run_id VARCHAR(64) NOT NULL,
+                matcher_version VARCHAR(64) NOT NULL,
+                input_fingerprint VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                finding_count INTEGER NOT NULL,
+                article_count INTEGER NOT NULL,
+                match_count INTEGER NOT NULL,
+                findings_json TEXT NOT NULL,
+                excluded_articles_json TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                empty_reason VARCHAR(64) NOT NULL,
+                created_at {timestamp_type} NOT NULL,
+                updated_at {timestamp_type} NOT NULL,
+                CONSTRAINT uq_literature_match_runs_scope_inputs_version
+                    UNIQUE (
+                        user_id, workspace_id, analysis_run_id,
+                        search_run_id, matcher_version
+                    ),
+                CONSTRAINT fk_literature_match_runs_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+                CONSTRAINT fk_literature_match_runs_analysis
+                    FOREIGN KEY (analysis_run_id)
+                    REFERENCES medical_analysis_runs(id) ON DELETE CASCADE,
+                CONSTRAINT fk_literature_match_runs_search
+                    FOREIGN KEY (search_run_id)
+                    REFERENCES literature_search_runs(id) ON DELETE CASCADE
+            )
+            """
+        )
+    else:
+        columns = (
+            ("findings_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("excluded_articles_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("warnings_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("empty_reason", "VARCHAR(64) NOT NULL DEFAULT ''"),
+        )
+        for column, definition in columns:
+            if not _has_column(connection, "literature_match_runs", column):
+                connection.exec_driver_sql(
+                    f"ALTER TABLE literature_match_runs ADD COLUMN {column} {definition}"
+                )
+
+    if not _has_table(connection, "literature_evidence_matches"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE literature_evidence_matches (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                match_run_id VARCHAR(64) NOT NULL,
+                finding_id VARCHAR(128) NOT NULL,
+                finding_type VARCHAR(64) NOT NULL,
+                finding_text_snapshot TEXT NOT NULL,
+                document_evidence_ids_json TEXT NOT NULL,
+                article_id VARCHAR(64) NOT NULL,
+                article_metadata_hash VARCHAR(64) NOT NULL,
+                relevance_score INTEGER NOT NULL,
+                match_specificity VARCHAR(32) NOT NULL,
+                matched_terms_json TEXT NOT NULL,
+                match_features_json TEXT NOT NULL,
+                abstract_quote TEXT,
+                abstract_character_start INTEGER,
+                abstract_character_end INTEGER,
+                provider_rank INTEGER NOT NULL,
+                warnings_json TEXT NOT NULL,
+                created_at {timestamp_type} NOT NULL,
+                CONSTRAINT uq_literature_evidence_matches_run_finding_article
+                    UNIQUE (match_run_id, finding_id, article_id),
+                CONSTRAINT fk_literature_evidence_matches_run
+                    FOREIGN KEY (match_run_id)
+                    REFERENCES literature_match_runs(id) ON DELETE CASCADE,
+                CONSTRAINT fk_literature_evidence_matches_article
+                    FOREIGN KEY (article_id)
+                    REFERENCES literature_articles(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+    indexes = (
+        ("ix_literature_match_runs_user_id", "literature_match_runs", "user_id"),
+        ("ix_literature_match_runs_workspace_id", "literature_match_runs", "workspace_id"),
+        ("ix_literature_match_runs_document_id", "literature_match_runs", "document_id"),
+        ("ix_literature_match_runs_analysis_run_id", "literature_match_runs", "analysis_run_id"),
+        ("ix_literature_match_runs_search_run_id", "literature_match_runs", "search_run_id"),
+        ("ix_literature_match_runs_matcher_version", "literature_match_runs", "matcher_version"),
+        ("ix_literature_match_runs_input_fingerprint", "literature_match_runs", "input_fingerprint"),
+        ("ix_literature_match_runs_status", "literature_match_runs", "status"),
+        ("ix_literature_evidence_matches_run_id", "literature_evidence_matches", "match_run_id"),
+        ("ix_literature_evidence_matches_finding_id", "literature_evidence_matches", "finding_id"),
+        ("ix_literature_evidence_matches_article_id", "literature_evidence_matches", "article_id"),
+        ("ix_literature_evidence_matches_relevance_score", "literature_evidence_matches", "relevance_score"),
+        ("ix_literature_evidence_matches_specificity", "literature_evidence_matches", "match_specificity"),
+    )
+    for name, table, column in indexes:
+        connection.exec_driver_sql(
+            f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"
+        )
+
 
 
 def _ensure_medical_ai_tables(connection) -> None:
@@ -570,6 +692,8 @@ def _ensure_literature_tables(connection) -> None:
             f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"
         )
 
+    _ensure_literature_match_tables(connection, timestamp_type)
+
 
 def _ensure_workspace_columns(connection) -> None:
     """Add the nullable column first; existing rows are filled below."""
@@ -668,6 +792,7 @@ def _backfill_workspace_ids(connection) -> int:
         ("processing_jobs", "document_id"),
         ("medical_document_profiles", "document_id"),
         ("document_sections", "document_id"),
+        ("literature_match_runs", "document_id"),
     ):
         if not _has_table(connection, table) or not _has_column(
             connection, table, document_column
@@ -716,6 +841,8 @@ def _clean_sqlite_orphans(connection) -> None:
     if not _has_table(connection, "documents"):
         return
 
+    _clean_orphan_match_references(connection)
+
     for table, column in (
         ("parsed_chunks", "document_id"),
         ("parsed_entities", "document_id"),
@@ -723,6 +850,7 @@ def _clean_sqlite_orphans(connection) -> None:
         ("medical_document_profiles", "document_id"),
         ("document_sections", "document_id"),
         ("literature_search_runs", "document_id"),
+        ("literature_match_runs", "document_id"),
     ):
         if not _has_table(connection, table) or not _has_column(connection, table, column):
             continue
@@ -788,6 +916,7 @@ def _move_legacy_document_ids(connection) -> int:
         ("medical_document_profiles", "document_id"),
         ("document_sections", "document_id"),
         ("literature_search_runs", "document_id"),
+        ("literature_match_runs", "document_id"),
     )
     for old_id, new_id in replacements.items():
         for table, column in references:
@@ -924,6 +1053,90 @@ def _needs_sqlite_sections_rebuild(connection) -> bool:
         "document_sections",
         ("user_id", "workspace_id", "document_id", "ordinal"),
         "document_id",
+    )
+
+
+def _needs_sqlite_literature_search_rebuild(connection) -> bool:
+    """Repair a search table whose document FK followed a renamed legacy table."""
+    return _has_table(connection, "literature_search_runs") and not _has_sqlite_document_fk(
+        connection,
+        "literature_search_runs",
+        "document_id",
+    )
+
+
+def _needs_sqlite_literature_results_rebuild(connection) -> bool:
+    if not _has_table(connection, "literature_search_results"):
+        return False
+    return any(
+        not _has_sqlite_fk(connection, "literature_search_results", column, parent)
+        for column, parent in (
+            ("search_run_id", "literature_search_runs"),
+            ("article_id", "literature_articles"),
+        )
+    ) or _missing_sqlite_unique_constraint(
+        connection,
+        "literature_search_results",
+        ("search_run_id", "article_id"),
+    )
+
+
+def _needs_sqlite_literature_match_rebuild(connection) -> bool:
+    if not _has_table(connection, "literature_match_runs"):
+        return False
+    return any(
+        not _has_sqlite_fk(connection, "literature_match_runs", column, parent)
+        for column, parent in (
+            ("document_id", "documents"),
+            ("analysis_run_id", "medical_analysis_runs"),
+            ("search_run_id", "literature_search_runs"),
+        )
+    ) or _missing_sqlite_unique_constraint(
+        connection,
+        "literature_match_runs",
+        ("user_id", "workspace_id", "analysis_run_id", "search_run_id", "matcher_version"),
+    )
+
+
+def _needs_sqlite_evidence_match_rebuild(connection) -> bool:
+    if not _has_table(connection, "literature_evidence_matches"):
+        return False
+    return any(
+        not _has_sqlite_fk(connection, "literature_evidence_matches", column, parent)
+        for column, parent in (
+            ("match_run_id", "literature_match_runs"),
+            ("article_id", "literature_articles"),
+        )
+    ) or _missing_sqlite_unique_constraint(
+        connection,
+        "literature_evidence_matches",
+        ("match_run_id", "finding_id", "article_id"),
+    )
+
+
+def _has_sqlite_fk(connection, table: str, column: str, referred_table: str) -> bool:
+    if not _has_table(connection, table):
+        return False
+    return any(
+        item.get("referred_table") == referred_table
+        and item.get("constrained_columns") == [column]
+        for item in inspect(connection).get_foreign_keys(table)
+    )
+
+
+def _missing_sqlite_unique_constraint(
+    connection,
+    table: str,
+    columns: tuple[str, ...],
+) -> bool:
+    """Use SQLite's index metadata as a fallback for named table constraints."""
+    inspector = inspect(connection)
+    if any(tuple(item.get("column_names") or ()) == columns for item in inspector.get_unique_constraints(table)):
+        return False
+    return not any(
+        item.get("unique")
+        and tuple(item.get("column_names") or ()) == columns
+        for item in inspector.get_indexes(table)
     )
 
 
@@ -1190,6 +1403,185 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
             "page_start, page_end, char_start, char_end, text, language, confidence, "
             "metadata_json, created_at",
         ),
+        "literature_articles": (
+            """
+            CREATE TABLE literature_articles (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                source VARCHAR(64) NOT NULL,
+                external_id VARCHAR(128) NOT NULL,
+                doi VARCHAR(255),
+                pmcid VARCHAR(64),
+                title TEXT NOT NULL,
+                abstract TEXT NOT NULL,
+                journal TEXT NOT NULL,
+                publication_date VARCHAR(32) NOT NULL,
+                publication_year INTEGER,
+                authors_json TEXT NOT NULL,
+                publication_types_json TEXT NOT NULL,
+                mesh_terms_json TEXT NOT NULL,
+                language VARCHAR(32) NOT NULL,
+                source_url VARCHAR(512) NOT NULL,
+                retraction_status VARCHAR(32) NOT NULL,
+                metadata_hash VARCHAR(64) NOT NULL,
+                fetched_at DATETIME,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                CONSTRAINT uq_literature_articles_source_external
+                    UNIQUE (source, external_id)
+            )
+            """,
+            "id, source, external_id, doi, pmcid, title, abstract, journal, "
+            "publication_date, publication_year, authors_json, publication_types_json, "
+            "mesh_terms_json, language, source_url, retraction_status, metadata_hash, "
+            "fetched_at, created_at, updated_at",
+        ),
+        "literature_search_runs": (
+            """
+            CREATE TABLE literature_search_runs (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255),
+                question TEXT NOT NULL,
+                normalized_query TEXT NOT NULL,
+                query_hash VARCHAR(64) NOT NULL,
+                provider VARCHAR(64) NOT NULL,
+                ontology_version VARCHAR(64) NOT NULL DEFAULT 'legacy',
+                detected_concepts_json TEXT NOT NULL DEFAULT '[]',
+                status VARCHAR(32) NOT NULL,
+                date_from VARCHAR(32),
+                date_to VARCHAR(32),
+                study_types_json TEXT NOT NULL,
+                sort VARCHAR(32) NOT NULL,
+                max_results INTEGER NOT NULL,
+                result_count INTEGER NOT NULL,
+                error_code VARCHAR(80) NOT NULL,
+                error_message TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                attempt_count INTEGER NOT NULL,
+                attempt_token VARCHAR(64),
+                external_search_confirmed_at DATETIME,
+                last_heartbeat_at DATETIME,
+                lease_expires_at DATETIME,
+                started_at DATETIME,
+                completed_at DATETIME,
+                fetched_at DATETIME,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                CONSTRAINT uq_literature_search_runs_scope_query_provider
+                    UNIQUE (user_id, workspace_id, document_id, query_hash, provider),
+                CONSTRAINT fk_literature_search_runs_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+            )
+            """,
+            "id, user_id, workspace_id, document_id, question, normalized_query, "
+            "query_hash, provider, ontology_version, detected_concepts_json, status, "
+            "date_from, date_to, study_types_json, sort, max_results, result_count, "
+            "error_code, error_message, warnings_json, attempt_count, attempt_token, "
+            "external_search_confirmed_at, last_heartbeat_at, lease_expires_at, started_at, "
+            "completed_at, fetched_at, created_at, updated_at",
+        ),
+        "literature_search_results": (
+            """
+            CREATE TABLE literature_search_results (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                search_run_id VARCHAR(64) NOT NULL,
+                article_id VARCHAR(64) NOT NULL,
+                provider_rank INTEGER NOT NULL,
+                matched_terms_json TEXT NOT NULL,
+                selected_for_analysis BOOLEAN NOT NULL,
+                created_at DATETIME NOT NULL,
+                CONSTRAINT uq_literature_search_results_run_article
+                    UNIQUE (search_run_id, article_id),
+                CONSTRAINT fk_literature_search_results_run
+                    FOREIGN KEY (search_run_id)
+                    REFERENCES literature_search_runs(id) ON DELETE CASCADE,
+                CONSTRAINT fk_literature_search_results_article
+                    FOREIGN KEY (article_id)
+                    REFERENCES literature_articles(id) ON DELETE CASCADE
+            )
+            """,
+            "id, search_run_id, article_id, provider_rank, matched_terms_json, "
+            "selected_for_analysis, created_at",
+        ),
+        "literature_match_runs": (
+            """
+            CREATE TABLE literature_match_runs (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                analysis_run_id VARCHAR(64) NOT NULL,
+                search_run_id VARCHAR(64) NOT NULL,
+                matcher_version VARCHAR(64) NOT NULL,
+                input_fingerprint VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                finding_count INTEGER NOT NULL,
+                article_count INTEGER NOT NULL,
+                match_count INTEGER NOT NULL,
+                findings_json TEXT NOT NULL,
+                excluded_articles_json TEXT NOT NULL,
+                warnings_json TEXT NOT NULL,
+                empty_reason VARCHAR(64) NOT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                CONSTRAINT uq_literature_match_runs_scope_inputs_version
+                    UNIQUE (
+                        user_id, workspace_id, analysis_run_id,
+                        search_run_id, matcher_version
+                    ),
+                CONSTRAINT fk_literature_match_runs_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+                CONSTRAINT fk_literature_match_runs_analysis
+                    FOREIGN KEY (analysis_run_id)
+                    REFERENCES medical_analysis_runs(id) ON DELETE CASCADE,
+                CONSTRAINT fk_literature_match_runs_search
+                    FOREIGN KEY (search_run_id)
+                    REFERENCES literature_search_runs(id) ON DELETE CASCADE
+            )
+            """,
+            "id, user_id, workspace_id, document_id, analysis_run_id, search_run_id, "
+            "matcher_version, input_fingerprint, status, finding_count, article_count, "
+            "match_count, findings_json, excluded_articles_json, warnings_json, empty_reason, "
+            "created_at, updated_at",
+        ),
+        "literature_evidence_matches": (
+            """
+            CREATE TABLE literature_evidence_matches (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                match_run_id VARCHAR(64) NOT NULL,
+                finding_id VARCHAR(128) NOT NULL,
+                finding_type VARCHAR(64) NOT NULL,
+                finding_text_snapshot TEXT NOT NULL,
+                document_evidence_ids_json TEXT NOT NULL,
+                article_id VARCHAR(64) NOT NULL,
+                article_metadata_hash VARCHAR(64) NOT NULL,
+                relevance_score INTEGER NOT NULL,
+                match_specificity VARCHAR(32) NOT NULL,
+                matched_terms_json TEXT NOT NULL,
+                match_features_json TEXT NOT NULL,
+                abstract_quote TEXT,
+                abstract_character_start INTEGER,
+                abstract_character_end INTEGER,
+                provider_rank INTEGER NOT NULL,
+                warnings_json TEXT NOT NULL,
+                created_at DATETIME NOT NULL,
+                CONSTRAINT uq_literature_evidence_matches_run_finding_article
+                    UNIQUE (match_run_id, finding_id, article_id),
+                CONSTRAINT fk_literature_evidence_matches_run
+                    FOREIGN KEY (match_run_id)
+                    REFERENCES literature_match_runs(id) ON DELETE CASCADE,
+                CONSTRAINT fk_literature_evidence_matches_article
+                    FOREIGN KEY (article_id)
+                    REFERENCES literature_articles(id) ON DELETE CASCADE
+            )
+            """,
+            "id, match_run_id, finding_id, finding_type, finding_text_snapshot, "
+            "document_evidence_ids_json, article_id, article_metadata_hash, relevance_score, "
+            "match_specificity, matched_terms_json, match_features_json, abstract_quote, "
+            "abstract_character_start, abstract_character_end, provider_rank, warnings_json, "
+            "created_at",
+        ),
     }
     try:
         return definitions[table]
@@ -1249,6 +1641,44 @@ def _sqlite_indexes(table: str) -> tuple[tuple[str, str], ...]:
         + (
             ("ix_document_sections_document_id", "document_id"),
             ("ix_document_sections_section_type", "section_type"),
+        ),
+        "literature_articles": (
+            ("ix_literature_articles_source", "source"),
+            ("ix_literature_articles_external_id", "external_id"),
+            ("ix_literature_articles_doi", "doi"),
+            ("ix_literature_articles_pmcid", "pmcid"),
+            ("ix_literature_articles_publication_year", "publication_year"),
+            ("ix_literature_articles_retraction_status", "retraction_status"),
+            ("ix_literature_articles_metadata_hash", "metadata_hash"),
+        ),
+        "literature_search_runs": common
+        + (
+            ("ix_literature_search_runs_document_id", "document_id"),
+            ("ix_literature_search_runs_query_hash", "query_hash"),
+            ("ix_literature_search_runs_provider", "provider"),
+            ("ix_literature_search_runs_status", "status"),
+            ("ix_literature_search_runs_lease_expires_at", "lease_expires_at"),
+            ("ix_literature_search_runs_attempt_token", "attempt_token"),
+        ),
+        "literature_search_results": (
+            ("ix_literature_search_results_run_id", "search_run_id"),
+            ("ix_literature_search_results_article_id", "article_id"),
+        ),
+        "literature_match_runs": common
+        + (
+            ("ix_literature_match_runs_document_id", "document_id"),
+            ("ix_literature_match_runs_analysis_run_id", "analysis_run_id"),
+            ("ix_literature_match_runs_search_run_id", "search_run_id"),
+            ("ix_literature_match_runs_matcher_version", "matcher_version"),
+            ("ix_literature_match_runs_input_fingerprint", "input_fingerprint"),
+            ("ix_literature_match_runs_status", "status"),
+        ),
+        "literature_evidence_matches": (
+            ("ix_literature_evidence_matches_run_id", "match_run_id"),
+            ("ix_literature_evidence_matches_finding_id", "finding_id"),
+            ("ix_literature_evidence_matches_article_id", "article_id"),
+            ("ix_literature_evidence_matches_relevance_score", "relevance_score"),
+            ("ix_literature_evidence_matches_specificity", "match_specificity"),
         ),
     }
     return indexes.get(table, ())
@@ -1315,6 +1745,31 @@ def _ensure_server_constraints(connection) -> None:
         ("user_id", "workspace_id", "document_id", "ordinal"),
         old_names=(),
     )
+    _ensure_document_fk(
+        connection,
+        "literature_search_runs",
+        "fk_literature_search_runs_document",
+    )
+    _ensure_unique_constraint(
+        connection,
+        "literature_match_runs",
+        "uq_literature_match_runs_scope_inputs_version",
+        (
+            "user_id",
+            "workspace_id",
+            "analysis_run_id",
+            "search_run_id",
+            "matcher_version",
+        ),
+        old_names=(),
+    )
+    _ensure_unique_constraint(
+        connection,
+        "literature_evidence_matches",
+        "uq_literature_evidence_matches_run_finding_article",
+        ("match_run_id", "finding_id", "article_id"),
+        old_names=(),
+    )
 
     _ensure_document_fk(connection, "parsed_chunks", "fk_parsed_chunks_document")
     _ensure_document_fk(connection, "parsed_entities", "fk_parsed_entities_document")
@@ -1335,6 +1790,39 @@ def _ensure_server_constraints(connection) -> None:
         connection,
         "document_sections",
         "fk_document_sections_document",
+    )
+    _ensure_document_fk(
+        connection,
+        "literature_match_runs",
+        "fk_literature_match_runs_document",
+    )
+    _ensure_foreign_key(
+        connection,
+        "literature_match_runs",
+        "fk_literature_match_runs_analysis",
+        "analysis_run_id",
+        "medical_analysis_runs",
+    )
+    _ensure_foreign_key(
+        connection,
+        "literature_match_runs",
+        "fk_literature_match_runs_search",
+        "search_run_id",
+        "literature_search_runs",
+    )
+    _ensure_foreign_key(
+        connection,
+        "literature_evidence_matches",
+        "fk_literature_evidence_matches_run",
+        "match_run_id",
+        "literature_match_runs",
+    )
+    _ensure_foreign_key(
+        connection,
+        "literature_evidence_matches",
+        "fk_literature_evidence_matches_article",
+        "article_id",
+        "literature_articles",
     )
 
 
@@ -1365,6 +1853,8 @@ def _clean_orphan_document_references(connection) -> None:
     if not _has_table(connection, "documents"):
         return
 
+    _clean_orphan_match_references(connection)
+
     references = (
         ("parsed_chunks", "document_id", "delete"),
         ("parsed_entities", "document_id", "delete"),
@@ -1372,6 +1862,8 @@ def _clean_orphan_document_references(connection) -> None:
         ("processing_jobs", "document_id", "null"),
         ("medical_document_profiles", "document_id", "delete"),
         ("document_sections", "document_id", "delete"),
+        ("literature_search_runs", "document_id", "delete"),
+        ("literature_match_runs", "document_id", "delete"),
     )
     for table, column, action in references:
         if not _has_table(connection, table) or not _has_column(connection, table, column):
@@ -1390,6 +1882,43 @@ def _clean_orphan_document_references(connection) -> None:
         if result.rowcount:
             outcome = "cleared" if action == "null" else "removed"
             log.warning("%s %d stale %s.%s references", outcome, result.rowcount, table, column)
+
+    # Removing an orphaned search or match run above can leave grandchildren
+    # behind on installations that predate foreign-key enforcement.
+    _clean_orphan_match_references(connection)
+
+
+def _clean_orphan_match_references(connection) -> None:
+    """Remove old match rows before PostgreSQL validates their parent keys."""
+    if _has_table(connection, "literature_match_runs"):
+        for column, parent_table in (
+            ("analysis_run_id", "medical_analysis_runs"),
+            ("search_run_id", "literature_search_runs"),
+        ):
+            if not _has_column(connection, "literature_match_runs", column):
+                continue
+            connection.execute(
+                text(
+                    f"DELETE FROM literature_match_runs AS child WHERE "
+                    f"NOT EXISTS (SELECT 1 FROM {parent_table} AS parent "
+                    f"WHERE parent.id = child.{column})"
+                )
+            )
+
+    if _has_table(connection, "literature_evidence_matches"):
+        for column, parent_table in (
+            ("match_run_id", "literature_match_runs"),
+            ("article_id", "literature_articles"),
+        ):
+            if not _has_column(connection, "literature_evidence_matches", column):
+                continue
+            connection.execute(
+                text(
+                    f"DELETE FROM literature_evidence_matches AS child WHERE "
+                    f"NOT EXISTS (SELECT 1 FROM {parent_table} AS parent "
+                    f"WHERE parent.id = child.{column})"
+                )
+            )
 
 
 def _ensure_unique_constraint(
@@ -1462,6 +1991,62 @@ def _ensure_document_fk(
         text(
             f"ALTER TABLE {table} ADD CONSTRAINT {name} "
             f"FOREIGN KEY ({column}) REFERENCES documents(id) "
+            f"ON DELETE {ondelete} NOT VALID"
+        )
+    )
+    connection.execute(text(f"ALTER TABLE {table} VALIDATE CONSTRAINT {name}"))
+
+
+def _ensure_foreign_key(
+    connection,
+    table: str,
+    name: str,
+    column: str,
+    referred_table: str,
+    referred_column: str = "id",
+    ondelete: str = "CASCADE",
+) -> None:
+    """Ensure a named PostgreSQL foreign key exists with the expected action."""
+    if (
+        not _has_table(connection, table)
+        or not _has_column(connection, table, column)
+        or not _has_table(connection, referred_table)
+    ):
+        return
+
+    expected_ondelete = ondelete.upper()
+    matching = []
+    for foreign_key in inspect(connection).get_foreign_keys(table):
+        if (
+            foreign_key.get("referred_table") != referred_table
+            or foreign_key.get("referred_columns") != [referred_column]
+            or foreign_key.get("constrained_columns") != [column]
+        ):
+            continue
+        actual_ondelete = str(
+            (foreign_key.get("options") or {}).get("ondelete") or "NO ACTION"
+        ).upper()
+        if actual_ondelete != expected_ondelete and foreign_key.get("name"):
+            connection.execute(
+                text(
+                    f"ALTER TABLE {table} "
+                    f"DROP CONSTRAINT IF EXISTS {foreign_key['name']}"
+                )
+            )
+            continue
+        matching.append(foreign_key)
+
+    for foreign_key in matching:
+        if foreign_key.get("name"):
+            connection.execute(
+                text(f"ALTER TABLE {table} VALIDATE CONSTRAINT {foreign_key['name']}")
+            )
+            return
+
+    connection.execute(
+        text(
+            f"ALTER TABLE {table} ADD CONSTRAINT {name} "
+            f"FOREIGN KEY ({column}) REFERENCES {referred_table}({referred_column}) "
             f"ON DELETE {ondelete} NOT VALID"
         )
     )

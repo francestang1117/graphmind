@@ -559,3 +559,91 @@ class LiteratureSearchResultRecord(Base):
     matched_terms_json: Mapped[str] = mapped_column(Text, default="[]")
     selected_for_analysis: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LiteratureMatchRunRecord(Base):
+    """One deterministic match between a saved insight and PubMed results."""
+
+    __tablename__ = "literature_match_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "analysis_run_id",
+            "search_run_id",
+            "matcher_version",
+            name="uq_literature_match_runs_scope_inputs_version",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    document_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    analysis_run_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("medical_analysis_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    search_run_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("literature_search_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    matcher_version: Mapped[str] = mapped_column(String(64), index=True)
+    input_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="completed", index=True)
+    finding_count: Mapped[int] = mapped_column(Integer, default=0)
+    article_count: Mapped[int] = mapped_column(Integer, default=0)
+    match_count: Mapped[int] = mapped_column(Integer, default=0)
+    findings_json: Mapped[str] = mapped_column(Text, default="[]")
+    excluded_articles_json: Mapped[str] = mapped_column(Text, default="{}")
+    warnings_json: Mapped[str] = mapped_column(Text, default="[]")
+    empty_reason: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class LiteratureEvidenceMatchRecord(Base):
+    """A candidate article attached to one saved finding snapshot."""
+
+    __tablename__ = "literature_evidence_matches"
+    __table_args__ = (
+        UniqueConstraint(
+            "match_run_id",
+            "finding_id",
+            "article_id",
+            name="uq_literature_evidence_matches_run_finding_article",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    match_run_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("literature_match_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    finding_id: Mapped[str] = mapped_column(String(128), index=True)
+    finding_type: Mapped[str] = mapped_column(String(64), index=True)
+    finding_text_snapshot: Mapped[str] = mapped_column(Text)
+    document_evidence_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    article_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("literature_articles.id", ondelete="CASCADE"),
+        index=True,
+    )
+    article_metadata_hash: Mapped[str] = mapped_column(String(64), default="")
+    relevance_score: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    match_specificity: Mapped[str] = mapped_column(String(32), index=True)
+    matched_terms_json: Mapped[str] = mapped_column(Text, default="[]")
+    match_features_json: Mapped[str] = mapped_column(Text, default="[]")
+    abstract_quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    abstract_character_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    abstract_character_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider_rank: Mapped[int] = mapped_column(Integer, default=0)
+    warnings_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

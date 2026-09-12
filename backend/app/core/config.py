@@ -126,6 +126,13 @@ class Settings(BaseSettings):
     # Redis is required outside local/test environments so multiple workers
     # cannot each apply an independent PubMed request budget.
     PUBMED_RATE_LIMIT_REDIS_REQUIRED: bool = True
+    # Local-only matching limits keep a request bounded at 20 x 50 comparisons.
+    LITERATURE_MATCHING_ENABLED: bool = True
+    LITERATURE_MATCH_MAX_FINDINGS: int = 20
+    LITERATURE_MATCH_MAX_ARTICLES: int = 50
+    LITERATURE_MATCH_MAX_PER_FINDING: int = 5
+    LITERATURE_MATCH_MIN_SCORE: int = 40
+    LITERATURE_MATCH_ABSTRACT_QUOTE_LENGTH: int = 600
     # The disease terminology package is local, versioned, and read-only at
     # runtime. Deployments may point this at a reviewed replacement package.
     MEDICAL_ONTOLOGY_DIR: str = str(
