@@ -144,4 +144,3 @@ def _api_error(exc: LiteratureMatchingError) -> AppError:
     else:
         http_status = status.HTTP_503_SERVICE_UNAVAILABLE
     return AppError(str(exc), code=code, status_code=http_status)
-

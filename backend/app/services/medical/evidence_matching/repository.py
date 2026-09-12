@@ -24,7 +24,10 @@ from app.models.persistence import (
 )
 from app.services.medical.ai.models import MedicalInsightReport
 from app.services.medical.evidence_matching.exceptions import LiteratureMatchingError
-from app.services.medical.evidence_matching.finding_extractor import FindingExtractor
+from app.services.medical.evidence_matching.finding_extractor import (
+    FindingExtractor,
+    extract_report_condition_concepts,
+)
 from app.services.medical.evidence_matching.matcher import LiteratureCandidateMatcher
 from app.services.medical.evidence_matching.models import (
     FindingMatchResult,
@@ -177,15 +180,28 @@ class EvidenceMatchingRepository:
                     for value in (row.id, row.evidence_id)
                     if value
                 }
+                evidence_text_by_id = {
+                    value: row.quoted_text
+                    for row in evidence_rows
+                    for value in (row.id, row.evidence_id)
+                    if value
+                }
                 report = _load_report(result_row.report_json)
                 detected_concepts = _loads_json(search.detected_concepts_json, [])
                 ontology = _load_optional_ontology()
+                analysis_concepts = extract_report_condition_concepts(
+                    report,
+                    ontology=ontology,
+                    evidence_texts=evidence_text_by_id.values(),
+                )
                 findings = FindingExtractor(
                     ontology=ontology,
                     max_findings=settings.LITERATURE_MATCH_MAX_FINDINGS,
                 ).extract(
                     report,
-                    detected_concepts=detected_concepts,
+                    analysis_concepts=analysis_concepts,
+                    candidate_concepts=detected_concepts,
+                    evidence_text_by_id=evidence_text_by_id,
                     valid_evidence_ids=valid_evidence_ids,
                 )
                 if not findings:
@@ -217,6 +233,7 @@ class EvidenceMatchingRepository:
 
                 matcher = LiteratureCandidateMatcher(
                     min_score=settings.LITERATURE_MATCH_MIN_SCORE,
+                    min_condition_score=settings.LITERATURE_MATCH_MIN_CONDITION_SCORE,
                     max_articles=settings.LITERATURE_MATCH_MAX_ARTICLES,
                     max_per_finding=settings.LITERATURE_MATCH_MAX_PER_FINDING,
                     quote_length=settings.LITERATURE_MATCH_ABSTRACT_QUOTE_LENGTH,
@@ -283,7 +300,7 @@ class EvidenceMatchingRepository:
                 row.updated_at = now
 
                 for finding_result in matching.findings:
-                    for card in finding_result.candidates:
+                    for candidate_rank, card in enumerate(finding_result.candidates, start=1):
                         article_row = article_rows_by_id.get(card.article_id)
                         if not article_row:
                             # This should only be possible for a malformed cache
@@ -301,6 +318,7 @@ class EvidenceMatchingRepository:
                                 ),
                                 article_id=article_row.id,
                                 article_metadata_hash=article_row.metadata_hash or "",
+                                article_snapshot_json=_dump_json(_article_snapshot(article_row)),
                                 relevance_score=card.relevance_score,
                                 match_specificity=card.match_specificity,
                                 matched_terms_json=_dump_json(card.matched_terms),
@@ -311,6 +329,7 @@ class EvidenceMatchingRepository:
                                 abstract_character_start=card.abstract_character_start,
                                 abstract_character_end=card.abstract_character_end,
                                 provider_rank=_provider_rank(articles, card.article_id),
+                                candidate_rank=candidate_rank,
                                 warnings_json=_dump_json(card.warnings),
                                 created_at=now,
                             )
@@ -508,6 +527,7 @@ def _input_fingerprint(
             "max_articles": settings.LITERATURE_MATCH_MAX_ARTICLES,
             "max_per_finding": settings.LITERATURE_MATCH_MAX_PER_FINDING,
             "min_score": settings.LITERATURE_MATCH_MIN_SCORE,
+            "min_condition_score": settings.LITERATURE_MATCH_MIN_CONDITION_SCORE,
             "quote_length": settings.LITERATURE_MATCH_ABSTRACT_QUOTE_LENGTH,
         },
     }
@@ -532,6 +552,7 @@ def _match_run_payload(db, row: LiteratureMatchRunRecord) -> dict[str, Any]:
         .where(LiteratureEvidenceMatchRecord.match_run_id == row.id)
         .order_by(
             LiteratureEvidenceMatchRecord.finding_id.asc(),
+            LiteratureEvidenceMatchRecord.candidate_rank.asc(),
             LiteratureEvidenceMatchRecord.relevance_score.desc(),
             LiteratureEvidenceMatchRecord.provider_rank.asc(),
             LiteratureArticleRecord.external_id.asc(),
@@ -539,11 +560,33 @@ def _match_run_payload(db, row: LiteratureMatchRunRecord) -> dict[str, Any]:
     ).all()
     grouped: dict[str, list[StudyCard]] = {}
     stale = False
+    retracted_after_matching = 0
+    retracted_by_finding: dict[str, int] = {}
     for match, article in records:
         current_hash = article.metadata_hash or ""
-        is_stale = current_hash != (match.article_metadata_hash or "")
+        current_status = str(article.retraction_status or "unknown").strip().lower()
+        if current_status in {"retracted", "retraction_notice"}:
+            retracted_after_matching += 1
+            retracted_by_finding[match.finding_id] = (
+                retracted_by_finding.get(match.finding_id, 0) + 1
+            )
+            stale = True
+            continue
+
+        snapshot = _loads_json(match.article_snapshot_json, {})
+        snapshot_available = isinstance(snapshot, Mapping) and bool(
+            str(snapshot.get("external_id") or snapshot.get("pmid") or "").strip()
+        )
+        if not snapshot_available:
+            snapshot = _article_dict(article)
+        snapshot_status = str(snapshot.get("retraction_status") or "unknown").strip().lower()
+        is_stale = (
+            not snapshot_available
+            or current_hash != (match.article_metadata_hash or "")
+            or current_status != snapshot_status
+        )
         card = build_study_card(
-            _article_dict(article),
+            snapshot,
             relevance_score=match.relevance_score,
             match_specificity=match.match_specificity,
             matched_terms=_loads_json(match.matched_terms_json, []),
@@ -557,9 +600,14 @@ def _match_run_payload(db, row: LiteratureMatchRunRecord) -> dict[str, Any]:
             abstract_character_start=match.abstract_character_start,
             abstract_character_end=match.abstract_character_end,
         )
+        saved_warnings = _string_list(_loads_json(match.warnings_json, []), limit=20)
+        card.warnings = _unique_strings([*saved_warnings, *card.warnings], limit=20)
+        status_warning = _retraction_warning(current_status)
+        if status_warning:
+            card.warnings = _unique_strings([*card.warnings, status_warning], limit=20)
         if is_stale:
             card.stale = True
-            card.warnings = list(dict.fromkeys([*card.warnings, "article_metadata_changed"]))
+            card.warnings = _unique_strings([*card.warnings, "article_metadata_changed"], limit=20)
             stale = True
         grouped.setdefault(match.finding_id, []).append(card)
 
@@ -576,6 +624,13 @@ def _match_run_payload(db, row: LiteratureMatchRunRecord) -> dict[str, Any]:
         if not snapshot:
             continue
         finding = snapshot["finding"]
+        match_status = snapshot.get("match_status", "no_candidates")
+        if (
+            not grouped.get(finding_id)
+            and retracted_by_finding.get(finding_id)
+            and match_status in {"matched", "condition_only"}
+        ):
+            match_status = "no_candidates"
         findings.append(
             {
                 "finding_id": finding_id,
@@ -583,15 +638,26 @@ def _match_run_payload(db, row: LiteratureMatchRunRecord) -> dict[str, Any]:
                 "statement": finding.get("statement", ""),
                 "plain_explanation": finding.get("plain_explanation", ""),
                 "document_evidence_ids": finding.get("evidence_ids", []),
-                "match_status": snapshot.get("match_status", "no_candidates"),
+                "match_status": match_status,
                 "candidates": [card.model_dump(mode="json") for card in grouped.get(finding_id, [])],
             }
         )
 
-    warnings = _loads_json(row.warnings_json, [])
+    warnings = _string_list(_loads_json(row.warnings_json, []), limit=20)
     if stale and "article_metadata_changed" not in warnings:
         warnings = [*warnings, "article_metadata_changed"]
     excluded = _loads_json(row.excluded_articles_json, {})
+    if not isinstance(excluded, dict):
+        excluded = {}
+    if retracted_after_matching:
+        excluded = dict(excluded)
+        excluded["retracted_after_matching"] = retracted_after_matching
+        if "retracted_after_matching" not in warnings:
+            warnings = [*warnings, "retracted_after_matching"]
+    visible_match_count = sum(len(cards) for cards in grouped.values())
+    empty_reason = row.empty_reason or ""
+    if retracted_after_matching and visible_match_count == 0:
+        empty_reason = "retracted_after_matching"
     return {
         "match_run_id": row.id,
         "user_id": row.user_id,
@@ -604,17 +670,18 @@ def _match_run_payload(db, row: LiteratureMatchRunRecord) -> dict[str, Any]:
         "status": row.status,
         "finding_count": row.finding_count,
         "article_count": row.article_count,
-        "match_count": row.match_count,
+        "match_count": visible_match_count,
         "summary": {
             "finding_count": row.finding_count,
             "article_count": row.article_count,
-            "match_count": row.match_count,
+            "match_count": visible_match_count,
             "retracted_articles_excluded": int(excluded.get("retracted", 0))
-            + int(excluded.get("retraction_notice", 0)),
+            + int(excluded.get("retraction_notice", 0))
+            + int(excluded.get("retracted_after_matching", 0)),
         },
         "excluded_articles": excluded,
         "warnings": warnings,
-        "empty_reason": row.empty_reason or "",
+        "empty_reason": empty_reason,
         "stale": stale,
         "findings": findings,
         "created_at": _iso(row.created_at),
@@ -643,6 +710,44 @@ def _article_dict(row: LiteratureArticleRecord) -> dict[str, Any]:
         "metadata_hash": row.metadata_hash,
         "fetched_at": row.fetched_at,
     }
+
+
+def _article_snapshot(row: LiteratureArticleRecord) -> dict[str, Any]:
+    """Return JSON-safe public metadata captured at match creation time."""
+    snapshot = _article_dict(row)
+    fetched_at = snapshot.get("fetched_at")
+    if isinstance(fetched_at, datetime):
+        snapshot["fetched_at"] = fetched_at.isoformat()
+    return snapshot
+
+
+def _string_list(value: Any, *, limit: int) -> list[str]:
+    if not isinstance(value, (list, tuple)):
+        return []
+    return _unique_strings(value, limit=limit)
+
+
+def _unique_strings(values: Any, *, limit: int) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value or "").strip()
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+            if len(result) >= limit:
+                break
+    return result
+
+
+def _retraction_warning(status: str) -> str | None:
+    if status == "expression_of_concern":
+        return "PubMed marks this article with an expression of concern."
+    if status in {"corrected", "correction_notice"}:
+        return "PubMed indicates that this article has a correction notice."
+    if status == "unknown":
+        return "The article's publication status is unknown."
+    return None
 
 
 def _provider_rank(articles: list[dict[str, Any]], article_id: str) -> int:

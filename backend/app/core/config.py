@@ -132,6 +132,9 @@ class Settings(BaseSettings):
     LITERATURE_MATCH_MAX_ARTICLES: int = 50
     LITERATURE_MATCH_MAX_PER_FINDING: int = 5
     LITERATURE_MATCH_MIN_SCORE: int = 40
+    # Condition-only matches use a lower, explicit threshold because they do
+    # not have finding-specific wording to contribute to the score.
+    LITERATURE_MATCH_MIN_CONDITION_SCORE: int = 15
     LITERATURE_MATCH_ABSTRACT_QUOTE_LENGTH: int = 600
     # The disease terminology package is local, versioned, and read-only at
     # runtime. Deployments may point this at a reviewed replacement package.

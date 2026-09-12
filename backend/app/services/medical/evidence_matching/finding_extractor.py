@@ -13,6 +13,7 @@ from app.services.medical.evidence_matching.models import (
     MatchableFinding,
 )
 from app.services.medical.terminology.loader import DiseaseOntology
+from app.services.medical.terminology.matcher import DiseaseMatcher
 from app.services.medical.terminology.normalizer import normalize_terminology_text
 
 
@@ -124,28 +125,38 @@ class FindingExtractor:
         report: MedicalInsightReport | Mapping[str, Any],
         *,
         detected_concepts: Iterable[Any] = (),
+        analysis_concepts: Iterable[Any] | None = None,
+        candidate_concepts: Iterable[Any] | None = None,
+        evidence_text_by_id: Mapping[str, str] | None = None,
         controlled_terms: Iterable[str] = (),
         condition_terms: Iterable[str] = (),
         biomedical_terms: Iterable[str] = (),
         valid_evidence_ids: set[str] | None = None,
     ) -> list[MatchableFinding]:
         parsed_report = _coerce_report(report)
-        concept_terms = _concept_terms(
-            detected_concepts,
-            ontology=self.ontology,
-        )
+        legacy_concept_mode = analysis_concepts is None and candidate_concepts is None
+        if legacy_concept_mode:
+            analysis_concepts_list = list(detected_concepts)
+            candidate_concepts_list = analysis_concepts_list
+        else:
+            analysis_concepts_list = list(analysis_concepts or ())
+            candidate_concepts_list = list(candidate_concepts or detected_concepts)
+        analysis_terms = _concept_terms(analysis_concepts_list, ontology=self.ontology)
+        candidate_terms = _concept_terms(candidate_concepts_list, ontology=self.ontology)
         all_controlled = _unique_terms(
-            [*controlled_terms, *concept_terms[0], *condition_terms, *biomedical_terms],
+            [
+                *controlled_terms,
+                *analysis_terms[0],
+                *(candidate_terms[0] if legacy_concept_mode else []),
+                *condition_terms,
+                *biomedical_terms,
+            ],
             limit=8,
         )
-        conditions = _unique_terms(
-            [*concept_terms[1], *condition_terms],
-            limit=16,
-        )
-        biomedical = _unique_terms(
-            [*concept_terms[2], *biomedical_terms],
-            limit=16,
-        )
+        global_conditions = _unique_terms([*analysis_terms[1], *condition_terms], limit=16)
+        global_biomedical = _unique_terms([*analysis_terms[2], *biomedical_terms], limit=16)
+        candidate_condition_ids = _concept_ids(candidate_concepts_list, condition_only=True)
+        analysis_condition_ids = _concept_ids(analysis_concepts_list, condition_only=True)
 
         findings: list[MatchableFinding] = []
         seen_text: set[str] = set()
@@ -169,15 +180,52 @@ class FindingExtractor:
                 source_id = _value(item, "id").strip()
                 if not source_id:
                     source_id = f"{finding_type}_{len(findings) + 1:03d}"
-                finding_id = source_id
-                if finding_id in seen_ids:
-                    finding_id = f"{finding_type}:{source_id}"
-                finding_id = finding_id[:128]
-                while finding_id in seen_ids:
-                    finding_id = f"{finding_type}:{finding_id}"[:128]
+                finding_id = _unique_finding_id(source_id, finding_type, seen_ids)
                 seen_ids.add(finding_id)
 
-                keywords, phrases = _text_terms(statement, all_controlled)
+                if legacy_concept_mode:
+                    conditions = global_conditions
+                    condition_status = "matched" if conditions else "unknown"
+                else:
+                    finding_text = _finding_text(
+                        statement,
+                        _value(item, "plain_explanation"),
+                        evidence_ids,
+                        evidence_text_by_id or {},
+                    )
+                    local_analysis_ids = _condition_ids_in_text(
+                        finding_text,
+                        ontology=self.ontology,
+                    )
+                    if not local_analysis_ids and len(analysis_condition_ids) == 1:
+                        local_analysis_ids = set(analysis_condition_ids)
+                    shared_ids = local_analysis_ids & candidate_condition_ids
+                    if shared_ids:
+                        conditions = _condition_terms_for_ids(
+                            candidate_concepts_list,
+                            shared_ids,
+                            ontology=self.ontology,
+                        )
+                        condition_status = "matched" if conditions else "unknown"
+                    elif local_analysis_ids and candidate_condition_ids:
+                        conditions = []
+                        condition_status = "mismatch"
+                    elif candidate_condition_ids and analysis_condition_ids:
+                        conditions = []
+                        condition_status = "mismatch"
+                    else:
+                        conditions = []
+                        condition_status = "unknown"
+
+                finding_controlled = _unique_terms(
+                    [
+                        *controlled_terms,
+                        *global_biomedical,
+                        *conditions,
+                    ],
+                    limit=8,
+                )
+                keywords, phrases = _text_terms(statement, finding_controlled)
                 findings.append(
                     MatchableFinding(
                         finding_id=finding_id,
@@ -186,11 +234,12 @@ class FindingExtractor:
                         plain_explanation=_value(item, "plain_explanation").strip()[:8000],
                         evidence_ids=evidence_ids[:32],
                         normalized_text=normalized[:8000],
-                        controlled_terms=all_controlled,
+                        controlled_terms=finding_controlled or all_controlled,
                         condition_terms=conditions,
-                        biomedical_terms=biomedical,
+                        biomedical_terms=global_biomedical,
                         keywords=keywords,
                         phrases=phrases,
+                        condition_status=condition_status,
                     )
                 )
                 if len(findings) >= self.max_findings:
@@ -202,6 +251,9 @@ def extract_matchable_findings(
     report: MedicalInsightReport | Mapping[str, Any],
     *,
     detected_concepts: Iterable[Any] = (),
+    analysis_concepts: Iterable[Any] | None = None,
+    candidate_concepts: Iterable[Any] | None = None,
+    evidence_text_by_id: Mapping[str, str] | None = None,
     ontology: DiseaseOntology | None = None,
     max_findings: int = 20,
     valid_evidence_ids: set[str] | None = None,
@@ -210,6 +262,9 @@ def extract_matchable_findings(
     return FindingExtractor(ontology=ontology, max_findings=max_findings).extract(
         report,
         detected_concepts=detected_concepts,
+        analysis_concepts=analysis_concepts,
+        candidate_concepts=candidate_concepts,
+        evidence_text_by_id=evidence_text_by_id,
         valid_evidence_ids=valid_evidence_ids,
     )
 
@@ -237,6 +292,135 @@ def _clean_ids(value: Any) -> list[str]:
     if not isinstance(value, (list, tuple)):
         return []
     return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+
+def extract_report_condition_concepts(
+    report: MedicalInsightReport | Mapping[str, Any],
+    *,
+    ontology: DiseaseOntology | None,
+    evidence_texts: Iterable[str] = (),
+) -> list[dict[str, Any]]:
+    """Extract report-owned condition concepts without trusting search input."""
+    if ontology is None:
+        return []
+    parsed_report = _coerce_report(report)
+    texts = [
+        _value(parsed_report.overview, "title"),
+        _value(parsed_report.overview, "summary"),
+        _value(parsed_report.overview, "study_type"),
+    ]
+    for field_name, _finding_type in _SECTION_TYPES:
+        for item in getattr(parsed_report, field_name, ()):
+            texts.extend((_value(item, "statement"), _value(item, "plain_explanation")))
+    for item in parsed_report.medical_terms:
+        texts.extend((_value(item, "term"), _value(item, "explanation")))
+    texts.extend(str(value or "") for value in evidence_texts)
+    return _concepts_from_texts(texts, ontology=ontology)
+
+
+def _concepts_from_texts(
+    texts: Iterable[Any],
+    *,
+    ontology: DiseaseOntology,
+) -> list[dict[str, Any]]:
+    matcher = DiseaseMatcher(ontology)
+    concepts: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for raw_text in texts:
+        text = str(raw_text or "").strip()
+        if not text:
+            continue
+        for match in matcher.find_matches(text):
+            if match.status != "ready" or len(match.candidates) != 1:
+                continue
+            candidate = match.candidates[0]
+            if candidate.resolution != "automatic" or candidate.concept_id in seen_ids:
+                continue
+            concept = ontology.get(candidate.concept_id)
+            if concept is None:
+                continue
+            seen_ids.add(concept.concept_id)
+            concepts.append(
+                {
+                    "type": "condition",
+                    "original": match.matched_text,
+                    "normalized": concept.preferred_name_en,
+                    "concept_id": concept.concept_id,
+                    "source": "local_ontology",
+                    "source_code": concept.mesh_id or concept.orpha_code or "",
+                }
+            )
+    return concepts
+
+
+def _condition_ids_in_text(text: str, *, ontology: DiseaseOntology | None) -> set[str]:
+    if ontology is None or not text.strip():
+        return set()
+    return {
+        candidate.concept_id
+        for match in DiseaseMatcher(ontology).find_matches(text)
+        if match.status == "ready" and len(match.candidates) == 1
+        for candidate in match.candidates
+        if candidate.resolution == "automatic"
+    }
+
+
+def _concept_ids(concepts: Iterable[Any], *, condition_only: bool) -> set[str]:
+    result: set[str] = set()
+    for raw in concepts:
+        concept = raw.model_dump() if isinstance(raw, BaseModel) else raw
+        if not isinstance(concept, Mapping):
+            continue
+        concept_id = str(concept.get("concept_id") or "").strip()
+        concept_type = str(concept.get("type") or "").strip().casefold()
+        is_condition = concept_type in {"condition", "disease", "medical_condition"} or (
+            concept_id.startswith("mesh:") or concept_id.startswith("orpha:")
+        )
+        if concept_id and is_condition == condition_only:
+            result.add(concept_id)
+    return result
+
+
+def _condition_terms_for_ids(
+    concepts: Iterable[Any],
+    concept_ids: set[str],
+    *,
+    ontology: DiseaseOntology | None,
+) -> list[str]:
+    values: list[str] = []
+    for raw in concepts:
+        concept = raw.model_dump() if isinstance(raw, BaseModel) else raw
+        if not isinstance(concept, Mapping):
+            continue
+        if str(concept.get("concept_id") or "").strip() not in concept_ids:
+            continue
+        values.extend(
+            _concept_terms([concept], ontology=ontology)[1]
+        )
+    return _unique_terms(values, limit=16)
+
+
+def _finding_text(
+    statement: str,
+    plain_explanation: Any,
+    evidence_ids: Iterable[str],
+    evidence_text_by_id: Mapping[str, str],
+) -> str:
+    texts = [statement, str(plain_explanation or "")]
+    texts.extend(evidence_text_by_id.get(evidence_id, "") for evidence_id in evidence_ids)
+    return "\n".join(text for text in texts if text).strip()
+
+
+def _unique_finding_id(source_id: str, finding_type: FindingType, seen_ids: set[str]) -> str:
+    base = source_id[:128]
+    if base not in seen_ids:
+        return base
+    for counter in range(2, 10000):
+        suffix = f":{counter:04d}"
+        candidate = f"{base[:128 - len(suffix)]}{suffix}"
+        if candidate not in seen_ids:
+            return candidate
+    raise FindingExtractionError(f"too many duplicate finding ids for {finding_type}")
 
 
 def _concept_terms(

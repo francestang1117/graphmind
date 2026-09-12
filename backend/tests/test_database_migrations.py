@@ -211,6 +211,10 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
     assert "attempt_token" in literature_run_columns
     assert "ontology_version" in literature_run_columns
     assert "detected_concepts_json" in literature_run_columns
+    evidence_match_columns = {
+        item["name"] for item in inspector.get_columns("literature_evidence_matches")
+    }
+    assert {"article_snapshot_json", "candidate_rank"}.issubset(evidence_match_columns)
     with engine.connect() as db:
         match_run_sql = db.scalar(
             text("SELECT sql FROM sqlite_master WHERE name = 'literature_match_runs'")

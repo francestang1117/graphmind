@@ -42,11 +42,13 @@ class LiteratureCandidateMatcher:
         self,
         *,
         min_score: int = 40,
+        min_condition_score: int = 15,
         max_articles: int = 50,
         max_per_finding: int = 5,
         quote_length: int = 600,
     ) -> None:
         self.min_score = max(0, min(int(min_score), 100))
+        self.min_condition_score = max(0, min(int(min_condition_score), 100))
         self.max_articles = max(1, min(int(max_articles or 1), 50))
         self.max_per_finding = max(1, min(int(max_per_finding or 1), 5))
         self.card_builder = StudyCardBuilder(quote_length=quote_length)
@@ -86,6 +88,11 @@ class LiteratureCandidateMatcher:
 
         result_findings: list[FindingMatchResult] = []
         for finding in findings:
+            if finding.condition_status == "mismatch":
+                result_findings.append(
+                    FindingMatchResult(finding=finding, match_status="condition_mismatch")
+                )
+                continue
             if not _has_match_terms(finding):
                 result_findings.append(
                     FindingMatchResult(finding=finding, match_status="insufficient_terms")
@@ -130,6 +137,8 @@ class LiteratureCandidateMatcher:
             warnings.append("Retracted PubMed articles were excluded from the candidate list.")
         if excluded.get("missing_metadata"):
             warnings.append("Some PubMed records were excluded because required metadata was missing.")
+        if any(item.match_status == "condition_mismatch" for item in result_findings):
+            warnings.append("Some findings were skipped because their condition did not match the search condition.")
         return LiteratureMatchResult(
             findings=result_findings,
             excluded_articles=excluded,
@@ -260,6 +269,8 @@ class LiteratureCandidateMatcher:
         if not condition_found and not specific_features:
             return None
         if not specific_features:
+            if score < self.min_condition_score:
+                return None
             specificity = "condition_only"
         elif score >= self.min_score:
             specificity = "finding_specific"
@@ -290,6 +301,7 @@ def match_articles(
     articles: Iterable[Any],
     *,
     min_score: int = 40,
+    min_condition_score: int = 15,
     max_articles: int = 50,
     max_per_finding: int = 5,
     quote_length: int = 600,
@@ -297,6 +309,7 @@ def match_articles(
     """Functional wrapper for deterministic unit and integration tests."""
     return LiteratureCandidateMatcher(
         min_score=min_score,
+        min_condition_score=min_condition_score,
         max_articles=max_articles,
         max_per_finding=max_per_finding,
         quote_length=quote_length,

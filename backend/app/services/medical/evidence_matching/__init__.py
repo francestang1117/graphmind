@@ -3,6 +3,7 @@
 from app.services.medical.evidence_matching.finding_extractor import (
     FindingExtractionError,
     FindingExtractor,
+    extract_report_condition_concepts,
     extract_matchable_findings,
 )
 from app.services.medical.evidence_matching.matcher import (
@@ -33,5 +34,6 @@ __all__ = [
     "StudyCardBuilder",
     "build_study_card",
     "extract_matchable_findings",
+    "extract_report_condition_concepts",
     "match_articles",
 ]

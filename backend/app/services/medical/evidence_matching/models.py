@@ -18,10 +18,12 @@ FindingType = Literal[
 FindingMatchStatus = Literal[
     "matched",
     "condition_only",
+    "condition_mismatch",
     "insufficient_terms",
     "no_candidates",
 ]
 MatchSpecificity = Literal["finding_specific", "condition_only"]
+ConditionStatus = Literal["matched", "mismatch", "unknown"]
 
 
 class _StrictModel(BaseModel):
@@ -42,6 +44,7 @@ class MatchableFinding(_StrictModel):
     biomedical_terms: list[str] = Field(default_factory=list, max_length=16)
     keywords: list[str] = Field(default_factory=list, max_length=10)
     phrases: list[str] = Field(default_factory=list, max_length=5)
+    condition_status: ConditionStatus = "unknown"
 
 
 class MatchFeature(_StrictModel):

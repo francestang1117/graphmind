@@ -334,6 +334,7 @@ def _ensure_literature_match_tables(connection, timestamp_type: str | None = Non
                 document_evidence_ids_json TEXT NOT NULL,
                 article_id VARCHAR(64) NOT NULL,
                 article_metadata_hash VARCHAR(64) NOT NULL,
+                article_snapshot_json TEXT NOT NULL DEFAULT '{{}}',
                 relevance_score INTEGER NOT NULL,
                 match_specificity VARCHAR(32) NOT NULL,
                 matched_terms_json TEXT NOT NULL,
@@ -342,6 +343,7 @@ def _ensure_literature_match_tables(connection, timestamp_type: str | None = Non
                 abstract_character_start INTEGER,
                 abstract_character_end INTEGER,
                 provider_rank INTEGER NOT NULL,
+                candidate_rank INTEGER NOT NULL DEFAULT 0,
                 warnings_json TEXT NOT NULL,
                 created_at {timestamp_type} NOT NULL,
                 CONSTRAINT uq_literature_evidence_matches_run_finding_article
@@ -355,6 +357,16 @@ def _ensure_literature_match_tables(connection, timestamp_type: str | None = Non
             )
             """
         )
+    else:
+        columns = (
+            ("article_snapshot_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("candidate_rank", "INTEGER NOT NULL DEFAULT 0"),
+        )
+        for column, definition in columns:
+            if not _has_column(connection, "literature_evidence_matches", column):
+                connection.exec_driver_sql(
+                    f"ALTER TABLE literature_evidence_matches ADD COLUMN {column} {definition}"
+                )
 
     indexes = (
         ("ix_literature_match_runs_user_id", "literature_match_runs", "user_id"),
@@ -370,6 +382,7 @@ def _ensure_literature_match_tables(connection, timestamp_type: str | None = Non
         ("ix_literature_evidence_matches_article_id", "literature_evidence_matches", "article_id"),
         ("ix_literature_evidence_matches_relevance_score", "literature_evidence_matches", "relevance_score"),
         ("ix_literature_evidence_matches_specificity", "literature_evidence_matches", "match_specificity"),
+        ("ix_literature_evidence_matches_candidate_rank", "literature_evidence_matches", "candidate_rank"),
     )
     for name, table, column in indexes:
         connection.exec_driver_sql(
@@ -1556,6 +1569,7 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
                 document_evidence_ids_json TEXT NOT NULL,
                 article_id VARCHAR(64) NOT NULL,
                 article_metadata_hash VARCHAR(64) NOT NULL,
+                article_snapshot_json TEXT NOT NULL DEFAULT '{}',
                 relevance_score INTEGER NOT NULL,
                 match_specificity VARCHAR(32) NOT NULL,
                 matched_terms_json TEXT NOT NULL,
@@ -1564,6 +1578,7 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
                 abstract_character_start INTEGER,
                 abstract_character_end INTEGER,
                 provider_rank INTEGER NOT NULL,
+                candidate_rank INTEGER NOT NULL DEFAULT 0,
                 warnings_json TEXT NOT NULL,
                 created_at DATETIME NOT NULL,
                 CONSTRAINT uq_literature_evidence_matches_run_finding_article
@@ -1579,7 +1594,8 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
             "id, match_run_id, finding_id, finding_type, finding_text_snapshot, "
             "document_evidence_ids_json, article_id, article_metadata_hash, relevance_score, "
             "match_specificity, matched_terms_json, match_features_json, abstract_quote, "
-            "abstract_character_start, abstract_character_end, provider_rank, warnings_json, "
+            "article_snapshot_json, abstract_character_start, abstract_character_end, "
+            "provider_rank, candidate_rank, warnings_json, "
             "created_at",
         ),
     }
@@ -1679,6 +1695,7 @@ def _sqlite_indexes(table: str) -> tuple[tuple[str, str], ...]:
             ("ix_literature_evidence_matches_article_id", "article_id"),
             ("ix_literature_evidence_matches_relevance_score", "relevance_score"),
             ("ix_literature_evidence_matches_specificity", "match_specificity"),
+            ("ix_literature_evidence_matches_candidate_rank", "candidate_rank"),
         ),
     }
     return indexes.get(table, ())

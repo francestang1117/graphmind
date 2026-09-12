@@ -637,6 +637,9 @@ class LiteratureEvidenceMatchRecord(Base):
         index=True,
     )
     article_metadata_hash: Mapped[str] = mapped_column(String(64), default="")
+    # Keep the exact public metadata used for the match so later PubMed cache
+    # refreshes cannot silently mix a new article with an old match score.
+    article_snapshot_json: Mapped[str] = mapped_column(Text, default="{}")
     relevance_score: Mapped[int] = mapped_column(Integer, default=0, index=True)
     match_specificity: Mapped[str] = mapped_column(String(32), index=True)
     matched_terms_json: Mapped[str] = mapped_column(Text, default="[]")
@@ -645,5 +648,6 @@ class LiteratureEvidenceMatchRecord(Base):
     abstract_character_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     abstract_character_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     provider_rank: Mapped[int] = mapped_column(Integer, default=0)
+    candidate_rank: Mapped[int] = mapped_column(Integer, default=0, index=True)
     warnings_json: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

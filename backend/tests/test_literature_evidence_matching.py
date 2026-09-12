@@ -29,6 +29,7 @@ from app.models.persistence import (
 )
 from app.services.medical.ai.models import MedicalInsightReport
 from app.services.medical.evidence_matching.finding_extractor import (
+    extract_report_condition_concepts,
     extract_matchable_findings,
 )
 from app.services.medical.evidence_matching.exceptions import LiteratureMatchingError
@@ -343,6 +344,64 @@ def test_finding_extractor_processes_at_most_twenty_findings() -> None:
     assert len(extract_matchable_findings(report, max_findings=20)) == 20
 
 
+def test_finding_extractor_scopes_conditions_to_each_finding() -> None:
+    report = _report(
+        [
+            {
+                "id": "fabry-finding",
+                "statement": "Fabry disease treatment reduced proteinuria.",
+                "plain_explanation": "Fabry disease was studied.",
+                "evidence_ids": ["EVIDENCE_001"],
+            },
+            {
+                "id": "melanoma-finding",
+                "statement": "Melanoma recurrence was observed after follow-up.",
+                "plain_explanation": "Melanoma was the reported condition.",
+                "evidence_ids": ["EVIDENCE_001"],
+            },
+        ]
+    )
+    report.overview.title = "Fabry disease and melanoma study"
+    from app.services.medical.terminology.loader import get_default_ontology
+
+    ontology = get_default_ontology()
+    analysis_concepts = extract_report_condition_concepts(report, ontology=ontology)
+    findings = extract_matchable_findings(
+        report,
+        ontology=ontology,
+        analysis_concepts=analysis_concepts,
+        candidate_concepts=analysis_concepts,
+        valid_evidence_ids={"EVIDENCE_001"},
+    )
+
+    assert [finding.condition_status for finding in findings] == ["matched", "matched"]
+    assert findings[0].condition_terms == ["Fabry disease", "D000795", "法布雷病", "Fabry's disease"]
+    assert findings[1].condition_terms == ["Melanoma", "D008545", "黑色素瘤"]
+
+
+def test_finding_extractor_does_not_loop_on_long_duplicate_ids() -> None:
+    report = _report(
+        [
+            {
+                "id": "x" * 128,
+                "statement": f"The treatment changed biomarker {index}.",
+                "plain_explanation": "A reported result.",
+                "evidence_ids": ["EVIDENCE_001"],
+            }
+            for index in range(20)
+        ]
+    )
+
+    findings = extract_matchable_findings(
+        report,
+        valid_evidence_ids={"EVIDENCE_001"},
+    )
+
+    assert len(findings) == 20
+    assert len({finding.finding_id for finding in findings}) == 20
+    assert all(len(finding.finding_id) <= 128 for finding in findings)
+
+
 def test_matcher_scores_specific_matches_and_locates_exact_abstract_text() -> None:
     article = _article()
     result = match_articles([_finding()], [article])
@@ -385,6 +444,30 @@ def test_condition_only_is_explicit_and_not_finding_specific() -> None:
     assert result.findings[0].candidates[0].abstract_quote is None
 
 
+def test_condition_only_uses_its_own_threshold() -> None:
+    article = _article(
+        title="Registry overview",
+        abstract="A public registry abstract.",
+        mesh_terms=["Fabry Disease"],
+    )
+
+    accepted = match_articles(
+        [_finding(keywords=[], phrases=[])],
+        [article],
+        min_score=99,
+        min_condition_score=40,
+    )
+    rejected = match_articles(
+        [_finding(keywords=[], phrases=[])],
+        [article],
+        min_score=99,
+        min_condition_score=41,
+    )
+
+    assert accepted.findings[0].match_status == "condition_only"
+    assert rejected.findings[0].match_status == "no_candidates"
+
+
 def test_matcher_excludes_retractions_and_reports_empty_eligible_result() -> None:
     result = match_articles(
         [_finding()],
@@ -421,6 +504,14 @@ def test_matcher_uses_numeric_pmid_order_for_tied_provider_ranks() -> None:
     result = match_articles([_finding()], articles, max_articles=2, max_per_finding=2)
 
     assert [card.pmid for card in result.findings[0].candidates] == ["2", "10"]
+
+
+def test_phase_four_is_not_classified_as_phase_one() -> None:
+    assert development_phase(["Clinical Trial", "Phase I"]) == "phase_1"
+    assert development_phase(["Clinical Trial", "Phase II"]) == "phase_2"
+    assert development_phase(["Clinical Trial", "Phase III"]) == "phase_3"
+    assert development_phase(["Clinical Trial", "Phase IV"]) == "phase_4"
+    assert classify_study_category(["Clinical Trial", "Phase IV"]) == "clinical_trial_phase_4"
 
 
 def test_matcher_does_not_translate_arbitrary_chinese_text() -> None:
@@ -504,6 +595,109 @@ def test_repository_persists_and_reuses_scoped_match_run() -> None:
     with sessions() as db:
         assert db.scalar(select(func.count(LiteratureMatchRunRecord.id))) == 1
         assert db.scalar(select(func.count(LiteratureEvidenceMatchRecord.id))) == 1
+
+
+def test_repository_rejects_search_condition_that_is_not_in_the_analysis() -> None:
+    sessions, repository = _setup()
+    analysis_id, search_id = _analysis_and_search(sessions)
+    with sessions() as db:
+        db.get(LiteratureSearchRunRecord, search_id).detected_concepts_json = json.dumps(
+            [
+                {
+                    "type": "condition",
+                    "original": "melanoma",
+                    "normalized": "Melanoma",
+                    "concept_id": "mesh:D008545",
+                    "source": "local_ontology",
+                    "source_code": "D008545",
+                }
+            ]
+        )
+        db.commit()
+
+    result, created = repository.create_or_reuse_match_run(
+        document_id="document-1",
+        user_id="user-a",
+        workspace_id="workspace-a",
+        analysis_run_id=analysis_id,
+        search_run_id=search_id,
+    )
+
+    assert created is True
+    assert result["findings"][0]["match_status"] == "condition_mismatch"
+    assert result["findings"][0]["candidates"] == []
+
+
+def test_repository_hides_article_retracted_after_matching() -> None:
+    sessions, repository = _setup()
+    analysis_id, search_id = _analysis_and_search(sessions)
+    saved, _ = repository.create_or_reuse_match_run(
+        document_id="document-1",
+        user_id="user-a",
+        workspace_id="workspace-a",
+        analysis_run_id=analysis_id,
+        search_run_id=search_id,
+    )
+    with sessions() as db:
+        article = db.get(LiteratureArticleRecord, "article-1001")
+        article.retraction_status = "retracted"
+        db.commit()
+
+    current = repository.get_match_run(saved["match_run_id"], "user-a", "workspace-a")
+
+    assert current["findings"][0]["match_status"] == "no_candidates"
+    assert current["findings"][0]["candidates"] == []
+    assert current["excluded_articles"]["retracted_after_matching"] == 1
+    assert "retracted_after_matching" in current["warnings"]
+    assert current["summary"]["match_count"] == 0
+    assert current["stale"] is True
+
+
+def test_repository_reads_saved_article_snapshot_and_candidate_rank() -> None:
+    sessions, repository = _setup()
+    analysis_id, search_id = _analysis_and_search(
+        sessions,
+        articles=[
+            _article("1001"),
+            _article(
+                "1002",
+                title="Fabry disease registry",
+                abstract="A public registry abstract.",
+                mesh_terms=["Fabry Disease"],
+                rank=2,
+            ),
+        ],
+    )
+    saved, _ = repository.create_or_reuse_match_run(
+        document_id="document-1",
+        user_id="user-a",
+        workspace_id="workspace-a",
+        analysis_run_id=analysis_id,
+        search_run_id=search_id,
+    )
+    with sessions() as db:
+        saved_matches = db.scalars(
+            select(LiteratureEvidenceMatchRecord)
+            .where(LiteratureEvidenceMatchRecord.match_run_id == saved["match_run_id"])
+            .order_by(LiteratureEvidenceMatchRecord.candidate_rank.asc())
+        ).all()
+        assert len(saved_matches) == 2
+        first_match = saved_matches[0]
+        assert first_match.candidate_rank == 1
+        assert json.loads(first_match.article_snapshot_json)["title"] == _article()["title"]
+        first_match.warnings_json = json.dumps(["saved_warning"])
+        saved_matches[0].relevance_score = 1
+        saved_matches[1].relevance_score = 100
+        db.get(LiteratureArticleRecord, "article-1001").title = "Refreshed title"
+        db.get(LiteratureArticleRecord, "article-1001").metadata_hash = "b" * 64
+        db.commit()
+
+    current = repository.get_match_run(saved["match_run_id"], "user-a", "workspace-a")
+
+    assert [card["pmid"] for card in current["findings"][0]["candidates"]] == ["1001", "1002"]
+    assert current["findings"][0]["candidates"][0]["title"] == _article()["title"]
+    assert current["findings"][0]["candidates"][0]["stale"] is True
+    assert "saved_warning" in current["findings"][0]["candidates"][0]["warnings"]
 
 
 def test_repository_marks_article_metadata_changes_as_stale() -> None:

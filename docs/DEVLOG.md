@@ -1737,5 +1737,5 @@ Tests cover finding extraction and evidence requirements, deterministic bounds,
 controlled-term and Chinese-language behavior, abstract offsets, publication
 type classification, retraction handling, idempotence, stale article warnings,
 workspace scope, migration constraints, and deletion cleanup. The local backend
-suite is now `432 passed, 3 skipped`; the PostgreSQL-specific checks remain
+suite is now `439 passed, 3 skipped`; the PostgreSQL-specific checks remain
 conditional when `GRAPHMIND_TEST_POSTGRES_URL` is not configured.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable, Mapping
 
 from app.services.medical.evidence_matching.models import MatchFeature, StudyCard
@@ -102,12 +103,9 @@ def classify_study_category(publication_types: Iterable[str]) -> str:
         return "meta_analysis"
     if _contains_any(values, "randomized controlled trial", "randomised controlled trial"):
         return "randomized_controlled_trial"
-    if _contains_any(values, "phase iii", "phase 3"):
-        return "clinical_trial_phase_3"
-    if _contains_any(values, "phase ii", "phase 2"):
-        return "clinical_trial_phase_2"
-    if _contains_any(values, "phase i", "phase 1"):
-        return "clinical_trial_phase_1"
+    phase = _explicit_phase(values)
+    if phase:
+        return f"clinical_trial_phase_{phase}"
     if _contains_any(values, "clinical trial", "clinical study"):
         return "clinical_trial"
     if _contains_any(
@@ -127,14 +125,8 @@ def classify_study_category(publication_types: Iterable[str]) -> str:
 
 def development_phase(publication_types: Iterable[str]) -> str:
     """Return a phase only when PubMed explicitly supplies one."""
-    values = _normalized_types(publication_types)
-    if _contains_any(values, "phase iii", "phase 3"):
-        return "phase_3"
-    if _contains_any(values, "phase ii", "phase 2"):
-        return "phase_2"
-    if _contains_any(values, "phase i", "phase 1"):
-        return "phase_1"
-    return "not_reported"
+    phase = _explicit_phase(_normalized_types(publication_types))
+    return f"phase_{phase}" if phase else "not_reported"
 
 
 def _normalized_types(values: Iterable[str]) -> list[str]:
@@ -143,6 +135,19 @@ def _normalized_types(values: Iterable[str]) -> list[str]:
 
 def _contains_any(values: Iterable[str], *needles: str) -> bool:
     return any(needle in value for value in values for needle in needles)
+
+
+_PHASE_PATTERN = re.compile(r"\bphase\s+(?P<phase>iv|iii|ii|i|4|3|2|1)\b")
+_PHASE_NUMBERS = {"i": "1", "ii": "2", "iii": "3", "iv": "4"}
+
+
+def _explicit_phase(values: Iterable[str]) -> str | None:
+    """Map a complete PubMed phase label without treating Phase IV as Phase I."""
+    for value in values:
+        match = _PHASE_PATTERN.search(value)
+        if match:
+            return _PHASE_NUMBERS.get(match.group("phase"), match.group("phase"))
+    return None
 
 
 def _value(article: Any, field: str) -> Any:
@@ -182,4 +187,3 @@ def _dedupe_strings(values: Iterable[str], *, limit: int) -> list[str]:
             if len(result) >= limit:
                 break
     return result
-
