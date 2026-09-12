@@ -3,7 +3,8 @@
 This project currently has backend tests for upload, validation, parsing, auth,
 search, graph construction, chat, persistence, rate limiting, virus scanning,
 WebSocket progress, medical document analysis, citation validation, safety
-boundaries, and the PubMed literature-search boundary.
+boundaries, the PubMed literature-search boundary, and local finding-to-literature
+matching with conservative study cards.
 
 ## Quick Start
 
@@ -14,7 +15,7 @@ PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
 
 The exact count can change as tests are added. The latest local result is
-`373 passed, 3 skipped`.
+`432 passed, 3 skipped`.
 
 The three skipped checks are the PostgreSQL migration test and two PostgreSQL
 row-lock tests when `GRAPHMIND_TEST_POSTGRES_URL` is not set. GitHub Actions
@@ -81,6 +82,7 @@ or unsafe.
 | `backend/tests/test_literature_rate_limiter.py` | Redis token-bucket pacing and fail-closed production behavior |
 | `backend/tests/test_literature_api.py` | Preview confirmation, stale fingerprints, queueing, and workspace isolation |
 | `backend/tests/test_literature_search_task.py` | Worker claim, provider success, and safe failure persistence |
+| `backend/tests/test_literature_evidence_matching.py` | Evidence-backed finding extraction, deterministic local matching, abstract offsets, study cards, scope, idempotence, and deletion cleanup |
 | `backend/tests/test_config.py` | Runtime environment, authentication, and JWT secret safety guards |
 
 ## Running Specific Tests
@@ -276,6 +278,22 @@ contact PubMed. In a multi-worker deployment, the provider uses the shared
 Redis PubMed token bucket; staging and production fail closed if that
 coordination service is unavailable. CI uses `httpx.MockTransport`; it never
 calls the external service.
+
+Run the local literature evidence matcher after a medical insight and a
+PubMed search have both succeeded:
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/documents/<document_id>/literature-matches?workspace_id=<workspace_id>" -H "Content-Type: application/json" -d '{"analysis_run_id":"<analysis_run_id>","search_run_id":"<search_run_id>"}'
+```
+
+Poll `GET /api/v1/literature-match-runs/<match_run_id>` or use the latest
+endpoint. Confirm that each candidate has an explainable score, specificity,
+matched terms, a quote and offsets from the stored abstract when available,
+and a study category derived only from PubMed publication types. Retracted
+articles must be excluded; correction or expression-of-concern records should
+carry warnings. This step is local and does not contact PubMed or an AI model.
+A report with no evidence-backed findings returns
+`literature_match_no_findings` rather than creating an unverifiable run.
 
 Check database-backed parsed artifacts:
 

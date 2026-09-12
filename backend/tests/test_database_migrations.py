@@ -196,6 +196,8 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         "literature_articles",
         "literature_search_runs",
         "literature_search_results",
+        "literature_match_runs",
+        "literature_evidence_matches",
     }.issubset(
         set(inspector.get_table_names())
     )
@@ -209,12 +211,28 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
     assert "attempt_token" in literature_run_columns
     assert "ontology_version" in literature_run_columns
     assert "detected_concepts_json" in literature_run_columns
+    with engine.connect() as db:
+        match_run_sql = db.scalar(
+            text("SELECT sql FROM sqlite_master WHERE name = 'literature_match_runs'")
+        )
+        match_sql = db.scalar(
+            text("SELECT sql FROM sqlite_master WHERE name = 'literature_evidence_matches'")
+        )
+    assert "uq_literature_match_runs_scope_inputs_version" in match_run_sql
+    assert "uq_literature_evidence_matches_run_finding_article" in match_sql
+    assert inspector.get_foreign_keys("literature_match_runs")
+    assert inspector.get_foreign_keys("literature_search_results")
+    assert inspector.get_foreign_keys("literature_evidence_matches")
     chunk_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_chunks")]
     entity_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_entities")]
     assert ["user_id", "workspace_id", "document_id", "chunk_index"] in chunk_uniques
     assert ["user_id", "workspace_id", "document_id", "normalized", "label"] in entity_uniques
     assert inspector.get_foreign_keys("parsed_chunks")[0]["referred_table"] == "documents"
     assert inspector.get_foreign_keys("parsed_entities")[0]["referred_table"] == "documents"
+    assert all(
+        fk["referred_table"] in {"literature_search_runs", "literature_articles"}
+        for fk in inspector.get_foreign_keys("literature_search_results")
+    )
     assert inspector.get_foreign_keys("graph_edges")[0]["referred_table"] == "documents"
     assert inspector.get_foreign_keys("processing_jobs")[0]["referred_table"] == "documents"
 

@@ -75,6 +75,8 @@ def init_db() -> None:
         MedicalAnalysisRunRecord,
         MedicalDocumentProfileRecord,
         LiteratureArticleRecord,
+        LiteratureEvidenceMatchRecord,
+        LiteratureMatchRunRecord,
         LiteratureSearchResultRecord,
         LiteratureSearchRunRecord,
         OAuthIdentityRecord,

@@ -1708,3 +1708,34 @@ replacement packages cannot bypass the build-time validation. The backend
 suite is now `412 passed, 3 skipped`; the remaining
 skips are environment-dependent PostgreSQL checks when no test database URL is
 configured.
+
+## 2026-09 - V2 PR9: Local Literature Evidence Matching
+
+PR9 connects a completed, evidence-backed medical insight to a completed
+workspace-scoped PubMed search without making another external request. The
+matching service extracts only findings with valid source evidence IDs, keeps a
+bounded finding/article set, snapshots the finding text, and computes a
+deterministic local score from controlled condition terms, title/abstract
+overlap, PubMed rank, and other explainable features.
+
+Each candidate includes a finding-specific or condition-only specificity label,
+matched terms, feature explanations, a quote from the stored abstract with
+character offsets, and a conservative study card. Study categories and trial
+phases come only from normalized PubMed publication types; the matcher does not
+infer efficacy, evidence quality, diagnosis, or treatment advice. Retracted
+articles are excluded, while corrections and expressions of concern remain
+visible through warnings. The response makes clear that relevance is not proof.
+
+The new match-run and evidence-match tables carry user, workspace, and document
+scope, source snapshots, matcher version, article metadata hashes, and cascade
+cleanup. Repeated requests reuse an unchanged input fingerprint. Document
+deletion removes match links and runs while retaining the shared public article
+cache. The API exposes create, polling, and latest-run endpoints; no frontend
+or remote model integration is included in this phase.
+
+Tests cover finding extraction and evidence requirements, deterministic bounds,
+controlled-term and Chinese-language behavior, abstract offsets, publication
+type classification, retraction handling, idempotence, stale article warnings,
+workspace scope, migration constraints, and deletion cleanup. The local backend
+suite is now `432 passed, 3 skipped`; the PostgreSQL-specific checks remain
+conditional when `GRAPHMIND_TEST_POSTGRES_URL` is not configured.
