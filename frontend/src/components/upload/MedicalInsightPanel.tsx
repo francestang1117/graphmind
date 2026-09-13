@@ -14,6 +14,7 @@ import {
   type MedicalInsightReport,
   type MedicalInsightRun,
 } from "../../services/api";
+import LiteratureEvidencePanel from "./literature/LiteratureEvidencePanel";
 
 function consentStorageKey(
   config: MedicalInsightConfig,
@@ -654,6 +655,16 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
               <blockquote>{selectedEvidence.quote}</blockquote>
             </aside>
           )}
+          <LiteratureEvidencePanel
+            key={`${documentId}:${workspaceId || "default"}:${run.run_id}`}
+            documentId={documentId}
+            workspaceId={workspaceId}
+            analysisRunId={run.run_id}
+            onEvidenceClick={(evidenceId) => {
+              const evidence = evidenceById.get(evidenceId);
+              if (evidence) setSelectedEvidence(evidence);
+            }}
+          />
           <p className="insight-disclaimer">
             AI-generated document explanation only. It is not a diagnosis or treatment recommendation.
           </p>
