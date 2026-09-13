@@ -20,11 +20,13 @@ Completed layers:
 - PR7: privacy-bounded PubMed search with scoped cache, worker leases, retries, and deletion cleanup
 - PR8: versioned local disease ontology with safe alias resolution and auditable source checksums
 - PR9: local finding-to-literature matching, abstract quote locations, and conservative study cards
+- PR11: evidence-backed questions for discussion with a healthcare professional
 
 Next V2 layer:
 
 - add the workspace and paper workflow to the frontend
 - build a reviewed Chinese/English evaluation set and measure matching precision
+- add durable question-list state only after the source-backed question flow is stable
 - compare multiple papers only after individual evidence remains traceable
 
 ## Development Phases

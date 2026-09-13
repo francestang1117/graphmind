@@ -1739,3 +1739,28 @@ type classification, retraction handling, idempotence, stale article warnings,
 workspace scope, migration constraints, and deletion cleanup. The local backend
 suite is now `439 passed, 3 skipped`; the PostgreSQL-specific checks remain
 conditional when `GRAPHMIND_TEST_POSTGRES_URL` is not configured.
+
+## 2026-09 - V2 PR11: Evidence-Backed Questions for Clinicians
+
+The medical insight report now has a V3 `question_suggestions` field for a
+small, source-backed list of questions that a general reader can discuss with a
+qualified healthcare professional. Each question has a fixed category, a
+plain-language rationale, one to five evidence IDs, and an interpretation type.
+The list is deliberately optional: when the source does not support a useful
+question, an empty list is valid. The previous V2 `questions_for_professional`
+field remains readable for old saved reports and is left empty by new provider
+output.
+
+Questions participate in the same citation, support, and safety checks as the
+rest of the report. Unknown or references-only evidence is rejected, duplicate
+questions are rejected after normalization, and vague or non-question text is
+not accepted. The safety validator scans both the question and its rationale for
+personal diagnosis and treatment instructions before a report can be saved.
+
+The local extractive provider can produce applicability and limitation questions
+when the corresponding source sections are present. The prompt instructs an
+external provider to use only the supplied evidence, avoid personal assumptions
+and treatment directions, and return an empty list when evidence is insufficient.
+The frontend renders structured question cards with category and rationale,
+opens the cited source passage, and copies only the human-readable question and
+reason to the clipboard. Legacy reports fall back to their old string list.
