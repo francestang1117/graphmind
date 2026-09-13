@@ -201,6 +201,213 @@ export interface MedicalInsightConfig {
   config_fingerprint: string;
 }
 
+export type LiteratureSearchStatus = "queued" | "running" | "succeeded" | "failed" | string;
+
+export interface LiteratureConceptSelection {
+  match_id: string;
+  concept_id: string;
+}
+
+export interface LiteratureSearchRequest {
+  question: string;
+  date_from?: string | null;
+  date_to?: string | null;
+  study_types: string[];
+  sort: "relevance" | "newest";
+  max_results: number;
+  external_search_confirmed: boolean;
+  query_fingerprint?: string | null;
+  concept_selections: LiteratureConceptSelection[];
+}
+
+export interface DetectedLiteratureConcept {
+  type: string;
+  original: string;
+  normalized: string;
+  concept_id?: string | null;
+  source?: string | null;
+  source_code?: string | null;
+  matched_alias?: string | null;
+  match_type?: string | null;
+  ontology_version?: string | null;
+}
+
+export interface LiteratureDiseaseCandidate {
+  concept_id: string;
+  preferred_name: string;
+  display_name_zh: string;
+  matched_alias: string;
+  resolution: "automatic" | "confirmation_required" | "blocked" | string;
+  mesh_id?: string | null;
+  orpha_code?: string | null;
+}
+
+export interface AmbiguousLiteratureConcept {
+  match_id: string;
+  matched_text: string;
+  normalized_text: string;
+  status: "ready" | "needs_confirmation" | string;
+  candidates: LiteratureDiseaseCandidate[];
+}
+
+export interface LiteratureSearchPreview {
+  document_id: string;
+  workspace_id: string;
+  question: string;
+  detected_concepts: DetectedLiteratureConcept[];
+  resolution_status: "ready" | "needs_confirmation" | string;
+  ambiguous_concepts: AmbiguousLiteratureConcept[];
+  selected_concept_ids: string[];
+  ontology_version?: string | null;
+  redacted_fields: string[];
+  pubmed_query?: string | null;
+  query_fingerprint?: string | null;
+  external_data: {
+    provider: "pubmed" | string;
+    sends_query_terms: boolean;
+    sends_document_content: boolean;
+    sends_uploaded_file: boolean;
+    requires_confirmation: boolean;
+  };
+}
+
+export interface LiteratureArticle {
+  id?: string;
+  source: "pubmed" | string;
+  external_id: string;
+  doi?: string | null;
+  pmcid?: string | null;
+  title: string;
+  abstract?: string | null;
+  journal: string;
+  publication_date?: string | null;
+  publication_year?: number | null;
+  authors?: string[];
+  publication_types: string[];
+  mesh_terms?: string[];
+  language?: string;
+  source_url: string;
+  retraction_status: string;
+  metadata_hash: string;
+  fetched_at?: string | null;
+  provider_rank?: number;
+  matched_terms?: string[];
+  selected_for_analysis?: boolean;
+}
+
+export interface LiteratureSearchRun {
+  run_id: string;
+  user_id?: string;
+  document_id: string;
+  workspace_id: string;
+  question: string;
+  normalized_query: string;
+  query_hash: string;
+  provider: string;
+  status: LiteratureSearchStatus;
+  date_from?: string | null;
+  date_to?: string | null;
+  study_types?: string[];
+  sort?: "relevance" | "newest" | string;
+  max_results?: number;
+  ontology_version?: string | null;
+  detected_concepts?: DetectedLiteratureConcept[];
+  selected_concept_ids?: string[];
+  result_count: number;
+  warnings: string[];
+  error_code: string;
+  error_message: string;
+  attempt_count?: number;
+  started_at?: string | null;
+  completed_at?: string | null;
+  fetched_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  articles: LiteratureArticle[];
+}
+
+export interface LiteratureMatchFeature {
+  feature: string;
+  score: number;
+  matched_values: string[];
+  explanation: string;
+}
+
+export interface LiteratureStudyCard {
+  article_id: string;
+  source: "pubmed" | string;
+  pmid: string;
+  doi?: string | null;
+  pmcid?: string | null;
+  title: string;
+  journal: string;
+  publication_year?: number | null;
+  publication_types: string[];
+  study_category: string;
+  development_phase: string;
+  abstract_available: boolean;
+  relevance_score: number;
+  match_specificity: "finding_specific" | "condition_only" | string;
+  matched_terms: string[];
+  match_reasons: string[];
+  match_features: LiteratureMatchFeature[];
+  abstract_quote?: string | null;
+  abstract_character_start?: number | null;
+  abstract_character_end?: number | null;
+  retraction_status: string;
+  source_url: string;
+  warnings: string[];
+  stale: boolean;
+}
+
+export type LiteratureFindingMatchStatus =
+  | "matched"
+  | "condition_only"
+  | "condition_mismatch"
+  | "insufficient_terms"
+  | "no_candidates"
+  | string;
+
+export interface LiteratureFindingMatch {
+  finding_id: string;
+  finding_type: string;
+  statement: string;
+  plain_explanation: string;
+  document_evidence_ids: string[];
+  match_status: LiteratureFindingMatchStatus;
+  candidates: LiteratureStudyCard[];
+}
+
+export interface LiteratureMatchSummary {
+  finding_count: number;
+  article_count: number;
+  match_count: number;
+  retracted_articles_excluded: number;
+}
+
+export interface LiteratureMatchRun {
+  match_run_id: string;
+  user_id?: string;
+  workspace_id: string;
+  document_id: string;
+  analysis_run_id: string;
+  search_run_id: string;
+  matcher_version: string;
+  input_fingerprint: string;
+  status: string;
+  finding_count: number;
+  article_count: number;
+  match_count: number;
+  summary: LiteratureMatchSummary;
+  excluded_articles: Record<string, number>;
+  warnings: string[];
+  empty_reason: string;
+  stale: boolean;
+  findings: LiteratureFindingMatch[];
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface JobProgress {
   state: "PENDING" | "PROGRESS" | "SUCCESS" | "FAILURE" | "REVOKED" | "ERROR" | string;
   pct: number;
@@ -474,6 +681,89 @@ export const getCurrentMedicalInsights = (
   http
     .get<MedicalInsightRun>(
       `/documents/${encodeURIComponent(documentId)}/medical-insights/current`,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const previewLiteratureSearch = (
+  documentId: string,
+  body: LiteratureSearchRequest,
+  workspaceId?: string | null,
+): Promise<LiteratureSearchPreview> =>
+  http
+    .post<LiteratureSearchPreview>(
+      `/documents/${encodeURIComponent(documentId)}/literature-search/preview`,
+      body,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const startLiteratureSearch = (
+  documentId: string,
+  body: LiteratureSearchRequest,
+  workspaceId?: string | null,
+): Promise<LiteratureSearchRun> =>
+  http
+    .post<LiteratureSearchRun & { created?: boolean }>(
+      `/documents/${encodeURIComponent(documentId)}/literature-search`,
+      body,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const getLiteratureSearchRun = (
+  runId: string,
+  workspaceId?: string | null,
+): Promise<LiteratureSearchRun> =>
+  http
+    .get<LiteratureSearchRun>(
+      `/literature-search-runs/${encodeURIComponent(runId)}`,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const getLatestLiteratureSearch = (
+  documentId: string,
+  workspaceId?: string | null,
+): Promise<LiteratureSearchRun> =>
+  http
+    .get<LiteratureSearchRun>(
+      `/documents/${encodeURIComponent(documentId)}/literature-searches/latest`,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const createLiteratureMatch = (
+  documentId: string,
+  body: { analysis_run_id: string; search_run_id: string },
+  workspaceId?: string | null,
+): Promise<LiteratureMatchRun> =>
+  http
+    .post<LiteratureMatchRun & { created?: boolean }>(
+      `/documents/${encodeURIComponent(documentId)}/literature-matches`,
+      body,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const getLiteratureMatchRun = (
+  matchRunId: string,
+  workspaceId?: string | null,
+): Promise<LiteratureMatchRun> =>
+  http
+    .get<LiteratureMatchRun>(
+      `/literature-match-runs/${encodeURIComponent(matchRunId)}`,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const getLatestLiteratureMatch = (
+  documentId: string,
+  workspaceId?: string | null,
+): Promise<LiteratureMatchRun> =>
+  http
+    .get<LiteratureMatchRun>(
+      `/documents/${encodeURIComponent(documentId)}/literature-matches/latest`,
       workspaceParams(workspaceId),
     )
     .then((r) => r.data);
