@@ -27,16 +27,6 @@ _ENGLISH_QUESTION_START = re.compile(
 _CJK_QUESTION_MARKERS = re.compile(
     r"(?:什么|哪些|哪种|谁|何时|哪里|为什么|为何|如何|能否|是否|可以|应该|需要|怎样)"
 )
-_QUESTION_CONTEXT = re.compile(
-    r"\b(?:study|paper|research|finding|result|population|risk|limitation|"
-    r"measure|indicator|test|evidence|disease|drug|treatment|therapy|sample|"
-    r"patient|adverse|safety|applicability|guideline|professional|doctor|"
-    r"clinician|document|participant|outcome|comparison|follow[- ]?up)\b|"
-    r"(?:研究|论文|文献|发现|结果|人群|风险|局限|指标|检测|证据|疾病|药物|"
-    r"治疗|疗法|样本|患者|不良事件|安全性|适用|指南|医生|专业人员|文档|"
-    r"参与者|结局|比较|随访)",
-    re.IGNORECASE,
-)
 _VAGUE_QUESTION = re.compile(
     r"^(?:what should I do|what now|is it useful|does it work|should I worry|"
     r"我该怎么办|怎么办|有用吗|有效吗|我要治疗吗|需要治疗吗|严重吗)[?？。！!]*$",
@@ -58,6 +48,7 @@ def validate_questions(
     """Require each structured question to be useful, bounded, and cited."""
     errors: list[str] = []
     seen_questions: set[str] = set()
+    seen_ids: set[str] = set()
     evidence = context.evidence_by_id
 
     if len(report.question_suggestions) > 5:
@@ -66,6 +57,9 @@ def validate_questions(
     for index, item in enumerate(report.question_suggestions, start=1):
         label = f"question_suggestions[{index}]"
         normalized = normalize_question(item.question)
+        if item.id in seen_ids:
+            errors.append(f"{label} duplicates another question id")
+        seen_ids.add(item.id)
         if normalized in seen_questions:
             errors.append(f"{label} duplicates another question")
         seen_questions.add(normalized)
@@ -117,7 +111,7 @@ def _is_vague(value: str) -> bool:
     if _VAGUE_QUESTION.fullmatch(normalized):
         return True
     compact = normalize_question(normalized)
-    return len(compact) < 8 or not _QUESTION_CONTEXT.search(normalized)
+    return len(compact) < 8
 
 
 def _section_key(value: str) -> str:

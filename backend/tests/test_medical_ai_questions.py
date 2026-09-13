@@ -114,9 +114,24 @@ def test_report_rejects_more_than_five_questions_and_keeps_v2_compatibility():
     with pytest.raises(ValidationError):
         _report(*questions)
 
+    with pytest.raises(ValidationError):
+        MedicalInsightReport.model_validate(
+            {
+                "schema_version": "medical-insights-v3",
+                "document_kind": "research_paper",
+                "language": "en",
+                "overview": {
+                    "title": "Example paper",
+                    "summary": "A saved V3 report.",
+                    "study_type": "Research paper",
+                    "evidence_ids": ["EVIDENCE_001"],
+                },
+                "questions_for_professional": ["An uncited legacy question."],
+            }
+        )
+
     legacy = MedicalInsightReport.model_validate(
         {
-            "schema_version": "medical-insights-v2",
             "document_kind": "research_paper",
             "language": "en",
             "overview": {
@@ -187,6 +202,37 @@ def test_question_validation_rejects_duplicate_questions_and_evidence_ids():
     assert not validation.valid
     assert any("duplicates another question" in error for error in validation.errors)
     assert any("duplicate evidence_ids" in error for error in validation.errors)
+
+    duplicate_id = _report(
+        _question(question="Which people were included in this study?"),
+        _question(
+            question="What limitation should I discuss with my doctor?",
+            rationale="The study reports a limitation that may affect interpretation.",
+        ),
+    )
+    duplicate_validation = validate_questions(duplicate_id, context)
+
+    assert not duplicate_validation.valid
+    assert any("duplicates another question id" in error for error in duplicate_validation.errors)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What does eGFR mean?",
+        "What is migalastat?",
+        "GLA 基因是什么意思？",
+    ],
+)
+def test_question_validation_allows_specific_terms_without_generic_context(question):
+    context = _context(("EVIDENCE_001", "results", "The source mentions eGFR, migalastat, and GLA."))
+
+    validation = validate_questions(
+        _report(_question(question=question, rationale="The cited passage contains this term.")),
+        context,
+    )
+
+    assert validation.valid, validation.errors
 
 
 def test_question_citations_support_and_safety_are_checked_like_other_report_content():
@@ -310,6 +356,26 @@ def test_analyzer_repairs_a_question_with_invalid_evidence():
 
     assert repair_provider.calls == 2
     assert output.questions.valid
+
+
+def test_v3_normalization_drops_legacy_questions_from_a_provider_payload():
+    payload = _report().model_dump()
+    payload["schema_version"] = "medical-insights-v2"
+    payload["questions_for_professional"] = ["This legacy question has no evidence IDs."]
+
+    class LegacyProvider(ExtractiveMedicalAIProvider):
+        def generate(self, prompt, context):
+            return payload
+
+    output = MedicalInsightAnalyzer(provider=LegacyProvider()).run(
+        [{"id": "chunk-1", "text": "The study reports a result.", "section_type": "results"}],
+        title="Example paper",
+        document_kind="research_paper",
+        language="en",
+    )
+
+    assert output.report.schema_version == "medical-insights-v3"
+    assert output.report.questions_for_professional == []
 
 
 def test_prompt_describes_structured_questions():

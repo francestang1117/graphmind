@@ -141,6 +141,7 @@ def test_safety_validator_rejects_personal_treatment_instructions():
 
 def test_safety_validator_checks_questions_and_chinese_diagnosis_text():
     payload = _report("EVIDENCE_001").model_dump()
+    payload["schema_version"] = "medical-insights-v2"
     payload["questions_for_professional"] = ["你应该停药吗？"]
     report = MedicalInsightReport.model_validate(payload)
 
@@ -164,6 +165,7 @@ def test_safety_validator_checks_questions_and_chinese_diagnosis_text():
 
 def test_safety_validator_allows_descriptive_medical_language():
     payload = _report("EVIDENCE_001").model_dump()
+    payload["schema_version"] = "medical-insights-v2"
     payload["overview"]["summary"] = "The paper describes medication use and treatment outcomes."
     payload["questions_for_professional"] = [
         "What medication and treatment outcomes did the authors report?"

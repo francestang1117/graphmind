@@ -206,15 +206,19 @@ class MedicalInsightAnalyzer:
                 "omitted_sections": context.omitted_sections,
             }
         )
-        return report.model_copy(
-            update={
-                "schema_version": self.schema_version,
-                "document_kind": context.document_kind,
-                "language": context.language,
-                "warnings": warnings,
-                "coverage": coverage,
-            }
-        )
+        updates = {
+            "schema_version": self.schema_version,
+            "document_kind": context.document_kind,
+            "language": context.language,
+            "warnings": warnings,
+            "coverage": coverage,
+        }
+        if self.schema_version == "medical-insights-v3":
+            # V3 questions must use the cited structured contract. Legacy
+            # strings are readable from saved V2 reports but never copied into
+            # a newly normalized V3 report.
+            updates["questions_for_professional"] = []
+        return report.model_copy(update=updates)
 
     def _output(self, report: MedicalInsightReport, context: AnalysisContext) -> AnalysisOutput:
         return AnalysisOutput(

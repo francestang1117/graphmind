@@ -16,7 +16,9 @@ export default function QuestionSuggestionList({
   onSelectEvidence,
 }: Props) {
   const suggestions = (report.question_suggestions ?? []).slice(0, 5);
-  const legacyQuestions = report.questions_for_professional ?? [];
+  const legacyQuestions = report.schema_version === "medical-insights-v2"
+    ? report.questions_for_professional ?? []
+    : [];
   if (!suggestions.length && !legacyQuestions.length) return null;
 
   return (

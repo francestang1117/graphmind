@@ -178,10 +178,20 @@ describe("QuestionSuggestionList", () => {
   });
 
   it("falls back to legacy questions for older reports", () => {
-    renderList(report({ questions_for_professional: ["What should I discuss with a professional?"] }));
+    renderList(report({
+      schema_version: "medical-insights-v2",
+      questions_for_professional: ["What should I discuss with a professional?"],
+    }));
 
     expect(screen.getByText("What should I discuss with a professional?")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Questions to discuss with a healthcare professional" })).toBeInTheDocument();
+  });
+
+  it("does not show legacy questions in a V3 report", () => {
+    renderList(report({ questions_for_professional: ["Uncited legacy question."] }));
+
+    expect(screen.queryByText("Uncited legacy question.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Questions to discuss with a healthcare professional" })).not.toBeInTheDocument();
   });
 
   it("returns no section when both question formats are empty", () => {

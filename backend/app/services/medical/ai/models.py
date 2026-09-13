@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -120,3 +120,24 @@ class MedicalInsightReport(_StrictModel):
     questions_for_professional: list[str] = Field(default_factory=list)
     coverage: AnalysisCoverage = Field(default_factory=AnalysisCoverage)
     warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_v2_for_unversioned_legacy_report(cls, data: Any) -> Any:
+        """Keep reports written before schema_version was persisted readable."""
+        if (
+            isinstance(data, dict)
+            and not data.get("schema_version")
+            and data.get("questions_for_professional")
+        ):
+            data = dict(data)
+            data["schema_version"] = "medical-insights-v2"
+        return data
+
+    @model_validator(mode="after")
+    def validate_v3_legacy_questions(self) -> Self:
+        if self.schema_version == "medical-insights-v3" and self.questions_for_professional:
+            raise ValueError(
+                "medical-insights-v3 reports must leave questions_for_professional empty"
+            )
+        return self
