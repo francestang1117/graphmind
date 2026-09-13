@@ -22,6 +22,7 @@ export default function LiteratureSearchForm({
   return (
     <form
       className="literature-search-form"
+      noValidate
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();
@@ -45,6 +46,7 @@ export default function LiteratureSearchForm({
           <input
             type="date"
             value={form.dateFrom}
+            max={form.dateTo || undefined}
             onChange={(event) => onChange("dateFrom", event.target.value)}
             disabled={disabled}
           />
@@ -54,6 +56,7 @@ export default function LiteratureSearchForm({
           <input
             type="date"
             value={form.dateTo}
+            min={form.dateFrom || undefined}
             onChange={(event) => onChange("dateTo", event.target.value)}
             disabled={disabled}
           />

@@ -25,9 +25,12 @@ export default function LiteratureEvidencePanel({
   const literature = useLiteratureEvidence(documentId, workspaceId, analysisRunId);
   const searchRun = literature.searchRun;
   const matchRun = literature.matchRun;
-  const searchActive = searchRun && ["queued", "running"].includes(searchRun.status);
-  const searchFailed = searchRun?.status === "failed";
-  const searchSucceeded = searchRun?.status === "succeeded";
+  const searchActive = !literature.draftIsDirty && searchRun && ["queued", "running"].includes(searchRun.status);
+  const searchFailed = !literature.draftIsDirty && searchRun?.status === "failed";
+  const searchSucceeded = !literature.draftIsDirty && searchRun?.status === "succeeded";
+  const staleMetadata = Boolean(
+    matchRun?.stale && matchRun.warnings.includes("article_metadata_changed"),
+  );
 
   return (
     <section className="literature-evidence-panel" aria-labelledby="literature-evidence-heading">
@@ -81,6 +84,31 @@ export default function LiteratureEvidencePanel({
         <div className="literature-inline-error" role="alert">
           <AlertCircle size={16} />
           <span>{literature.searchError}</span>
+          <button
+            className="literature-secondary-button"
+            type="button"
+            onClick={literature.retrySearchStatus}
+          >
+            <RefreshCw size={13} />
+            Retry status
+          </button>
+        </div>
+      )}
+
+      {literature.draftIsDirty && searchRun && (
+        <div className="literature-draft-warning" role="status">
+          <div>
+            <strong>Unsaved search changes</strong>
+            <p>The saved PubMed results below belong to: <span>{searchRun.question}</span></p>
+            <button
+              className="literature-secondary-button"
+              type="button"
+              onClick={literature.restoreSavedSearch}
+            >
+              <RefreshCw size={13} />
+              Discard changes and restore saved search
+            </button>
+          </div>
         </div>
       )}
 
@@ -120,7 +148,7 @@ export default function LiteratureEvidencePanel({
           <Search size={15} />
           <span>{searchRun.result_count} PubMed article{searchRun.result_count === 1 ? "" : "s"} retrieved</span>
           <span>{readable(searchRun.sort || "relevance")} order</span>
-          <span>Search {searchRun.query_hash.slice(0, 10)}</span>
+          <span>Search {searchRun.query_hash ? searchRun.query_hash.slice(0, 10) : "n/a"}</span>
         </div>
       )}
 
@@ -129,7 +157,7 @@ export default function LiteratureEvidencePanel({
       )}
 
       {literature.outdatedMatch && (
-        <LiteratureEvidenceAlerts warnings={literature.outdatedMatch.warnings} outdated />
+        <LiteratureEvidenceAlerts warnings={literature.outdatedMatch.warnings} olderAnalysis />
       )}
 
       {literature.matchLoading && (
@@ -159,12 +187,12 @@ export default function LiteratureEvidencePanel({
         </div>
       )}
 
-      {matchRun && (
+      {matchRun && !literature.draftIsDirty && (
         <div className="literature-match-results">
           <LiteratureEvidenceAlerts
-            warnings={matchRun.warnings}
+            warnings={matchRun.warnings.filter((warning) => warning !== "article_metadata_changed")}
             excludedCount={matchRun.summary.retracted_articles_excluded}
-            outdated={matchRun.stale}
+            staleMetadata={staleMetadata}
           />
           <div className="literature-match-heading">
             <div>

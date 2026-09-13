@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import LiteratureEvidencePanel from "../components/upload/literature/LiteratureEvidencePanel";
@@ -55,6 +55,11 @@ const searchRun = {
   query_hash: preview.query_fingerprint,
   provider: "pubmed",
   status: "succeeded",
+  date_from: null,
+  date_to: null,
+  study_types: [],
+  sort: "relevance",
+  max_results: 20,
   result_count: 1,
   warnings: [],
   error_code: "",
@@ -265,5 +270,114 @@ describe("LiteratureEvidencePanel", () => {
 
     expect(await screen.findByText("Migalastat and proteinuria in Fabry disease")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "View on PubMed" })).not.toBeInTheDocument();
+  });
+
+  it("restores canonical study filters and sends an empty list after cancellation", async () => {
+    const user = userEvent.setup();
+    api.getLatestLiteratureSearch.mockResolvedValue({
+      ...searchRun,
+      study_types: ["clinical_trial"],
+    });
+    api.getLiteratureSearchRun.mockResolvedValue({
+      ...searchRun,
+      study_types: ["clinical_trial"],
+    });
+    api.getLatestLiteratureMatch.mockResolvedValue(matchRun);
+    api.previewLiteratureSearch.mockResolvedValue(preview);
+
+    renderPanel();
+
+    const clinicalTrial = await screen.findByRole("checkbox", { name: "Clinical trial" });
+    await waitFor(() => expect(clinicalTrial).toBeChecked());
+    await user.click(clinicalTrial);
+    await user.click(screen.getByRole("button", { name: "Preview PubMed query" }));
+
+    await waitFor(() => expect(api.previewLiteratureSearch).toHaveBeenCalledWith(
+      "doc-1",
+      expect.objectContaining({ study_types: [] }),
+      "workspace-1",
+    ));
+  });
+
+  it("hides saved results while editing and can restore the saved search", async () => {
+    const user = userEvent.setup();
+    api.getLatestLiteratureSearch.mockResolvedValue(searchRun);
+    api.getLiteratureSearchRun.mockResolvedValue(searchRun);
+    api.getLatestLiteratureMatch.mockResolvedValue(matchRun);
+
+    renderPanel();
+    expect(await screen.findByText("Migalastat and proteinuria in Fabry disease")).toBeInTheDocument();
+
+    const question = screen.getByLabelText("Research question");
+    await user.clear(question);
+    await user.type(question, "What evidence exists for melanoma immunotherapy?");
+
+    expect(screen.queryByText("Migalastat and proteinuria in Fabry disease")).not.toBeInTheDocument();
+    expect(screen.getByText(/The saved PubMed results below belong to:/)).toBeInTheDocument();
+    expect(screen.getByText(searchRun.question)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Discard changes and restore saved search" }));
+    expect(question).toHaveValue(searchRun.question);
+    expect(await screen.findByText("Migalastat and proteinuria in Fabry disease")).toBeInTheDocument();
+  });
+
+  it("explains stale metadata separately from an older analysis", async () => {
+    api.getLatestLiteratureMatch.mockResolvedValue({
+      ...matchRun,
+      stale: true,
+      warnings: ["article_metadata_changed"],
+    });
+
+    renderPanel();
+
+    expect(await screen.findByText(/PubMed metadata changed after this match was saved/)).toBeInTheDocument();
+    expect(screen.queryByText(/older medical analysis/)).not.toBeInTheDocument();
+  });
+
+  it("shows a retry action when an active search status request fails", async () => {
+    const user = userEvent.setup();
+    const queuedRun = { ...searchRun, status: "queued" };
+    api.getLatestLiteratureSearch.mockResolvedValue(queuedRun);
+    api.getLiteratureSearchRun
+      .mockRejectedValueOnce(new Error("status connection lost"))
+      .mockResolvedValue({ ...searchRun, status: "succeeded" });
+    api.getLatestLiteratureMatch.mockRejectedValue({ response: { status: 404 } });
+    api.createLiteratureMatch.mockResolvedValue(matchRun);
+
+    renderPanel();
+
+    expect(await screen.findByText("status connection lost")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry status" }));
+    await waitFor(() => expect(api.getLiteratureSearchRun).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("1 PubMed article retrieved")).toBeInTheDocument();
+  });
+
+  it("rejects an invalid date range before previewing", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.type(screen.getByLabelText("Research question"), "What evidence exists?");
+    fireEvent.change(screen.getByLabelText("From"), { target: { value: "2026-02-01" } });
+    fireEvent.change(screen.getByLabelText("To"), { target: { value: "2026-01-01" } });
+    await user.click(screen.getByRole("button", { name: "Preview PubMed query" }));
+
+    expect(screen.getByText("The From date must be on or before the To date.")).toBeInTheDocument();
+    expect(api.previewLiteratureSearch).not.toHaveBeenCalled();
+  });
+
+  it("renders FastAPI validation details instead of a generic 422 error", async () => {
+    const user = userEvent.setup();
+    api.previewLiteratureSearch.mockRejectedValue({
+      response: {
+        status: 422,
+        data: { detail: [{ loc: ["body", "question"], msg: "question is invalid" }] },
+      },
+    });
+
+    renderPanel();
+    await user.type(screen.getByLabelText("Research question"), "What evidence exists?");
+    await user.click(screen.getByRole("button", { name: "Preview PubMed query" }));
+
+    expect(await screen.findByText("question is invalid")).toBeInTheDocument();
   });
 });

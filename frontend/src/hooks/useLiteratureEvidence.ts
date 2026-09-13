@@ -19,12 +19,12 @@ import {
 } from "../services/api";
 
 export const LITERATURE_STUDY_TYPES = [
-  { value: "systematic review", label: "Systematic review" },
-  { value: "meta-analysis", label: "Meta-analysis" },
-  { value: "randomized controlled trial", label: "Randomized controlled trial" },
-  { value: "clinical trial", label: "Clinical trial" },
-  { value: "observational study", label: "Observational study" },
-  { value: "case report", label: "Case report" },
+  { value: "systematic_review", label: "Systematic review" },
+  { value: "meta_analysis", label: "Meta-analysis" },
+  { value: "randomized_controlled_trial", label: "Randomized controlled trial" },
+  { value: "clinical_trial", label: "Clinical trial" },
+  { value: "observational_study", label: "Observational study" },
+  { value: "case_report", label: "Case report" },
   { value: "guideline", label: "Guideline" },
 ] as const;
 
@@ -48,6 +48,65 @@ const INITIAL_FORM: LiteratureFormState = {
 
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
 
+const STUDY_TYPE_ALIASES: Record<string, string> = {
+  "systematic review": "systematic_review",
+  "meta-analysis": "meta_analysis",
+  "meta analysis": "meta_analysis",
+  "randomized controlled trial": "randomized_controlled_trial",
+  "clinical trial": "clinical_trial",
+  "observational study": "observational_study",
+  "case report": "case_report",
+};
+
+function normalizeStudyTypes(values: string[]) {
+  return [...new Set(values
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean)
+    .map((value) => STUDY_TYPE_ALIASES[value] ?? value))];
+}
+
+function sameStudyTypes(left: string[], right: string[]) {
+  const normalizedLeft = normalizeStudyTypes(left).sort();
+  const normalizedRight = normalizeStudyTypes(right).sort();
+  return normalizedLeft.length === normalizedRight.length
+    && normalizedLeft.every((value, index) => value === normalizedRight[index]);
+}
+
+function formMatchesSearchRun(form: LiteratureFormState, run: LiteratureSearchRun) {
+  return form.question.trim() === run.question.trim()
+    && form.dateFrom === (run.date_from ?? "")
+    && form.dateTo === (run.date_to ?? "")
+    && form.sort === (run.sort === "newest" ? "newest" : "relevance")
+    && form.maxResults === (run.max_results ?? 20)
+    && sameStudyTypes(form.studyTypes, run.study_types ?? []);
+}
+
+function formFromSearchRun(run: LiteratureSearchRun): LiteratureFormState {
+  return {
+    question: run.question,
+    dateFrom: run.date_from ?? "",
+    dateTo: run.date_to ?? "",
+    studyTypes: normalizeStudyTypes(run.study_types ?? []),
+    sort: run.sort === "newest" ? "newest" : "relevance",
+    maxResults: run.max_results ?? 20,
+  };
+}
+
+function messageFromDetail(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    const messages = value
+      .map((item) => messageFromDetail(item))
+      .filter((message): message is string => Boolean(message));
+    return messages.length > 0 ? messages.join("; ") : undefined;
+  }
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as { message?: unknown; msg?: unknown };
+  if (typeof record.message === "string") return record.message;
+  if (typeof record.msg === "string") return record.msg;
+  return undefined;
+}
+
 function errorDetails(error: unknown) {
   const requestError = (error && typeof error === "object" ? error : {}) as {
     response?: {
@@ -55,18 +114,21 @@ function errorDetails(error: unknown) {
       data?: {
         code?: string;
         message?: string;
-        detail?: { code?: string; message?: string; details?: unknown } | string;
+        detail?: unknown;
         details?: unknown;
       };
     };
     message?: string;
   };
   const data = requestError.response?.data;
-  const detail = typeof data?.detail === "object" ? data.detail : undefined;
+  const detail = data?.detail && typeof data.detail === "object" && !Array.isArray(data.detail)
+    ? data.detail as { code?: string; message?: string; details?: unknown }
+    : undefined;
   const code = data?.code ?? detail?.code;
   const message = data?.message
     ?? detail?.message
-    ?? (typeof data?.detail === "string" ? data.detail : undefined)
+    ?? messageFromDetail(data?.detail)
+    ?? messageFromDetail(data?.details)
     ?? requestError.message;
   return {
     code,
@@ -83,7 +145,8 @@ function isLiteraturePreview(value: unknown): value is LiteratureSearchPreview {
     && typeof candidate.workspace_id === "string"
     && Array.isArray(candidate.detected_concepts)
     && Array.isArray(candidate.ambiguous_concepts)
-    && typeof candidate.external_data === "object";
+    && typeof candidate.external_data === "object"
+    && candidate.external_data !== null;
 }
 
 function readableError(error: unknown, fallback: string) {
@@ -121,7 +184,7 @@ function requestFromForm(
     question: form.question.trim(),
     date_from: form.dateFrom || null,
     date_to: form.dateTo || null,
-    study_types: form.studyTypes,
+    study_types: normalizeStudyTypes(form.studyTypes),
     sort: form.sort,
     max_results: form.maxResults,
     external_search_confirmed: Boolean(preview?.query_fingerprint),
@@ -154,6 +217,7 @@ export function useLiteratureEvidence(
   const [activeMatchRun, setActiveMatchRun] = useState<LiteratureMatchRun | null>(null);
   const [matchingSearchRunId, setMatchingSearchRunId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [formHydrated, setFormHydrated] = useState(false);
   const hydratedForm = useRef(false);
   const matchAttemptKey = useRef<string | null>(null);
 
@@ -245,19 +309,18 @@ export function useLiteratureEvidence(
     ? currentMatch
     : null;
   const outdatedMatch = latestMatch && latestMatch.analysis_run_id !== analysisRunId ? latestMatch : null;
+  const draftIsDirty = Boolean(
+    searchRun
+      && formHydrated
+      && !formMatchesSearchRun(form, searchRun),
+  );
 
   useEffect(() => {
     if (!latestSearch) return;
     if (hydratedForm.current) return;
-    setForm({
-      question: latestSearch.question,
-      dateFrom: latestSearch.date_from ?? "",
-      dateTo: latestSearch.date_to ?? "",
-      studyTypes: latestSearch.study_types ?? [],
-      sort: latestSearch.sort === "newest" ? "newest" : "relevance",
-      maxResults: latestSearch.max_results ?? 20,
-    });
+    setForm(formFromSearchRun(latestSearch));
     hydratedForm.current = true;
+    setFormHydrated(true);
   }, [latestSearch]);
 
   useEffect(() => {
@@ -293,6 +356,10 @@ export function useLiteratureEvidence(
       setError("Enter a research question before generating a PubMed preview.");
       return;
     }
+    if (form.dateFrom && form.dateTo && form.dateFrom > form.dateTo) {
+      setError("The From date must be on or before the To date.");
+      return;
+    }
     setError("");
     previewMutation.mutate(requestFromForm(form, conceptSelections));
   };
@@ -326,6 +393,21 @@ export function useLiteratureEvidence(
     setError("");
   };
 
+  const retrySearchStatus = () => {
+    setError("");
+    void (effectiveSearchRunId ? activeSearchQuery.refetch() : latestSearchQuery.refetch());
+  };
+
+  const restoreSavedSearch = () => {
+    if (!searchRun) return;
+    setForm(formFromSearchRun(searchRun));
+    hydratedForm.current = true;
+    setFormHydrated(true);
+    setPreview(null);
+    setConceptSelections([]);
+    setError("");
+  };
+
   return {
     form,
     updateForm,
@@ -339,8 +421,15 @@ export function useLiteratureEvidence(
     startLoading: startMutation.isPending,
     searchRun,
     searchLoading: latestSearchQuery.isLoading || activeSearchQuery.isFetching,
-    searchError: latestSearchQuery.error ? readableError(latestSearchQuery.error, "Could not load the latest PubMed search.") : "",
+    searchError: activeSearchQuery.error
+      ? readableError(activeSearchQuery.error, "Unable to refresh the PubMed search status.")
+      : latestSearchQuery.error
+        ? readableError(latestSearchQuery.error, "Could not load the latest PubMed search.")
+        : "",
     retrySearch,
+    retrySearchStatus,
+    draftIsDirty,
+    restoreSavedSearch,
     matchSearch,
     matchLoading: matchMutation.isPending,
     matchingSearchRunId,

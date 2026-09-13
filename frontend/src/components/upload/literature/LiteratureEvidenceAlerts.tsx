@@ -3,7 +3,8 @@ import { AlertTriangle, Info } from "lucide-react";
 interface Props {
   warnings: string[];
   excludedCount?: number;
-  outdated?: boolean;
+  olderAnalysis?: boolean;
+  staleMetadata?: boolean;
 }
 
 function warningLabel(warning: string) {
@@ -16,16 +17,29 @@ function warningLabel(warning: string) {
   return labels[warning] || warning.replaceAll("_", " ");
 }
 
-export default function LiteratureEvidenceAlerts({ warnings, excludedCount = 0, outdated = false }: Props) {
-  const uniqueWarnings = [...new Set(warnings)];
-  if (!uniqueWarnings.length && !excludedCount && !outdated) return null;
+export default function LiteratureEvidenceAlerts({
+  warnings,
+  excludedCount = 0,
+  olderAnalysis = false,
+  staleMetadata = false,
+}: Props) {
+  const uniqueWarnings = [...new Set(warnings)].filter((warning) => (
+    !staleMetadata || warning !== "article_metadata_changed"
+  ));
+  if (!uniqueWarnings.length && !excludedCount && !olderAnalysis && !staleMetadata) return null;
 
   return (
     <div className="literature-alert-stack" role="status">
-      {outdated && (
+      {olderAnalysis && (
         <div className="literature-alert literature-alert-warning">
           <AlertTriangle size={16} />
           <p>This result belongs to an older medical analysis and is hidden until it is matched to the current analysis.</p>
+        </div>
+      )}
+      {staleMetadata && (
+        <div className="literature-alert literature-alert-warning">
+          <AlertTriangle size={16} />
+          <p>PubMed metadata changed after this match was saved. Review the article details or run matching again.</p>
         </div>
       )}
       {uniqueWarnings.map((warning) => (

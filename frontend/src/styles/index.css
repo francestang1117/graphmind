@@ -2070,6 +2070,36 @@ button {
   cursor: pointer;
 }
 
+.literature-draft-warning {
+  display: grid;
+  gap: 8px;
+  padding: 10px 11px;
+  border: 1px solid rgba(246, 180, 75, 0.28);
+  border-radius: 8px;
+  background: rgba(246, 180, 75, 0.07);
+}
+
+.literature-draft-warning strong {
+  color: #fef3c7;
+  font-size: 11px;
+}
+
+.literature-draft-warning p {
+  margin: 4px 0 8px;
+  color: #fde68a;
+  font-size: 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.literature-draft-warning p span {
+  color: var(--text);
+}
+
+.literature-draft-warning .literature-secondary-button {
+  justify-self: start;
+}
+
 .literature-query-preview {
   padding: 11px;
   border: 1px solid rgba(167, 139, 250, 0.22);
