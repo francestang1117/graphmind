@@ -170,8 +170,7 @@ export function useLiteratureEvidence(
   });
 
   const latestSearch = latestSearchQuery.data ?? null;
-  const effectiveSearchRunId = activeSearchRunId
-    ?? (latestSearch && ACTIVE_STATUSES.has(latestSearch.status) ? latestSearch.run_id : null);
+  const effectiveSearchRunId = activeSearchRunId ?? latestSearch?.run_id ?? null;
 
   const activeSearchQuery = useQuery({
     queryKey: ["literature-search-run", scopeKey, effectiveSearchRunId],
@@ -238,7 +237,7 @@ export function useLiteratureEvidence(
     },
   });
 
-  const searchRun = activeSearchQuery.data ?? (effectiveSearchRunId ? null : latestSearch);
+  const searchRun = activeSearchQuery.data ?? latestSearch;
   const latestMatch = activeMatchRun ?? latestMatchQuery.data ?? null;
   const currentMatch = latestMatch?.analysis_run_id === analysisRunId ? latestMatch : null;
   const matchForCurrentSearch = currentMatch
