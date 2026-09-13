@@ -756,7 +756,7 @@ button {
 .job-cancel {
   display: grid;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.045);
   color: var(--muted);
   cursor: pointer;
@@ -1659,6 +1659,122 @@ button {
   display: grid;
   gap: 6px;
   margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.insight-question-list {
+  display: grid;
+  gap: 10px;
+}
+
+.insight-question-safety {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.insight-question-grid {
+  display: grid;
+  gap: 9px;
+}
+
+.insight-question-card {
+  display: grid;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.insight-question-header,
+.insight-question-evidence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.insight-question-header {
+  justify-content: space-between;
+}
+
+.insight-question-category {
+  color: #c4b5fd;
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.insight-question-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 4px 7px;
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  border-radius: 6px;
+  background: rgba(139, 92, 246, 0.08);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.insight-question-copy:hover {
+  color: var(--text);
+  border-color: rgba(167, 139, 250, 0.5);
+  background: rgba(139, 92, 246, 0.16);
+}
+
+.insight-question-text,
+.insight-question-rationale {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.insight-question-text {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.insight-question-rationale {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.insight-question-evidence {
+  flex-wrap: wrap;
+  align-items: baseline;
+  margin-top: 1px;
+}
+
+.insight-question-evidence-label {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.insight-question-evidence .insight-evidence-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.insight-question-error {
+  margin: 0;
+  color: #fca5a5;
+  font-size: 10px;
+}
+
+.insight-questions-legacy {
+  display: grid;
+  gap: 6px;
+  margin: 0;
   padding-left: 18px;
   color: var(--muted);
   font-size: 12px;

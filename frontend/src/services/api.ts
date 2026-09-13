@@ -113,6 +113,27 @@ export interface MedicalInsightAttribute {
   evidence_ids: string[];
 }
 
+export type QuestionSuggestionCategory =
+  | "clarify_finding"
+  | "applicability"
+  | "study_limitation"
+  | "evidence_gap"
+  | "monitoring_discussion"
+  | "research_option";
+
+export interface MedicalQuestionSuggestion {
+  id: string;
+  question: string;
+  rationale: string;
+  category: QuestionSuggestionCategory;
+  evidence_ids: string[];
+  interpretation_type:
+    | "direct_statement"
+    | "summary"
+    | "inference"
+    | "uncertain";
+}
+
 export interface MedicalInsightReport {
   schema_version: string;
   document_kind: string;
@@ -141,6 +162,7 @@ export interface MedicalInsightReport {
   what_it_does_not_mean: MedicalInsightFinding[];
   applicability?: MedicalInsightFinding[];
   future_research?: MedicalInsightFinding[];
+  question_suggestions?: MedicalQuestionSuggestion[];
   questions_for_professional: string[];
   coverage?: {
     complete: boolean;
