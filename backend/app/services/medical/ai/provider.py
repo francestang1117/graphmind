@@ -133,9 +133,40 @@ class ExtractiveMedicalAIProvider:
                 )
             )
 
+        question_suggestions = []
+        population_item = _first_of(
+            evidence,
+            "population",
+            "scope",
+            "methods",
+            "abstract",
+            "introduction",
+        )
+        if population_item:
+            question_suggestions.append(
+                _question_suggestion(
+                    "question_001",
+                    "Which people were included in this document, and who was not included?",
+                    "The source describes the study population or scope, so it is useful to discuss who the findings may apply to.",
+                    "applicability",
+                    population_item,
+                )
+            )
+        limitation_item = _first_of(evidence, "limitations", "limitation")
+        if limitation_item:
+            question_suggestions.append(
+                _question_suggestion(
+                    "question_002",
+                    "What limitation should I keep in mind when interpreting these findings?",
+                    "The document describes a limitation, so a professional can explain how it affects interpretation of the findings.",
+                    "study_limitation",
+                    limitation_item,
+                )
+            )
+
         warnings = ["not_medical_advice", *context.warnings]
         return {
-            "schema_version": "medical-insights-v2",
+            "schema_version": "medical-insights-v3",
             "document_kind": context.document_kind,
             "language": context.language,
             "overview": {
@@ -152,10 +183,8 @@ class ExtractiveMedicalAIProvider:
             "what_it_does_not_mean": does_not_mean,
             "applicability": [],
             "future_research": [],
-            "questions_for_professional": [
-                "Which people were included in this document, and who was not included?",
-                "How strong are the reported findings and their limitations?",
-            ],
+            "question_suggestions": question_suggestions[:5],
+            "questions_for_professional": [],
             "coverage": _coverage(context),
             "warnings": warnings,
         }
@@ -377,6 +406,23 @@ def _finding(
         "evidence_ids": [item.evidence_id],
         "evidence_level": "reported_in_document",
         "interpretation_type": interpretation_type,
+    }
+
+
+def _question_suggestion(
+    suggestion_id: str,
+    question: str,
+    rationale: str,
+    category: str,
+    item: EvidenceItem,
+) -> dict[str, Any]:
+    return {
+        "id": suggestion_id,
+        "question": question,
+        "rationale": rationale,
+        "category": category,
+        "evidence_ids": [item.evidence_id],
+        "interpretation_type": "inference",
     }
 
 

@@ -8,7 +8,7 @@ from typing import Any
 from app.services.medical.ai.context_builder import AnalysisContext
 
 
-def build_prompt(context: AnalysisContext, *, schema_version: str = "medical-insights-v2") -> str:
+def build_prompt(context: AnalysisContext, *, schema_version: str = "medical-insights-v3") -> str:
     """Build the initial request without asking the provider to invent facts."""
     return _instructions(schema_version) + "\n\nSOURCE EVIDENCE\n" + context.render()
 
@@ -18,7 +18,7 @@ def build_repair_prompt(
     invalid_output: Any,
     errors: list[str],
     *,
-    schema_version: str = "medical-insights-v2",
+    schema_version: str = "medical-insights-v3",
 ) -> str:
     """Ask for a corrected JSON object after one failed validation pass."""
     return (
@@ -50,6 +50,17 @@ Rules:
 - Explain applicability separately from findings. Add future_research items
   only for open questions or next steps stated or directly supported by the
   document; do not invent a research agenda.
+- Return zero to five question_suggestions for a general reader to discuss with
+  a qualified healthcare professional. Each question must have a stable id, a
+  category, a short source-grounded rationale, and one to five exact Evidence
+  IDs. The rationale must be supported by the same cited evidence. An empty
+  list is correct when the supplied evidence does not support a useful question.
+- Questions must clarify the document, its applicability, limitations, evidence
+  gaps, monitoring, or research options. Do not diagnose the reader, assume
+  their symptoms or condition, prescribe or change treatment, recommend a dose,
+  or tell them to seek emergency care. Use plain language and explain necessary
+  terms in the rationale. Return questions in question_suggestions and leave
+  legacy questions_for_professional as an empty list.
 - Preserve all numbers, units, study populations, and comparison groups exactly.
 - Do not turn association into causation, animal or in-vitro results into human
   efficacy, a non-significant result into proof of no effect, or author
@@ -61,4 +72,6 @@ Rules:
 - Do not use References as evidence for the document's own results.
 - The coverage object is filled by the server. Return it with empty/default
   values rather than estimating document coverage yourself.
+- Safe question example (illustrative only; still return the complete report):
+  {{"question_suggestions":[{{"id":"question_001","question":"Which people were included in this study?","rationale":"The study describes a population, so it is useful to discuss who the findings may apply to.","category":"applicability","evidence_ids":["EVIDENCE_004"],"interpretation_type":"inference"}}],"questions_for_professional":[]}}
 - Return JSON only. Do not add Markdown fences or extra keys."""

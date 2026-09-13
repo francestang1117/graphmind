@@ -19,6 +19,7 @@ from app.services.medical.ai.exceptions import (
 from app.services.medical.ai.models import MedicalInsightReport
 from app.services.medical.ai.prompt_builder import build_prompt, build_repair_prompt
 from app.services.medical.ai.provider import MedicalAIProvider, get_provider
+from app.services.medical.ai.question_validator import QuestionValidation, validate_questions
 from app.services.medical.ai.safety_validator import SafetyValidation, validate_safety
 from app.services.medical.ai.support_validator import SupportValidation, validate_support
 
@@ -30,6 +31,7 @@ class AnalysisOutput:
     report: MedicalInsightReport
     context: AnalysisContext
     citations: CitationValidation
+    questions: QuestionValidation
     safety: SafetyValidation
     support: SupportValidation
 
@@ -44,8 +46,8 @@ class MedicalInsightAnalyzer:
         max_input_tokens: int = 12000,
         timeout_seconds: int = 30,
         redact_pii: bool = True,
-        schema_version: str = "medical-insights-v2",
-        prompt_version: str = "medical-insights-v2",
+        schema_version: str = "medical-insights-v3",
+        prompt_version: str = "medical-insights-v3",
         context_builder: ContextBuilder | None = None,
     ) -> None:
         if provider is None:
@@ -181,9 +183,10 @@ class MedicalInsightAnalyzer:
 
     def _validate(self, report: MedicalInsightReport, context: AnalysisContext) -> list[str] | None:
         citation = validate_citations(report, context)
+        questions = validate_questions(report, context)
         safety = validate_safety(report)
         support = validate_support(report, context)
-        errors = [*citation.errors, *safety.errors, *support.errors]
+        errors = [*citation.errors, *questions.errors, *safety.errors, *support.errors]
         return errors or None
 
     def _normalize_report(
@@ -218,6 +221,7 @@ class MedicalInsightAnalyzer:
             report=report,
             context=context,
             citations=validate_citations(report, context),
+            questions=validate_questions(report, context),
             safety=validate_safety(report),
             support=validate_support(report, context),
         )

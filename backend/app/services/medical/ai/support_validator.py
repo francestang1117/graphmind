@@ -169,6 +169,12 @@ def _supported_statements(
     for field_name, item in report.study_methods.model_dump().items():
         if item["support_status"] != "not_reported":
             yield f"study_methods.{field_name}", item["value"], item["evidence_ids"]
+    for index, item in enumerate(report.question_suggestions, start=1):
+        yield (
+            f"question_suggestions[{index}]",
+            f"{item.question}\n{item.rationale}",
+            item.evidence_ids,
+        )
 
 
 def _finding_text(item: EvidenceFinding) -> str:

@@ -19,6 +19,14 @@ SupportStatus = Literal[
     "not_reported",
     "uncertain",
 ]
+QuestionSuggestionCategory = Literal[
+    "clarify_finding",
+    "applicability",
+    "study_limitation",
+    "evidence_gap",
+    "monitoring_discussion",
+    "research_option",
+]
 NOT_REPORTED_VALUE = "Not reported in the selected source evidence."
 
 
@@ -46,6 +54,17 @@ class MedicalTermExplanation(_StrictModel):
     term: str
     explanation: str
     evidence_ids: list[str] = Field(default_factory=list)
+
+
+class QuestionSuggestion(_StrictModel):
+    """A safe, source-backed question for discussion with a professional."""
+
+    id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
+    question: str = Field(min_length=1, max_length=500)
+    rationale: str = Field(min_length=1, max_length=1000)
+    category: QuestionSuggestionCategory
+    evidence_ids: list[str] = Field(min_length=1, max_length=5)
+    interpretation_type: InterpretationType = "inference"
 
 
 class EvidenceAttribute(_StrictModel):
@@ -84,7 +103,7 @@ class AnalysisCoverage(_StrictModel):
 
 
 class MedicalInsightReport(_StrictModel):
-    schema_version: str = "medical-insights-v2"
+    schema_version: str = "medical-insights-v3"
     document_kind: str
     language: str
     overview: DocumentOverview
@@ -96,6 +115,8 @@ class MedicalInsightReport(_StrictModel):
     what_it_does_not_mean: list[EvidenceFinding] = Field(default_factory=list)
     applicability: list[EvidenceFinding] = Field(default_factory=list)
     future_research: list[EvidenceFinding] = Field(default_factory=list)
+    question_suggestions: list[QuestionSuggestion] = Field(default_factory=list, max_length=5)
+    # Kept so previously saved V2 reports remain readable.
     questions_for_professional: list[str] = Field(default_factory=list)
     coverage: AnalysisCoverage = Field(default_factory=AnalysisCoverage)
     warnings: list[str] = Field(default_factory=list)

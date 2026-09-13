@@ -376,7 +376,12 @@ class AnalysisRepository:
     ) -> dict[str, Any]:
         """Atomically save a validated report, citations, and current pointer."""
         self._require_available()
-        if not output.citations.valid or not output.safety.valid:
+        if (
+            not output.citations.valid
+            or not output.questions.valid
+            or not output.safety.valid
+            or not output.support.valid
+        ):
             raise MedicalInsightError(
                 "Medical insight output did not pass validation.",
                 code="failed_validation",
