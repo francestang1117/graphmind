@@ -254,6 +254,25 @@ describe("LiteratureEvidencePanel", () => {
     ));
   });
 
+  it("waits for the latest match lookup before creating a match", async () => {
+    let resolveLatestMatch!: (value: typeof matchRun) => void;
+    const latestMatchPromise = new Promise<typeof matchRun>((resolve) => {
+      resolveLatestMatch = resolve;
+    });
+    api.getLatestLiteratureSearch.mockResolvedValue(searchRun);
+    api.getLiteratureSearchRun.mockResolvedValue(searchRun);
+    api.getLatestLiteratureMatch.mockReturnValue(latestMatchPromise);
+
+    renderPanel();
+
+    await waitFor(() => expect(api.getLiteratureSearchRun).toHaveBeenCalled());
+    expect(api.createLiteratureMatch).not.toHaveBeenCalled();
+
+    resolveLatestMatch(matchRun);
+    expect(await screen.findByText("Migalastat and proteinuria in Fabry disease")).toBeInTheDocument();
+    expect(api.createLiteratureMatch).not.toHaveBeenCalled();
+  });
+
   it("does not render an untrusted source URL as a link", async () => {
     api.getLatestLiteratureMatch.mockResolvedValue({
       ...matchRun,
@@ -313,7 +332,7 @@ describe("LiteratureEvidencePanel", () => {
     await user.type(question, "What evidence exists for melanoma immunotherapy?");
 
     expect(screen.queryByText("Migalastat and proteinuria in Fabry disease")).not.toBeInTheDocument();
-    expect(screen.getByText(/The saved PubMed results below belong to:/)).toBeInTheDocument();
+    expect(screen.getByText(/Saved results are currently hidden and belong to:/)).toBeInTheDocument();
     expect(screen.getByText(searchRun.question)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Discard changes and restore saved search" }));

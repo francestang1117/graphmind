@@ -99,7 +99,7 @@ export default function LiteratureEvidencePanel({
         <div className="literature-draft-warning" role="status">
           <div>
             <strong>Unsaved search changes</strong>
-            <p>The saved PubMed results below belong to: <span>{searchRun.question}</span></p>
+            <p>Saved results are currently hidden and belong to: <span>{searchRun.question}</span></p>
             <button
               className="literature-secondary-button"
               type="button"

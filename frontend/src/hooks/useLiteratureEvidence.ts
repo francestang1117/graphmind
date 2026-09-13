@@ -325,12 +325,20 @@ export function useLiteratureEvidence(
 
   useEffect(() => {
     if (searchRun?.status !== "succeeded" || !searchRun.run_id) return;
+    if (!latestMatchQuery.isFetched || latestMatchQuery.error) return;
     if (matchForCurrentSearch || matchMutation.isPending) return;
     const attemptKey = `${analysisRunId}:${searchRun.run_id}`;
     if (matchAttemptKey.current === attemptKey) return;
     matchAttemptKey.current = attemptKey;
     matchMutation.mutate(searchRun.run_id);
-  }, [analysisRunId, matchForCurrentSearch, matchMutation, searchRun]);
+  }, [
+    analysisRunId,
+    latestMatchQuery.error,
+    latestMatchQuery.isFetched,
+    matchForCurrentSearch,
+    matchMutation,
+    searchRun,
+  ]);
 
   const updateForm = (field: keyof LiteratureFormState, value: string | number) => {
     setForm((previous) => ({ ...previous, [field]: value } as LiteratureFormState));
