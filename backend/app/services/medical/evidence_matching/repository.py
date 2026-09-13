@@ -560,16 +560,14 @@ def _match_run_payload(db, row: LiteratureMatchRunRecord) -> dict[str, Any]:
     ).all()
     grouped: dict[str, list[StudyCard]] = {}
     stale = False
-    retracted_after_matching = 0
-    retracted_by_finding: dict[str, int] = {}
+    retracted_article_ids: set[str] = set()
+    retracted_by_finding: dict[str, set[str]] = {}
     for match, article in records:
         current_hash = article.metadata_hash or ""
         current_status = str(article.retraction_status or "unknown").strip().lower()
         if current_status in {"retracted", "retraction_notice"}:
-            retracted_after_matching += 1
-            retracted_by_finding[match.finding_id] = (
-                retracted_by_finding.get(match.finding_id, 0) + 1
-            )
+            retracted_article_ids.add(article.id)
+            retracted_by_finding.setdefault(match.finding_id, set()).add(article.id)
             stale = True
             continue
 
@@ -611,6 +609,7 @@ def _match_run_payload(db, row: LiteratureMatchRunRecord) -> dict[str, Any]:
             stale = True
         grouped.setdefault(match.finding_id, []).append(card)
 
+    retracted_after_matching = len(retracted_article_ids)
     findings: list[dict[str, Any]] = []
     ordered_ids = [
         str(snapshot.get("finding", {}).get("finding_id"))

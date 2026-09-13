@@ -379,6 +379,72 @@ def test_finding_extractor_scopes_conditions_to_each_finding() -> None:
     assert findings[1].condition_terms == ["Melanoma", "D008545", "黑色素瘤"]
 
 
+def test_finding_extractor_scopes_biomedical_concepts_to_each_finding() -> None:
+    report = _report(
+        [
+            {
+                "id": "migalastat-finding",
+                "statement": "米加司他可能改善蛋白尿。",
+                "plain_explanation": "该结果涉及米加司他。",
+                "evidence_ids": ["EVIDENCE_001"],
+            },
+            {
+                "id": "other-finding",
+                "statement": "蛋白尿变化值得进一步研究。",
+                "plain_explanation": "这是另一条结果。",
+                "evidence_ids": ["EVIDENCE_001"],
+            },
+        ]
+    )
+    condition = {
+        "type": "condition",
+        "original": "Fabry disease",
+        "normalized": "Fabry disease",
+        "concept_id": "mesh:D000795",
+        "source_code": "D000795",
+    }
+    drug = {
+        "type": "drug",
+        "original": "米加司他",
+        "matched_alias": "米加司他",
+        "normalized": "migalastat",
+        "concept_id": "drug:migalastat",
+    }
+
+    from app.services.medical.terminology.loader import get_default_ontology
+
+    findings = extract_matchable_findings(
+        report,
+        ontology=get_default_ontology(),
+        analysis_concepts=[condition],
+        candidate_concepts=[condition, drug],
+        valid_evidence_ids={"EVIDENCE_001"},
+    )
+
+    assert "migalastat" in findings[0].biomedical_terms
+    assert "migalastat" not in findings[1].biomedical_terms
+
+    result = match_articles(
+        findings,
+        [
+            _article(
+                title="Fabry disease and migalastat treatment outcomes",
+                abstract=(
+                    "Fabry disease patients received migalastat. "
+                    "Proteinuria improved after treatment."
+                ),
+            )
+        ],
+    )
+    first_features = {feature.feature for feature in result.findings[0].candidates[0].match_features}
+    second_features = {
+        feature.feature
+        for feature in result.findings[1].candidates[0].match_features
+    }
+    assert "controlled_biomedical_match" in first_features
+    assert "controlled_biomedical_match" not in second_features
+
+
 def test_finding_extractor_does_not_loop_on_long_duplicate_ids() -> None:
     report = _report(
         [
@@ -597,6 +663,81 @@ def test_repository_persists_and_reuses_scoped_match_run() -> None:
         assert db.scalar(select(func.count(LiteratureEvidenceMatchRecord.id))) == 1
 
 
+def test_repository_scopes_biomedical_terms_to_the_matching_finding() -> None:
+    sessions, repository = _setup()
+    report = _report(
+        [
+            {
+                "id": "migalastat-finding",
+                "statement": "米加司他可能改善蛋白尿。",
+                "plain_explanation": "该结果涉及米加司他。",
+                "evidence_ids": ["EVIDENCE_001"],
+            },
+            {
+                "id": "other-finding",
+                "statement": "蛋白尿变化值得进一步研究。",
+                "plain_explanation": "这是另一条结果。",
+                "evidence_ids": ["EVIDENCE_001"],
+            },
+        ]
+    )
+    analysis_id, search_id = _analysis_and_search(
+        sessions,
+        report=report,
+        articles=[
+            _article(
+                title="Fabry disease and migalastat treatment outcomes",
+                abstract=(
+                    "Fabry disease patients received migalastat. "
+                    "Proteinuria improved after treatment."
+                ),
+            )
+        ],
+    )
+    with sessions() as db:
+        db.get(LiteratureSearchRunRecord, search_id).detected_concepts_json = json.dumps(
+            [
+                {
+                    "type": "condition",
+                    "original": "Fabry disease",
+                    "normalized": "Fabry disease",
+                    "concept_id": "mesh:D000795",
+                    "source": "local_ontology",
+                    "source_code": "D000795",
+                },
+                {
+                    "type": "drug",
+                    "original": "米加司他",
+                    "matched_alias": "米加司他",
+                    "normalized": "migalastat",
+                    "concept_id": "drug:migalastat",
+                },
+            ]
+        )
+        db.commit()
+
+    result, created = repository.create_or_reuse_match_run(
+        document_id="document-1",
+        user_id="user-a",
+        workspace_id="workspace-a",
+        analysis_run_id=analysis_id,
+        search_run_id=search_id,
+    )
+
+    assert created is True
+    findings = {finding["finding_id"]: finding for finding in result["findings"]}
+    first_features = {
+        feature["feature"]
+        for feature in findings["migalastat-finding"]["candidates"][0]["match_features"]
+    }
+    second_features = {
+        feature["feature"]
+        for feature in findings["other-finding"]["candidates"][0]["match_features"]
+    }
+    assert "controlled_biomedical_match" in first_features
+    assert "controlled_biomedical_match" not in second_features
+
+
 def test_repository_rejects_search_condition_that_is_not_in_the_analysis() -> None:
     sessions, repository = _setup()
     analysis_id, search_id = _analysis_and_search(sessions)
@@ -651,6 +792,56 @@ def test_repository_hides_article_retracted_after_matching() -> None:
     assert "retracted_after_matching" in current["warnings"]
     assert current["summary"]["match_count"] == 0
     assert current["stale"] is True
+
+
+def test_repository_counts_one_retracted_article_once_across_findings() -> None:
+    sessions, repository = _setup()
+    report = _report(
+        [
+            {
+                "id": "finding-1",
+                "statement": "Fabry disease treatment reduced proteinuria in 42 patients.",
+                "plain_explanation": "The paper reports a reduction.",
+                "evidence_ids": ["EVIDENCE_001"],
+            },
+            {
+                "id": "finding-2",
+                "statement": "Fabry disease treatment improved renal outcomes in 42 patients.",
+                "plain_explanation": "The paper reports improved outcomes.",
+                "evidence_ids": ["EVIDENCE_001"],
+            },
+        ]
+    )
+    analysis_id, search_id = _analysis_and_search(
+        sessions,
+        report=report,
+        articles=[
+            _article(
+                title="Fabry disease treatment improved proteinuria and renal outcomes",
+                abstract=(
+                    "Fabry disease was studied in 42 patients. "
+                    "Proteinuria and renal outcomes improved after treatment."
+                ),
+            )
+        ],
+    )
+    saved, _ = repository.create_or_reuse_match_run(
+        document_id="document-1",
+        user_id="user-a",
+        workspace_id="workspace-a",
+        analysis_run_id=analysis_id,
+        search_run_id=search_id,
+    )
+
+    with sessions() as db:
+        db.get(LiteratureArticleRecord, "article-1001").retraction_status = "retracted"
+        db.commit()
+
+    current = repository.get_match_run(saved["match_run_id"], "user-a", "workspace-a")
+
+    assert current["excluded_articles"]["retracted_after_matching"] == 1
+    assert current["summary"]["retracted_articles_excluded"] == 1
+    assert all(finding["candidates"] == [] for finding in current["findings"])
 
 
 def test_repository_reads_saved_article_snapshot_and_candidate_rank() -> None:

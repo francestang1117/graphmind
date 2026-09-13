@@ -183,6 +183,7 @@ class FindingExtractor:
                 finding_id = _unique_finding_id(source_id, finding_type, seen_ids)
                 seen_ids.add(finding_id)
 
+                finding_text = ""
                 if legacy_concept_mode:
                     conditions = global_conditions
                     condition_status = "matched" if conditions else "unknown"
@@ -217,10 +218,25 @@ class FindingExtractor:
                         conditions = []
                         condition_status = "unknown"
 
+                finding_biomedical = _unique_terms(
+                    [
+                        *global_biomedical,
+                        *(
+                            _biomedical_terms_in_text(
+                                candidate_concepts_list,
+                                finding_text,
+                                ontology=self.ontology,
+                            )
+                            if not legacy_concept_mode
+                            else []
+                        ),
+                    ],
+                    limit=16,
+                )
                 finding_controlled = _unique_terms(
                     [
                         *controlled_terms,
-                        *global_biomedical,
+                        *finding_biomedical,
                         *conditions,
                     ],
                     limit=8,
@@ -236,7 +252,7 @@ class FindingExtractor:
                         normalized_text=normalized[:8000],
                         controlled_terms=finding_controlled or all_controlled,
                         condition_terms=conditions,
-                        biomedical_terms=global_biomedical,
+                        biomedical_terms=finding_biomedical,
                         keywords=keywords,
                         phrases=phrases,
                         condition_status=condition_status,
@@ -400,6 +416,50 @@ def _condition_terms_for_ids(
     return _unique_terms(values, limit=16)
 
 
+def _biomedical_terms_in_text(
+    concepts: Iterable[Any],
+    text: str,
+    *,
+    ontology: DiseaseOntology | None,
+) -> list[str]:
+    """Keep non-condition search concepts local to findings that mention them."""
+    values: list[str] = []
+    for raw in concepts:
+        concept = raw.model_dump() if isinstance(raw, BaseModel) else raw
+        if not isinstance(concept, Mapping) or _is_condition_concept(concept):
+            continue
+        if not _concept_alias_is_mentioned(concept, text):
+            continue
+        values.extend(_concept_terms([concept], ontology=ontology)[2])
+    return _unique_terms(values, limit=16)
+
+
+def _concept_alias_is_mentioned(concept: Mapping[str, Any], text: str) -> bool:
+    """Require a source alias from the search result to occur in this finding."""
+    for field in ("original", "matched_alias"):
+        value = concept.get(field)
+        values = value if isinstance(value, (list, tuple, set)) else (value,)
+        if any(_term_occurs_in_text(str(item or ""), text) for item in values):
+            return True
+    return False
+
+
+def _term_occurs_in_text(term: str, text: str) -> bool:
+    normalized_term = normalize_terminology_text(term)
+    normalized_text = normalize_terminology_text(text)
+    if not normalized_term or not normalized_text:
+        return False
+    if any(not character.isascii() for character in normalized_term):
+        return normalized_term in normalized_text
+    return bool(
+        re.search(
+            rf"(?<![A-Za-z0-9]){re.escape(normalized_term)}(?![A-Za-z0-9])",
+            normalized_text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _finding_text(
     statement: str,
     plain_explanation: Any,
@@ -436,7 +496,6 @@ def _concept_terms(
         if not isinstance(concept, Mapping):
             continue
         concept_id = str(concept.get("concept_id") or "").strip()
-        concept_type = str(concept.get("type") or "").strip().casefold()
         values = [
             concept.get("normalized"),
             concept.get("original"),
@@ -450,9 +509,7 @@ def _concept_terms(
                 values.extend(alias.text for alias in record.aliases[:8])
         terms = [str(value).strip() for value in values if str(value or "").strip()]
         all_terms.extend(terms)
-        if concept_type in {"condition", "disease", "medical_condition"} or (
-            concept_id.startswith("mesh:") or concept_id.startswith("orpha:")
-        ):
+        if _is_condition_concept(concept):
             condition_terms.extend(terms)
         else:
             biomedical_terms.extend(terms)
@@ -460,6 +517,14 @@ def _concept_terms(
         _unique_terms(all_terms, limit=8),
         _unique_terms(condition_terms, limit=16),
         _unique_terms(biomedical_terms, limit=16),
+    )
+
+
+def _is_condition_concept(concept: Mapping[str, Any]) -> bool:
+    concept_id = str(concept.get("concept_id") or "").strip().casefold()
+    concept_type = str(concept.get("type") or "").strip().casefold()
+    return concept_type in {"condition", "disease", "medical_condition"} or (
+        concept_id.startswith("mesh:") or concept_id.startswith("orpha:")
     )
 
 
