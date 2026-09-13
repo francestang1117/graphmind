@@ -199,6 +199,9 @@ class DocumentService:
             from app.services.graph_repository import graph_repository
             from app.services.medical.repository import medical_repository
             from app.services.medical.ai.analysis_repository import medical_analysis_repository
+            from app.services.medical.evidence_matching.repository import (
+                evidence_matching_repository,
+            )
             from app.services.medical.literature.repository import literature_repository
 
             self._cancel_document_jobs(document_id, user_id, workspace_id)
@@ -219,6 +222,11 @@ class DocumentService:
                     user_id=user_id,
                     workspace_id=workspace_id,
                 )
+                evidence_matching_repository.delete_for_document(
+                    document_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
                 literature_repository.delete_for_document(
                     document_id,
                     user_id=user_id,
@@ -229,6 +237,7 @@ class DocumentService:
                 graph_repository.delete_for_document(document_id, user_id)
                 medical_repository.delete_for_document(document_id, user_id=user_id)
                 medical_analysis_repository.delete_for_document(document_id, user_id=user_id)
+                evidence_matching_repository.delete_for_document(document_id, user_id=user_id)
                 literature_repository.delete_for_document(document_id, user_id=user_id)
         return deleted
 

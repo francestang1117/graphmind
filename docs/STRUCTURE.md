@@ -37,6 +37,7 @@ GraphMind/
 │   │   │       ├── search.py
 │   │   │       ├── websocket.py
 │   │   │       ├── medical_insights.py
+│   │   │       ├── literature_matches.py
 │   │   │       └── workspaces.py
 │   │   ├── core/
 │   │   │   ├── celery_app.py
@@ -78,7 +79,7 @@ GraphMind/
 │   │   │   │   │   ├── prompt_builder.py
 │   │   │   │   │   ├── provider.py
 │   │   │   │   │   └── safety_validator.py
-│   │   │   │   └── literature/
+│   │   │   │   ├── literature/
 │   │   │   │       ├── __init__.py
 │   │   │   │       ├── exceptions.py
 │   │   │   │       ├── models.py
@@ -88,6 +89,14 @@ GraphMind/
 │   │   │   │       ├── query_builder.py
 │   │   │   │       ├── rate_limiter.py
 │   │   │   │       └── repository.py
+│   │   │   │   └── evidence_matching/
+│   │   │   │       ├── __init__.py
+│   │   │   │       ├── exceptions.py
+│   │   │   │       ├── finding_extractor.py
+│   │   │   │       ├── matcher.py
+│   │   │   │       ├── models.py
+│   │   │   │       ├── repository.py
+│   │   │   │       └── study_card_builder.py
 │   │   │   ├── parsed_artifact_repository.py
 │   │   │   ├── persistence_service.py
 │   │   │   ├── qa_engine.py
@@ -122,6 +131,7 @@ GraphMind/
 │       ├── test_medical_classifier.py
 │       ├── test_medical_repository.py
 │       ├── test_medical_ai_insights.py
+│       ├── test_literature_evidence_matching.py
 │       ├── test_literature_api.py
 │       ├── test_literature_provider.py
 │       ├── test_literature_query_builder.py
@@ -184,8 +194,8 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `main.py` wires the FastAPI app, CORS, lifespan startup, rate limiting, API
   error handlers, `/api/v1/*` routes, and the WebSocket router.
 - `api/__init__.py` registers the active REST routers: auth, documents, graph,
-  search, chat, scraper, jobs, workspaces, medical insights, and literature
-  search.
+  search, chat, scraper, jobs, workspaces, medical insights, literature search,
+  and local literature matching.
 - `documents.py` is the active upload/list/detail/delete/open-file API. It uses
   validation, optional virus scanning, content-hash deduplication, storage, parse
   caching, user scoping, and stable application error codes.
@@ -195,6 +205,9 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `services/medical/` classifies medical documents, normalizes paper headings,
   builds page-aware sections and chunks, stores the resulting analysis, and
   provides the evidence-backed insight modules under `services/medical/ai/`.
+- `services/medical/evidence_matching/` extracts evidence-backed findings,
+  matches them against saved PubMed metadata locally, builds study cards, and
+  persists scoped match runs without contacting external services.
 - `services/medical/literature/` builds privacy-bounded PubMed queries, calls
   the official E-utilities endpoints, normalizes public metadata, coordinates
   request pacing through Redis, and persists scoped search runs and result links.
@@ -274,6 +287,7 @@ SQLite files, and virtual environments are intentionally left out of this map.
 - `tasks/literature_search.py` runs one confirmed PubMed search with a bounded
   retryable worker lease and fencing token, then saves only normalized public
   metadata.
+- `literature_matches.py` exposes the workspace-scoped local matching API.
 - `web_scraper.py` fetches public web pages, strips noisy HTML, and stores the
   readable result as a normal Markdown document.
 - `virus_scanner.py` is the ClamAV integration wrapper. Scanning is optional and
@@ -326,6 +340,8 @@ The backend currently has tests for:
   results, and stale-source handling
 - privacy-bounded PubMed query preview, official metadata/abstract retrieval,
   scoped search persistence, cache reuse, retry handling, and deletion cleanup
+- local finding-to-literature matching, bounded scoring, abstract offsets,
+  study-card classification, and match persistence
 
 Run the current backend suite with:
 
@@ -345,20 +361,20 @@ branch adds the first medical research workflow layers:
 - deterministic local provider, PII redaction, and medical-safety warnings
 - the frontend document-level insight panel with source evidence details
 - PubMed literature search with confirmed query terms and normalized abstracts
-- study cards, AI evidence matching, and paper-focused chat are still next
-- the frontend workspace picker and dedicated research-card pages
+- study cards and AI evidence matching now exist as a backend-only foundation
+- paper-focused chat and the frontend workspace/research-card pages are still next
 - staging OAuth and `AUTH_REQUIRED=true` checks behind HTTPS and secure cookies
 
 ## Still Early
 
 The project now has real modules for upload, parsing, entity extraction, graph,
 search, chat, auth, rate limiting, persistence, metrics, Celery workers,
-WebSocket progress, paper structure parsing, and evidence-backed medical
-insights. The remaining gaps are:
+WebSocket progress, paper structure parsing, evidence-backed medical insights,
+and local literature matching. The remaining gaps are:
 
 - deeper graph persistence tooling beyond the current node/edge tables
-- study cards and a dedicated research-card page
-- claim-to-literature evidence matching and paper-focused chat
+- richer study-card presentation and a dedicated research-card page
+- paper-focused chat and stronger semantic evidence matching
 - embedded PDF page navigation from an evidence citation
 - the frontend workspace picker and full paper workflow
 - staging OAuth and `AUTH_REQUIRED=true` checks behind HTTPS

@@ -468,6 +468,51 @@ Common API errors include `literature_no_medical_concepts` (`422`),
 `literature_search_stalled` (`503`). A different user or workspace receives
 `404` rather than a result from another scope.
 
+### Local literature evidence matching
+
+This endpoint joins one validated medical insight run with one completed PubMed
+search run. Matching is local: it reads the saved report and article metadata,
+does not call PubMed or an AI provider, and never crosses the current user,
+workspace, or document boundary.
+
+#### `POST /documents/{document_id}/literature-matches`
+
+```json
+{
+  "analysis_run_id": "<validated-analysis-run-id>",
+  "search_run_id": "<completed-search-run-id>"
+}
+```
+
+The response is `201` for a new run and `200` when an unchanged input snapshot
+is reused. Findings are extracted only from report fields with valid evidence
+IDs. Each candidate includes a bounded score, matched terms, explainable feature
+reasons, study category from PubMed publication types, and an abstract quote
+with character offsets when an abstract is available. A candidate is potentially
+relevant; a match is not proof that the article supports the finding.
+
+The matcher excludes retracted articles and marks correction or expression-of-
+concern records with warnings. `condition_only` means the article shares the
+same controlled condition but does not have enough finding-specific overlap.
+Unknown Chinese free text is not translated or sent to an external service.
+
+#### `GET /literature-match-runs/{match_run_id}`
+
+Returns the saved finding snapshots, candidate study cards, match counts,
+excluded article counts, warnings, and input fingerprint. A run from another
+user or workspace returns `404`.
+
+#### `GET /documents/{document_id}/literature-matches/latest`
+
+Returns the newest completed match run for the selected document and workspace.
+Deleting the document removes the match run and evidence links while retaining
+the shared public article metadata cache.
+
+Common errors include `literature_match_no_findings` (`422`),
+`medical_analysis_not_ready` or `medical_analysis_not_validated` (`409`),
+`literature_search_not_ready` (`409`), and
+`literature_match_storage_unavailable` (`503`).
+
 ### `DELETE /documents/{filename}`
 
 Deletes the stored file, soft-deletes the database document record when persistence is enabled, and clears cached parsed artifacts for that file.
