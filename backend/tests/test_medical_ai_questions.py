@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from app.services.medical.ai.analyzer import MedicalInsightAnalyzer
 from app.services.medical.ai.citation_validator import evidence_rows, validate_citations
 from app.services.medical.ai.context_builder import AnalysisContext, EvidenceItem
+from app.services.medical.ai.exceptions import MedicalInsightValidationError
 from app.services.medical.ai.models import MedicalInsightReport, QuestionSuggestion
 from app.services.medical.ai.prompt_builder import build_prompt
 from app.services.medical.ai.provider import ExtractiveMedicalAIProvider
@@ -356,6 +357,33 @@ def test_analyzer_repairs_a_question_with_invalid_evidence():
 
     assert repair_provider.calls == 2
     assert output.questions.valid
+
+
+def test_analyzer_rejects_personalized_medication_question_after_repair():
+    unsafe = _report(
+        _question(
+            question="Would switching to the drug in this paper be better for me?"
+        )
+    ).model_dump()
+
+    class UnsafeProvider(ExtractiveMedicalAIProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, prompt, context):
+            self.calls += 1
+            return unsafe
+
+    provider = UnsafeProvider()
+    with pytest.raises(MedicalInsightValidationError):
+        MedicalInsightAnalyzer(provider=provider).run(
+            [{"id": "chunk-1", "text": "The study reports a result.", "section_type": "results"}],
+            title="Example paper",
+            document_kind="research_paper",
+            language="en",
+        )
+
+    assert provider.calls == 2
 
 
 def test_v3_normalization_drops_legacy_questions_from_a_provider_payload():

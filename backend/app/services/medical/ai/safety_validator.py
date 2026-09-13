@@ -106,6 +106,27 @@ _TREATMENT_COMMAND = re.compile(
     re.I,
 )
 
+_PERSONALIZED_TREATMENT_TERM = re.compile(
+    r"\b(?:medication|medicine|drug|dose|dosage|treatment|therapy|prescription)\b"
+    r"|(?:药物|药|剂量|治疗|疗法|处方|用药)",
+    re.I,
+)
+_DIRECT_PERSONAL_MARKER = re.compile(
+    r"\b(?:for me|to me|my case|my condition|my situation|my symptoms|"
+    r"for my(?:\s+condition|\s+case|\s+situation)?)\b"
+    r"|(?:对我|适合我|合适我|我的情况|我的病情|我应该|我需要|我能否|我可以|"
+    r"我能不能|我是否可以|我是否应该|我该)",
+    re.I,
+)
+
+
+def _has_personalized_treatment_question(value: str) -> bool:
+    """Reject medication suitability or dosing questions aimed at the user."""
+    return bool(
+        _PERSONALIZED_TREATMENT_TERM.search(value)
+        and _DIRECT_PERSONAL_MARKER.search(value)
+    )
+
 
 def validate_safety(report: MedicalInsightReport) -> SafetyValidation:
     """Reject direct diagnosis and treatment instructions before persistence."""
@@ -115,6 +136,11 @@ def validate_safety(report: MedicalInsightReport) -> SafetyValidation:
         errors.append("report contains a personalized diagnosis")
     if _TREATMENT_COMMAND.search(text):
         errors.append("report contains a treatment or medication instruction")
+    if any(
+        _has_personalized_treatment_question(item.question)
+        for item in report.question_suggestions
+    ):
+        errors.append("question suggestions contain personalized medication guidance")
     return SafetyValidation(valid=not errors, errors=errors)
 
 

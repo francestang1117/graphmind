@@ -881,12 +881,36 @@ def _clear_run_payload(db, run_id: str) -> None:
     )
 
 
+def _normalize_saved_report(report: Any, row_schema_version: str | None) -> Any:
+    """Add the persisted report version before returning an API payload."""
+    if not isinstance(report, dict):
+        return report
+
+    normalized = dict(report)
+    schema_version = str(normalized.get("schema_version") or "").strip()
+    if not schema_version:
+        schema_version = str(row_schema_version or "").strip()
+        if not schema_version and normalized.get("questions_for_professional"):
+            schema_version = "medical-insights-v2"
+        if schema_version:
+            normalized["schema_version"] = schema_version
+
+    # A malformed V3 row must not expose its uncited legacy questions. V2
+    # remains the only version allowed to use the legacy field in the UI.
+    if schema_version == "medical-insights-v3":
+        normalized["questions_for_professional"] = []
+    return normalized
+
+
 def _run_payload(db, row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
     payload = _run_dict(row)
     result = db.get(MedicalAnalysisResultRecord, row.id)
     if not result:
         return payload
-    payload["report"] = _loads_json(result.report_json, {})
+    payload["report"] = _normalize_saved_report(
+        _loads_json(result.report_json, {}),
+        row.schema_version,
+    )
     payload["citation_coverage"] = result.citation_coverage
     payload["validation_status"] = result.validation_status
     payload["warnings"] = _loads_json(result.warnings_json, [])

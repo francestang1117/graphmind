@@ -18,6 +18,7 @@ from app.models.persistence import (
     DocumentRecord,
     DocumentSectionRecord,
     MedicalAnalysisEvidenceRecord,
+    MedicalAnalysisResultRecord,
     MedicalAnalysisRunRecord,
     MedicalDocumentProfileRecord,
     ParsedChunkRecord,
@@ -172,6 +173,33 @@ def test_safety_validator_allows_descriptive_medical_language():
     ]
 
     assert validate_safety(MedicalInsightReport.model_validate(payload)).valid
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Would switching to the drug in this paper be better for me?",
+        "What dose is appropriate for me?",
+        "论文里的药是不是更适合我？",
+    ],
+)
+def test_safety_validator_rejects_personalized_medication_questions(question):
+    payload = _report("EVIDENCE_001").model_dump()
+    payload["question_suggestions"] = [
+        {
+            "id": "question_001",
+            "question": question,
+            "rationale": "The cited passage describes the intervention.",
+            "category": "applicability",
+            "evidence_ids": ["EVIDENCE_001"],
+            "interpretation_type": "inference",
+        }
+    ]
+
+    validation = validate_safety(MedicalInsightReport.model_validate(payload))
+
+    assert not validation.valid
+    assert any("personalized medication" in error for error in validation.errors)
 
 
 def test_context_builder_reads_legacy_page_metadata_for_guidelines():
@@ -855,6 +883,63 @@ def test_repository_persists_citations_and_filters_stale_source_versions():
         with sessions() as db:
             assert len(db.scalars(select(MedicalAnalysisRunRecord)).all()) == 1
             assert len(db.scalars(select(MedicalAnalysisEvidenceRecord)).all()) >= 1
+    finally:
+        engine.dispose()
+
+
+def test_repository_normalizes_unversioned_legacy_report_for_api_payload():
+    engine, sessions, repository = _repository()
+    try:
+        _paper_rows(sessions)
+        run, created = repository.create_or_reuse(
+            document_id="document-1",
+            user_id="user-1",
+            workspace_id="workspace-1",
+            source_hash="a" * 64,
+            requested_by="user-1",
+            provider="extractive",
+            model_name="extractive-v1",
+            prompt_version="medical-insights-v2",
+            schema_version="medical-insights-v2",
+        )
+        assert created
+
+        legacy_report = {
+            "document_kind": "research_paper",
+            "language": "en",
+            "overview": {
+                "title": "Old report",
+                "summary": "A saved V2 report.",
+                "study_type": "Research paper",
+                "evidence_ids": ["EVIDENCE_001"],
+            },
+            "questions_for_professional": [
+                "What should I discuss with a professional?"
+            ],
+        }
+        with sessions() as db:
+            row = db.get(MedicalAnalysisRunRecord, run["run_id"])
+            row.status = "succeeded"
+            row.is_current = True
+            db.add(
+                MedicalAnalysisResultRecord(
+                    run_id=run["run_id"],
+                    report_json=json.dumps(legacy_report),
+                    citation_coverage=1.0,
+                    validation_status="validated",
+                    warnings_json="[]",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+            db.commit()
+
+        current = repository.get_current("document-1", "user-1", "workspace-1")
+        latest = repository.get_latest("document-1", "user-1", "workspace-1")
+        assert current["report"]["schema_version"] == "medical-insights-v2"
+        assert current["report"]["questions_for_professional"] == legacy_report[
+            "questions_for_professional"
+        ]
+        assert latest["report"]["schema_version"] == "medical-insights-v2"
     finally:
         engine.dispose()
 
