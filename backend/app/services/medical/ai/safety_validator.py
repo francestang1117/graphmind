@@ -106,25 +106,48 @@ _TREATMENT_COMMAND = re.compile(
     re.I,
 )
 
-_PERSONALIZED_TREATMENT_TERM = re.compile(
-    r"\b(?:medication|medicine|drug|dose|dosage|treatment|therapy|prescription)\b"
-    r"|(?:药物|药|剂量|治疗|疗法|处方|用药)",
+_PERSONALIZED_SUITABILITY = re.compile(
+    r"\b(?:appropriate|suitable|suited|right|best|better|safe|effective|"
+    r"beneficial|helpful|work)\b[^?？!！\n]{0,80}"
+    r"\bfor\s+(?:me|my\s+(?:case|condition|situation))\b"
+    r"|(?:适合我|合适我|更适合我|最适合我|适用于我|对我合适|对我有效|"
+    r"对我安全|对我有用|适合我的情况|适合我的病情|对我的情况合适|"
+    r"对我的病情有效)",
     re.I,
 )
-_DIRECT_PERSONAL_MARKER = re.compile(
-    r"\b(?:for me|to me|my case|my condition|my situation|my symptoms|"
-    r"for my(?:\s+condition|\s+case|\s+situation)?)\b"
-    r"|(?:对我|适合我|合适我|我的情况|我的病情|我应该|我需要|我能否|我可以|"
-    r"我能不能|我是否可以|我是否应该|我该)",
+_PERSONALIZED_TREATMENT_ACTION = re.compile(
+    r"\b(?:should|must|can|may|could|do)\s+i\s+"
+    r"(?:take|use|start|stop|switch|change|try|choose|increase|decrease|adjust|"
+    r"continue)\b"
+    r"|\bwhat\s+(?:should|can|may)\s+i\s+"
+    r"(?:take|use|start|stop|switch|change|try|choose|increase|decrease|adjust)\b"
+    r"|(?:我|本人)\s*(?:该|应该|必须|需要|是否可以|能否|可以|可不可以|"
+    r"是否应该|该不该|要不要)\s*(?:立即|马上|立刻)?\s*"
+    r"(?:服用|使用|开始(?:用药|服药|服用)|停药|换药|改用|尝试|"
+    r"增加剂量|减少剂量|调整剂量|继续服用|继续使用)"
+    r"|(?:该|应该|需要)\s*(?:选|选择|选用)\s*(?:哪种|什么)"
+    r"[^。！？?!]{0,12}(?:药物|药|治疗|疗法)",
+    re.I,
+)
+_PERSONALIZED_TREATMENT_BENEFIT = re.compile(
+    r"\b(?:would|could|might|may|does)\s+"
+    r"(?!(?:these|the)\s+(?:findings|results|evidence|study|research|paper|"
+    r"population|data)\b)"
+    r"(?:[A-Za-z][A-Za-z0-9-]*\s+){0,6}"
+    r"(?:help|benefit|work)\s+(?:for\s+)?me\b"
+    r"|(?!(?:这些发现|这些结果|该研究|这项研究|研究结果|研究人群|该证据))"
+    r"(?:[\u4e00-\u9fffA-Za-z0-9-]{2,80})\s*"
+    r"(?:对我有效|对我有用|能帮我|会帮助我)",
     re.I,
 )
 
 
 def _has_personalized_treatment_question(value: str) -> bool:
-    """Reject medication suitability or dosing questions aimed at the user."""
+    """Reject treatment decisions while allowing evidence-scope questions."""
     return bool(
-        _PERSONALIZED_TREATMENT_TERM.search(value)
-        and _DIRECT_PERSONAL_MARKER.search(value)
+        _PERSONALIZED_SUITABILITY.search(value)
+        or _PERSONALIZED_TREATMENT_ACTION.search(value)
+        or _PERSONALIZED_TREATMENT_BENEFIT.search(value)
     )
 
 

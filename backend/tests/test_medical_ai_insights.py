@@ -181,6 +181,10 @@ def test_safety_validator_allows_descriptive_medical_language():
         "Would switching to the drug in this paper be better for me?",
         "What dose is appropriate for me?",
         "论文里的药是不是更适合我？",
+        "Would migalastat be appropriate for me?",
+        "米格列醇对我有效吗？",
+        "Which treatment is right for my condition?",
+        "该选哪种药？",
     ],
 )
 def test_safety_validator_rejects_personalized_medication_questions(question):

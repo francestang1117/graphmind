@@ -293,6 +293,8 @@ def test_question_safety_rejects_first_person_diagnosis_and_treatment_instructio
         "这篇论文的结果是否已经在更大规模研究中验证？",
         "研究人群与我的情况是否具有可比性？",
         "Could these findings apply to people like me?",
+        "Could these findings help people like me?",
+        "What treatment outcomes did the study report for people with my condition?",
     ],
 )
 def test_question_safety_allows_evidence_bound_discussion_questions(question):
@@ -362,7 +364,7 @@ def test_analyzer_repairs_a_question_with_invalid_evidence():
 def test_analyzer_rejects_personalized_medication_question_after_repair():
     unsafe = _report(
         _question(
-            question="Would switching to the drug in this paper be better for me?"
+            question="Would migalastat be appropriate for me?"
         )
     ).model_dump()
 
