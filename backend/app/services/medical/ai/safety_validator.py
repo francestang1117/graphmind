@@ -106,27 +106,81 @@ _TREATMENT_COMMAND = re.compile(
     re.I,
 )
 
-_PERSONALIZED_SUITABILITY = re.compile(
-    r"\b(?:appropriate|suitable|suited|right|best|better|safe|effective|"
-    r"beneficial|helpful|work)\b[^?？!！\n]{0,80}"
-    r"\bfor\s+(?:me|my\s+(?:case|condition|situation))\b"
-    r"|(?:适合我|合适我|更适合我|最适合我|适用于我|对我合适|对我有效|"
-    r"对我安全|对我有用|适合我的情况|适合我的病情|对我的情况合适|"
-    r"对我的病情有效)",
+_PERSONAL_QUESTION_MARKER = re.compile(
+    r"\b(?:for|to)\s+(?:me|people\s+like\s+me|people\s+with\s+my\s+condition|"
+    r"my\s+(?:case|condition|situation))\b"
+    r"|\bin\s+my\s+(?:case|condition|situation)\b"
+    r"|\bpeople\s+(?:like\s+me|with\s+my\s+condition)\b"
+    r"|\b(?:help|benefit|work)\s+(?:me|people\s+like\s+me|"
+    r"people\s+with\s+my\s+condition)\b"
+    r"|\bmy\s+(?:treatment|medication|medicine|dose|dosage|drug|therapy|"
+    r"prescription|condition|case|situation|symptom(?:s)?)\b"
+    r"|(?:给我|为我|对我|适合我|合适我|更适合我|最适合我|适用于我|"
+    r"对我合适|对我有效|对我安全|对我有用|适合我的情况|适合我的病情|"
+    r"对我的情况合适|对我的病情有效|像我这样的人|类似人群|"
+    r"我的(?:治疗|用药|药物|剂量|情况|病情|症状))",
     re.I,
 )
-_PERSONALIZED_TREATMENT_ACTION = re.compile(
-    r"\b(?:should|must|can|may|could|do)\s+i\s+"
+_PERSONAL_TREATMENT_ACTION = re.compile(
+    r"\b(?:should|must|can|could|may|would)\s+i\s+"
     r"(?:take|use|start|stop|switch|change|try|choose|increase|decrease|adjust|"
     r"continue)\b"
-    r"|\bwhat\s+(?:should|can|may)\s+i\s+"
+    r"|\bwhat\s+(?:should|can|may|would)\s+i\s+"
     r"(?:take|use|start|stop|switch|change|try|choose|increase|decrease|adjust)\b"
-    r"|(?:我|本人)\s*(?:该|应该|必须|需要|是否可以|能否|可以|可不可以|"
-    r"是否应该|该不该|要不要)\s*(?:立即|马上|立刻)?\s*"
-    r"(?:服用|使用|开始(?:用药|服药|服用)|停药|换药|改用|尝试|"
-    r"增加剂量|减少剂量|调整剂量|继续服用|继续使用)"
-    r"|(?:该|应该|需要)\s*(?:选|选择|选用)\s*(?:哪种|什么)"
-    r"[^。！？?!]{0,12}(?:药物|药|治疗|疗法)",
+    r"|\b(?:should|must|can|could|may|would)\s+(?:my\s+)?doctor\b"
+    r"[^?？!！\n]{0,80}\b(?:prescribe|recommend|give|start|switch|change|"
+    r"put\s+me\s+on)\b"
+    r"|\b(?:should|must|can|could|may|would)\s+my\s+"
+    r"(?:treatment|medication|medicine|dose|dosage|drug|therapy|prescription)\s+"
+    r"(?:be\s+)?(?:switched|changed|adjusted|replaced|started|stopped)\b"
+    r"|(?:该|应该|需要|可以|能否|是否应该|要不要)\s*(?:选|选择|选用)\s*"
+    r"(?:哪种|什么)?\s*(?:药物|药|治疗|疗法)"
+    r"|(?:医生|大夫)[^。！？?!]{0,20}(?:给我开|开给我|为我开|处方|"
+    r"推荐给我|帮我换药)",
+    re.I,
+)
+_RESEARCH_APPLICABILITY_QUESTION = re.compile(
+    r"^\s*(?:are|is|could|would|might|may|can)\s+"
+    r"(?:(?:these|the|this)\s+)?(?:findings|results|evidence|study|research|"
+    r"population|data)(?:\s+population)?"
+    r"(?:\s+(?:from|in)\s+(?:this|the)\s+study)?\s+"
+    r"(?:apply|appropriate|suitable|relevant|comparable|"
+    r"applicable|be\s+(?:appropriate|suitable|relevant|comparable|applicable))\s+"
+    r"(?:to|for)\s+(?:people\s+like\s+me|people\s+with\s+my\s+condition|"
+    r"my\s+(?:condition|case|situation)|me)\s*[?？!！。\.]*\s*$",
+    re.I,
+)
+_RESEARCH_APPLICABILITY_HELP = re.compile(
+    r"^\s*(?:could|would|might|may|can)\s+"
+    r"(?:(?:these|the|this)\s+)?(?:findings|results|evidence|study|research|data)"
+    r"(?:\s+(?:from|in)\s+(?:this|the)\s+study)?\s+"
+    r"(?:help|benefit)\s+(?:me|people\s+like\s+me|people\s+with\s+my\s+condition)"
+    r"\s*[?？!！。\.]*\s*$",
+    re.I,
+)
+_RESEARCH_REPORTING_QUESTION = re.compile(
+    r"^\s*(?:what|which|how)\b[^?？!！\n]{0,100}\b(?:did|does|do)\s+"
+    r"(?:the\s+)?(?:study|paper|research|authors?|investigators?)\b"
+    r"[^?？!！\n]{0,100}\b(?:report|find|observe|include|measure|show)\b"
+    r"[^?？!！\n]{0,100}(?:for|about|in)\s+"
+    r"(?:people\s+like\s+me|people\s+with\s+my\s+condition|"
+    r"my\s+(?:condition|case|situation))\s*[?？!！。\.]*\s*$",
+    re.I,
+)
+_RESEARCH_CJK_APPLICABILITY = re.compile(
+    r"^\s*(?:"
+    r"(?:这些(?:发现|结果)|(?:这项|该)研究|研究(?:结果|证据|人群)|该证据)"
+    r"[^。！？?!]{0,30}(?:适用于|推广到|适合)"
+    r"[^。！？?!]{0,20}(?:我的情况|我的病情|类似人群|我)"
+    r"|"
+    r"(?:这些(?:发现|结果)|(?:这项|该)研究|研究(?:结果|证据|人群)|该证据)"
+    r"[^。！？?!]{0,20}(?:我的情况|我的病情|类似人群|我)"
+    r"[^。！？?!]{0,20}(?:具有可比性|可比)"
+    r")\s*[?？!！。\.]*\s*$",
+    re.I,
+)
+_CJK_TREATMENT_TARGET = re.compile(
+    r"(?:药物|药|剂量|治疗|疗法|用药|处方|换药|服用|使用)",
     re.I,
 )
 _PERSONALIZED_TREATMENT_BENEFIT = re.compile(
@@ -142,13 +196,30 @@ _PERSONALIZED_TREATMENT_BENEFIT = re.compile(
 )
 
 
-def _has_personalized_treatment_question(value: str) -> bool:
-    """Reject treatment decisions while allowing evidence-scope questions."""
+def _is_research_scoped_question(value: str) -> bool:
+    """Allow only explicit research-object questions with personal targets."""
+    if _PERSONAL_TREATMENT_ACTION.search(value):
+        return False
+    if (
+        _RESEARCH_APPLICABILITY_QUESTION.fullmatch(value)
+        or _RESEARCH_APPLICABILITY_HELP.fullmatch(value)
+        or _RESEARCH_REPORTING_QUESTION.fullmatch(value)
+    ):
+        return True
     return bool(
-        _PERSONALIZED_SUITABILITY.search(value)
-        or _PERSONALIZED_TREATMENT_ACTION.search(value)
-        or _PERSONALIZED_TREATMENT_BENEFIT.search(value)
+        _RESEARCH_CJK_APPLICABILITY.fullmatch(value)
+        and not _CJK_TREATMENT_TARGET.search(value)
     )
+
+
+def _has_personalized_treatment_question(value: str) -> bool:
+    """Default-deny personal treatment targets unless research scope is explicit."""
+    has_personal_target = _PERSONAL_QUESTION_MARKER.search(value)
+    has_treatment_action = _PERSONAL_TREATMENT_ACTION.search(value)
+    has_personal_benefit = _PERSONALIZED_TREATMENT_BENEFIT.search(value)
+    if not has_personal_target and not has_treatment_action and not has_personal_benefit:
+        return False
+    return not _is_research_scoped_question(value)
 
 
 def validate_safety(report: MedicalInsightReport) -> SafetyValidation:

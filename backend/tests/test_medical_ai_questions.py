@@ -295,6 +295,9 @@ def test_question_safety_rejects_first_person_diagnosis_and_treatment_instructio
         "Could these findings apply to people like me?",
         "Could these findings help people like me?",
         "What treatment outcomes did the study report for people with my condition?",
+        "Are these findings appropriate for my condition?",
+        "Is this study suitable for my situation?",
+        "Could this study help me?",
     ],
 )
 def test_question_safety_allows_evidence_bound_discussion_questions(question):
@@ -364,7 +367,7 @@ def test_analyzer_repairs_a_question_with_invalid_evidence():
 def test_analyzer_rejects_personalized_medication_question_after_repair():
     unsafe = _report(
         _question(
-            question="Would migalastat be appropriate for me?"
+            question="Is migalastat a good option for me?"
         )
     ).model_dump()
 
