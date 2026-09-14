@@ -27,6 +27,16 @@ QuestionSuggestionCategory = Literal[
     "monitoring_discussion",
     "research_option",
 ]
+QuestionSuggestionTopic = Literal[
+    "study_population",
+    "study_design",
+    "reported_result",
+    "term_clarification",
+    "study_limitation",
+    "evidence_gap",
+    "monitoring",
+    "future_research",
+]
 NOT_REPORTED_VALUE = "Not reported in the selected source evidence."
 
 
@@ -57,12 +67,15 @@ class MedicalTermExplanation(_StrictModel):
 
 
 class QuestionSuggestion(_StrictModel):
-    """A safe, source-backed question for discussion with a professional."""
+    """A source-backed question draft normalized by the server before display."""
 
     id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
-    question: str = Field(min_length=1, max_length=500)
-    rationale: str = Field(min_length=1, max_length=1000)
+    # Providers may leave these blank. V3 replaces them with a server-owned
+    # template after validating the structured category and topic.
+    question: str = Field(default="", max_length=500)
+    rationale: str = Field(default="", max_length=1000)
     category: QuestionSuggestionCategory
+    topic: QuestionSuggestionTopic | None = None
     evidence_ids: list[str] = Field(min_length=1, max_length=5)
     interpretation_type: InterpretationType = "inference"
 

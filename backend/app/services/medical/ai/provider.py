@@ -146,10 +146,9 @@ class ExtractiveMedicalAIProvider:
             question_suggestions.append(
                 _question_suggestion(
                     "question_001",
-                    "Which people were included in this document, and who was not included?",
-                    "The source describes the study population or scope, so it is useful to discuss who the findings may apply to.",
                     "applicability",
                     population_item,
+                    "study_population",
                 )
             )
         limitation_item = _first_of(evidence, "limitations", "limitation")
@@ -157,10 +156,9 @@ class ExtractiveMedicalAIProvider:
             question_suggestions.append(
                 _question_suggestion(
                     "question_002",
-                    "What limitation should I keep in mind when interpreting these findings?",
-                    "The document describes a limitation, so a professional can explain how it affects interpretation of the findings.",
                     "study_limitation",
                     limitation_item,
+                    "study_limitation",
                 )
             )
 
@@ -411,16 +409,16 @@ def _finding(
 
 def _question_suggestion(
     suggestion_id: str,
-    question: str,
-    rationale: str,
     category: str,
     item: EvidenceItem,
+    topic: str,
 ) -> dict[str, Any]:
     return {
         "id": suggestion_id,
-        "question": question,
-        "rationale": rationale,
+        "question": "",
+        "rationale": "",
         "category": category,
+        "topic": topic,
         "evidence_ids": [item.evidence_id],
         "interpretation_type": "inference",
     }

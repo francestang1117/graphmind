@@ -51,16 +51,21 @@ Rules:
   only for open questions or next steps stated or directly supported by the
   document; do not invent a research agenda.
 - Return zero to five question_suggestions for a general reader to discuss with
-  a qualified healthcare professional. Each question must have a stable id, a
-  category, a short source-grounded rationale, and one to five exact Evidence
-  IDs. The rationale must be supported by the same cited evidence. An empty
-  list is correct when the supplied evidence does not support a useful question.
+  a qualified healthcare professional. Each item must have a stable id, one of
+  these categories (clarify_finding, applicability, study_limitation,
+  evidence_gap, monitoring_discussion, research_option), a compatible topic,
+  and one to five exact Evidence IDs. Valid topics are study_population,
+  study_design, reported_result, term_clarification, study_limitation,
+  evidence_gap, monitoring, and future_research. The server creates the final
+  question and rationale from the category and topic, so return empty strings
+  for question and rationale. An empty list is correct when the supplied
+  evidence does not support a useful question.
 - Questions must clarify the document, its applicability, limitations, evidence
   gaps, monitoring, or research options. Do not diagnose the reader, assume
   their symptoms or condition, prescribe or change treatment, recommend a dose,
-  or tell them to seek emergency care. Use plain language and explain necessary
-  terms in the rationale. Return questions in question_suggestions and leave
-  legacy questions_for_professional as an empty list.
+  or tell them to seek emergency care. Return questions in
+  question_suggestions and leave legacy questions_for_professional as an empty
+  list.
 - Preserve all numbers, units, study populations, and comparison groups exactly.
 - Do not turn association into causation, animal or in-vitro results into human
   efficacy, a non-significant result into proof of no effect, or author
@@ -72,6 +77,6 @@ Rules:
 - Do not use References as evidence for the document's own results.
 - The coverage object is filled by the server. Return it with empty/default
   values rather than estimating document coverage yourself.
-- Safe question example (illustrative only; still return the complete report):
-  {{"question_suggestions":[{{"id":"question_001","question":"Which people were included in this study?","rationale":"The study describes a population, so it is useful to discuss who the findings may apply to.","category":"applicability","evidence_ids":["EVIDENCE_004"],"interpretation_type":"inference"}}],"questions_for_professional":[]}}
+- Safe question intent example (illustrative only; still return the complete report):
+  {{"question_suggestions":[{{"id":"question_001","question":"","rationale":"","category":"applicability","topic":"study_population","evidence_ids":["EVIDENCE_004"],"interpretation_type":"inference"}}],"questions_for_professional":[]}}
 - Return JSON only. Do not add Markdown fences or extra keys."""

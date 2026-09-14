@@ -20,6 +20,7 @@ from app.services.medical.ai.models import MedicalInsightReport
 from app.services.medical.ai.prompt_builder import build_prompt, build_repair_prompt
 from app.services.medical.ai.provider import MedicalAIProvider, get_provider
 from app.services.medical.ai.question_validator import QuestionValidation, validate_questions
+from app.services.medical.ai.question_templates import normalize_question_suggestions
 from app.services.medical.ai.safety_validator import SafetyValidation, validate_safety
 from app.services.medical.ai.support_validator import SupportValidation, validate_support
 
@@ -214,9 +215,14 @@ class MedicalInsightAnalyzer:
             "coverage": coverage,
         }
         if self.schema_version == "medical-insights-v3":
-            # V3 questions must use the cited structured contract. Legacy
-            # strings are readable from saved V2 reports but never copied into
-            # a newly normalized V3 report.
+            # V3 questions must use the cited structured contract. The
+            # provider supplies only intent metadata; the server owns the
+            # final question and rationale text. Legacy strings are readable
+            # from saved V2 reports but never copied into a new V3 report.
+            updates["question_suggestions"] = normalize_question_suggestions(
+                report.question_suggestions,
+                context.language,
+            )
             updates["questions_for_professional"] = []
         return report.model_copy(update=updates)
 

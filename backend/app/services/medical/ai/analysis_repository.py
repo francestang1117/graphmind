@@ -14,6 +14,7 @@ from app.core.config import settings
 from app.core.workspace import default_workspace_id
 from app.services.medical.ai.citation_validator import evidence_rows
 from app.services.medical.ai.exceptions import MedicalInsightError
+from app.services.medical.ai.question_templates import normalize_saved_question_payload
 
 log = logging.getLogger(__name__)
 
@@ -899,6 +900,10 @@ def _normalize_saved_report(report: Any, row_schema_version: str | None) -> Any:
     # remains the only version allowed to use the legacy field in the UI.
     if schema_version == "medical-insights-v3":
         normalized["questions_for_professional"] = []
+        normalized["question_suggestions"] = normalize_saved_question_payload(
+            normalized.get("question_suggestions"),
+            str(normalized.get("language") or "en"),
+        )
     return normalized
 
 

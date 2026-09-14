@@ -26,6 +26,7 @@ from app.models.persistence import (
 from app.services.medical.ai.analysis_repository import (
     AnalysisRepository,
     external_processing_fingerprint,
+    _normalize_saved_report,
 )
 from app.services.medical.ai.analyzer import MedicalInsightAnalyzer
 from app.services.medical.ai.citation_validator import evidence_rows, validate_citations
@@ -209,6 +210,34 @@ def test_safety_validator_rejects_personalized_medication_questions(question):
 
     assert not validation.valid
     assert any("personalized medication" in error for error in validation.errors)
+
+
+def test_saved_v3_question_payload_uses_controlled_template():
+    payload = _normalize_saved_report(
+        {
+            "schema_version": "medical-insights-v3",
+            "language": "en",
+            "questions_for_professional": ["Uncited legacy question."],
+            "question_suggestions": [
+                {
+                    "id": "question_001",
+                    "question": "Is migalastat a good option for me?",
+                    "rationale": "The provider wrote this free-form rationale.",
+                    "category": "applicability",
+                    "evidence_ids": ["EVIDENCE_001"],
+                    "interpretation_type": "inference",
+                }
+            ],
+        },
+        "medical-insights-v3",
+    )
+
+    assert payload["questions_for_professional"] == []
+    assert payload["question_suggestions"][0]["topic"] == "study_population"
+    assert payload["question_suggestions"][0]["question"] == (
+        "Which people were included in this study, and who was not included?"
+    )
+    assert "migalastat" not in payload["question_suggestions"][0]["rationale"]
 
 
 def test_context_builder_reads_legacy_page_metadata_for_guidelines():

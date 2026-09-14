@@ -121,11 +121,22 @@ export type QuestionSuggestionCategory =
   | "monitoring_discussion"
   | "research_option";
 
+export type QuestionSuggestionTopic =
+  | "study_population"
+  | "study_design"
+  | "reported_result"
+  | "term_clarification"
+  | "study_limitation"
+  | "evidence_gap"
+  | "monitoring"
+  | "future_research";
+
 export interface MedicalQuestionSuggestion {
   id: string;
   question: string;
   rationale: string;
   category: QuestionSuggestionCategory;
+  topic?: QuestionSuggestionTopic;
   evidence_ids: string[];
   interpretation_type:
     | "direct_statement"

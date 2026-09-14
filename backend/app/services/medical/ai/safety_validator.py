@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 
 from app.services.medical.ai.models import MedicalInsightReport
+from app.services.medical.ai.question_templates import is_controlled_question
 
 
 @dataclass
@@ -230,11 +231,12 @@ def validate_safety(report: MedicalInsightReport) -> SafetyValidation:
         errors.append("report contains a personalized diagnosis")
     if _TREATMENT_COMMAND.search(text):
         errors.append("report contains a treatment or medication instruction")
-    if any(
-        _has_personalized_treatment_question(item.question)
-        for item in report.question_suggestions
-    ):
-        errors.append("question suggestions contain personalized medication guidance")
+    for item in report.question_suggestions:
+        if item.topic is not None:
+            if not is_controlled_question(item, report.language):
+                errors.append("question suggestions must use server-controlled templates")
+        elif _has_personalized_treatment_question(item.question):
+            errors.append("question suggestions contain personalized medication guidance")
     return SafetyValidation(valid=not errors, errors=errors)
 
 

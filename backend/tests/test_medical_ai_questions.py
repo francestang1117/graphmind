@@ -8,7 +8,6 @@ from pydantic import ValidationError
 from app.services.medical.ai.analyzer import MedicalInsightAnalyzer
 from app.services.medical.ai.citation_validator import evidence_rows, validate_citations
 from app.services.medical.ai.context_builder import AnalysisContext, EvidenceItem
-from app.services.medical.ai.exceptions import MedicalInsightValidationError
 from app.services.medical.ai.models import MedicalInsightReport, QuestionSuggestion
 from app.services.medical.ai.prompt_builder import build_prompt
 from app.services.medical.ai.provider import ExtractiveMedicalAIProvider
@@ -100,14 +99,17 @@ def test_question_suggestion_has_bounded_structured_fields():
         QuestionSuggestion.model_validate({**_question(), "evidence_ids": []})
     with pytest.raises(ValidationError):
         QuestionSuggestion.model_validate({**_question(), "category": "diagnosis"})
-    with pytest.raises(ValidationError):
-        QuestionSuggestion.model_validate({**_question(), "question": ""})
+    draft = QuestionSuggestion.model_validate(
+        {**_question(), "question": "", "rationale": ""}
+    )
+    assert draft.question == ""
+    assert draft.rationale == ""
     with pytest.raises(ValidationError):
         QuestionSuggestion.model_validate({**_question(), "question": "Q" * 501})
     with pytest.raises(ValidationError):
-        QuestionSuggestion.model_validate({**_question(), "rationale": ""})
-    with pytest.raises(ValidationError):
         QuestionSuggestion.model_validate({**_question(), "interpretation_type": "claim"})
+    with pytest.raises(ValidationError):
+        QuestionSuggestion.model_validate({**_question(), "topic": "personal_treatment"})
 
 
 def test_report_rejects_more_than_five_questions_and_keeps_v2_compatibility():
@@ -364,7 +366,7 @@ def test_analyzer_repairs_a_question_with_invalid_evidence():
     assert output.questions.valid
 
 
-def test_analyzer_rejects_personalized_medication_question_after_repair():
+def test_analyzer_replaces_free_form_question_with_controlled_template():
     unsafe = _report(
         _question(
             question="Is migalastat a good option for me?"
@@ -380,15 +382,38 @@ def test_analyzer_rejects_personalized_medication_question_after_repair():
             return unsafe
 
     provider = UnsafeProvider()
-    with pytest.raises(MedicalInsightValidationError):
-        MedicalInsightAnalyzer(provider=provider).run(
-            [{"id": "chunk-1", "text": "The study reports a result.", "section_type": "results"}],
-            title="Example paper",
-            document_kind="research_paper",
-            language="en",
-        )
+    output = MedicalInsightAnalyzer(provider=provider).run(
+        [{"id": "chunk-1", "text": "The study reports a result.", "section_type": "results"}],
+        title="Example paper",
+        document_kind="research_paper",
+        language="en",
+    )
 
-    assert provider.calls == 2
+    assert provider.calls == 1
+    suggestion = output.report.question_suggestions[0]
+    assert suggestion.topic == "study_population"
+    assert suggestion.question == "Which people were included in this study, and who was not included?"
+    assert "migalastat" not in suggestion.question
+    assert validate_safety(output.report).valid
+
+
+def test_analyzer_localizes_controlled_question_templates():
+    payload = _report(_question(question="A free-form question from the provider?")).model_dump()
+
+    class Provider(ExtractiveMedicalAIProvider):
+        def generate(self, prompt, context):
+            return payload
+
+    output = MedicalInsightAnalyzer(provider=Provider()).run(
+        [{"id": "chunk-1", "text": "研究纳入成年人。", "section_type": "population"}],
+        title="示例论文",
+        document_kind="research_paper",
+        language="zh-CN",
+    )
+
+    suggestion = output.report.question_suggestions[0]
+    assert suggestion.question == "这项研究纳入了哪些人，没有纳入哪些人？"
+    assert suggestion.rationale.startswith("原文描述了研究人群")
 
 
 def test_v3_normalization_drops_legacy_questions_from_a_provider_payload():
