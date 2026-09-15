@@ -39,7 +39,8 @@ Schema version: {schema_version}
 
 Rules:
 - Use only the supplied SOURCE EVIDENCE.
-- Cite source blocks with their exact Evidence IDs, such as EVIDENCE_003.
+- Cite report content with the exact source object that supports it. Evidence IDs
+  are assigned by the server after the source object is validated.
 - Every overview, finding, limitation, term explanation, and meaning statement
   needs at least one Evidence ID. If the source does not say something, omit it
   or state that it was not found; do not fill it from general knowledge.
@@ -54,12 +55,13 @@ Rules:
   a qualified healthcare professional. Each item must have a stable id, one of
   these categories (clarify_finding, applicability, study_limitation,
   evidence_gap, monitoring_discussion, research_option), a compatible topic,
-  and one to five exact Evidence IDs. Valid topics are study_population,
-  study_design, reported_result, term_clarification, study_limitation,
-  evidence_gap, monitoring, and future_research. The server creates the final
-  question and rationale from the category and topic, so return empty strings
-  for question and rationale. An empty list is correct when the supplied
-  evidence does not support a useful question.
+  and a source_kind/source_id pair naming the report object that supports the
+  topic. Valid source objects are study_methods.population or .design,
+  key_findings/<finding id>, medical_terms/<term>, limitations/<finding id>,
+  and future_research/<finding id>. Do not choose evidence_ids yourself;
+  return an empty evidence_ids list. The server creates the final question,
+  rationale, and evidence IDs after resolving the source object. An empty list
+  is correct when the supplied evidence does not support a useful question.
 - Questions must clarify the document, its applicability, limitations, evidence
   gaps, monitoring, or research options. Do not diagnose the reader, assume
   their symptoms or condition, prescribe or change treatment, recommend a dose,
@@ -78,5 +80,5 @@ Rules:
 - The coverage object is filled by the server. Return it with empty/default
   values rather than estimating document coverage yourself.
 - Safe question intent example (illustrative only; still return the complete report):
-  {{"question_suggestions":[{{"id":"question_001","question":"","rationale":"","category":"applicability","topic":"study_population","evidence_ids":["EVIDENCE_004"],"interpretation_type":"inference"}}],"questions_for_professional":[]}}
+  {{"question_suggestions":[{{"id":"question_001","question":"","rationale":"","category":"applicability","topic":"study_population","source_kind":"study_methods","source_id":"population","evidence_ids":[],"interpretation_type":"inference"}}],"questions_for_professional":[]}}
 - Return JSON only. Do not add Markdown fences or extra keys."""

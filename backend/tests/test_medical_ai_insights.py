@@ -216,7 +216,28 @@ def test_saved_v3_question_payload_uses_controlled_template():
     payload = _normalize_saved_report(
         {
             "schema_version": "medical-insights-v3",
+            "document_kind": "research_paper",
             "language": "en",
+            "overview": {
+                "title": "Example paper",
+                "summary": "The paper reports a result.",
+                "study_type": "Research paper",
+                "evidence_ids": ["EVIDENCE_001"],
+            },
+            "study_methods": {
+                "population": {
+                    "value": "The study included adults with the condition.",
+                    "support_status": "supported",
+                    "evidence_ids": ["EVIDENCE_001"],
+                }
+            },
+            "key_findings": [],
+            "limitations": [],
+            "medical_terms": [],
+            "what_it_means": [],
+            "what_it_does_not_mean": [],
+            "applicability": [],
+            "future_research": [],
             "questions_for_professional": ["Uncited legacy question."],
             "question_suggestions": [
                 {
@@ -224,7 +245,10 @@ def test_saved_v3_question_payload_uses_controlled_template():
                     "question": "Is migalastat a good option for me?",
                     "rationale": "The provider wrote this free-form rationale.",
                     "category": "applicability",
-                    "evidence_ids": ["EVIDENCE_001"],
+                    "topic": "study_population",
+                    "source_kind": "study_methods",
+                    "source_id": "population",
+                    "evidence_ids": ["EVIDENCE_WRONG"],
                     "interpretation_type": "inference",
                 }
             ],

@@ -37,6 +37,13 @@ QuestionSuggestionTopic = Literal[
     "monitoring",
     "future_research",
 ]
+QuestionSourceKind = Literal[
+    "study_methods",
+    "key_findings",
+    "medical_terms",
+    "limitations",
+    "future_research",
+]
 NOT_REPORTED_VALUE = "Not reported in the selected source evidence."
 
 
@@ -67,7 +74,7 @@ class MedicalTermExplanation(_StrictModel):
 
 
 class QuestionSuggestion(_StrictModel):
-    """A source-backed question draft normalized by the server before display."""
+    """A structured question intent bound to a report source object."""
 
     id: str = Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
     # Providers may leave these blank. V3 replaces them with a server-owned
@@ -76,7 +83,11 @@ class QuestionSuggestion(_StrictModel):
     rationale: str = Field(default="", max_length=1000)
     category: QuestionSuggestionCategory
     topic: QuestionSuggestionTopic | None = None
-    evidence_ids: list[str] = Field(min_length=1, max_length=5)
+    source_kind: QuestionSourceKind | None = None
+    source_id: str | None = Field(default=None, max_length=200)
+    # Kept for the final normalized report and old V2 rows. V3 providers must
+    # leave this empty; the server fills it from source_kind/source_id.
+    evidence_ids: list[str] = Field(default_factory=list, max_length=5)
     interpretation_type: InterpretationType = "inference"
 
 

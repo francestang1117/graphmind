@@ -147,18 +147,29 @@ class ExtractiveMedicalAIProvider:
                 _question_suggestion(
                     "question_001",
                     "applicability",
-                    population_item,
                     "study_population",
+                    source_kind="study_methods",
+                    source_id="population",
                 )
             )
         limitation_item = _first_of(evidence, "limitations", "limitation")
+        limitation_finding = next(
+            (
+                finding
+                for finding in limitations
+                if finding.get("evidence_ids", [None])[0]
+                == (limitation_item.evidence_id if limitation_item else None)
+            ),
+            None,
+        )
         if limitation_item:
             question_suggestions.append(
                 _question_suggestion(
                     "question_002",
                     "study_limitation",
-                    limitation_item,
                     "study_limitation",
+                    source_kind="limitations",
+                    source_id=(limitation_finding or {}).get("id", ""),
                 )
             )
 
@@ -173,7 +184,17 @@ class ExtractiveMedicalAIProvider:
                 "study_type": _study_type(context.document_kind),
                 "evidence_ids": [overview_item.evidence_id] if overview_item else [],
             },
-            "study_methods": {},
+            "study_methods": {
+                "population": (
+                    {
+                        "value": _summary(population_item.text),
+                        "support_status": "supported",
+                        "evidence_ids": [population_item.evidence_id],
+                    }
+                    if population_item
+                    else {}
+                ),
+            },
             "key_findings": findings,
             "limitations": limitations,
             "medical_terms": [],
@@ -410,8 +431,10 @@ def _finding(
 def _question_suggestion(
     suggestion_id: str,
     category: str,
-    item: EvidenceItem,
     topic: str,
+    *,
+    source_kind: str,
+    source_id: str,
 ) -> dict[str, Any]:
     return {
         "id": suggestion_id,
@@ -419,7 +442,9 @@ def _question_suggestion(
         "rationale": "",
         "category": category,
         "topic": topic,
-        "evidence_ids": [item.evidence_id],
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "evidence_ids": [],
         "interpretation_type": "inference",
     }
 

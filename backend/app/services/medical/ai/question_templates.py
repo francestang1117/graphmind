@@ -7,7 +7,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.services.medical.ai.models import QuestionSuggestion
+from app.services.medical.ai.context_builder import AnalysisContext
+from app.services.medical.ai.models import MedicalInsightReport, QuestionSuggestion
 
 
 _CATEGORY_TOPICS: dict[str, tuple[str, ...]] = {
@@ -20,6 +21,18 @@ _CATEGORY_TOPICS: dict[str, tuple[str, ...]] = {
 }
 _DEFAULT_TOPIC = {
     category: topics[0] for category, topics in _CATEGORY_TOPICS.items()
+}
+
+# These are report object paths, not evidence IDs. The provider may select a
+# source object, but it cannot select arbitrary chunks to cite.
+_TOPIC_SOURCES: dict[str, tuple[str, str | None]] = {
+    "study_population": ("study_methods", "population"),
+    "study_design": ("study_methods", "design"),
+    "reported_result": ("key_findings", None),
+    "term_clarification": ("medical_terms", None),
+    "study_limitation": ("limitations", None),
+    "monitoring": ("key_findings", None),
+    "future_research": ("future_research", None),
 }
 
 _TEMPLATES: dict[str, dict[str, tuple[str, str]]] = {
@@ -131,30 +144,51 @@ _TEMPLATES: dict[str, dict[str, tuple[str, str]]] = {
 def normalize_question_suggestions(
     suggestions: Iterable[QuestionSuggestion],
     language: str,
+    *,
+    report: MedicalInsightReport,
+    context: AnalysisContext | None = None,
 ) -> list[QuestionSuggestion]:
-    """Replace provider prose with a safe template selected by intent."""
+    """Bind provider intents to report fields and replace prose with a template."""
     language_key = _language_key(language)
     normalized: list[QuestionSuggestion] = []
-    for item in suggestions:
-        topic, question, rationale = _template_for(item, language_key)
+    errors: list[str] = []
+    for index, item in enumerate(suggestions, start=1):
+        try:
+            topic, question, rationale = _template_for(item, language_key)
+            source_kind, source_id, evidence_ids = _resolve_source(
+                item,
+                topic,
+                report,
+                context,
+            )
+        except QuestionTemplateError as exc:
+            errors.extend(f"question_suggestions[{index}]: {error}" for error in exc.errors)
+            continue
         normalized.append(
             item.model_copy(
                 update={
                     "topic": topic,
                     "question": question,
                     "rationale": rationale,
+                    "source_kind": source_kind,
+                    "source_id": source_id,
+                    "evidence_ids": evidence_ids,
                 }
             )
         )
+    if errors:
+        raise QuestionTemplateError(errors)
     return normalized
 
 
 def normalize_saved_question_payload(
     values: Any,
     language: str,
+    *,
+    report: MedicalInsightReport | None = None,
 ) -> list[dict[str, Any]]:
     """Sanitize V3 question rows before returning an old saved report."""
-    if not isinstance(values, list):
+    if not isinstance(values, list) or report is None:
         return []
     normalized: list[dict[str, Any]] = []
     for value in values:
@@ -162,10 +196,18 @@ def normalize_saved_question_payload(
             item = QuestionSuggestion.model_validate(value)
         except ValidationError:
             continue
-        normalized.extend(
-            item.model_dump(mode="json")
-            for item in normalize_question_suggestions([item], language)
-        )
+        try:
+            normalized.extend(
+                item.model_dump(mode="json")
+                for item in normalize_question_suggestions(
+                    [item],
+                    language,
+                    report=report,
+                )
+            )
+        except QuestionTemplateError:
+            # A saved row without a valid report source is not safe to show.
+            continue
     return normalized
 
 
@@ -173,7 +215,10 @@ def is_controlled_question(item: QuestionSuggestion, language: str) -> bool:
     """Check whether a persisted V3 suggestion uses its server template."""
     if not item.topic:
         return False
-    topic, question, rationale = _template_for(item, _language_key(language))
+    try:
+        topic, question, rationale = _template_for(item, _language_key(language))
+    except QuestionTemplateError:
+        return False
     return (
         item.topic == topic
         and item.question == question
@@ -186,12 +231,190 @@ def _template_for(
     language_key: str,
 ) -> tuple[str, str, str]:
     allowed = _CATEGORY_TOPICS.get(item.category, ())
-    topic = item.topic if item.topic in allowed else _DEFAULT_TOPIC.get(
-        item.category,
-        "reported_result",
-    )
+    if item.topic is None:
+        topic = _DEFAULT_TOPIC.get(item.category, "reported_result")
+    elif item.topic not in allowed:
+        raise QuestionTemplateError(
+            [f"topic {item.topic!r} is incompatible with category {item.category!r}"]
+        )
+    else:
+        topic = item.topic
     question, rationale = _TEMPLATES[language_key][topic]
     return topic, question, rationale
+
+
+class QuestionTemplateError(ValueError):
+    """A question intent cannot be safely bound to a report source."""
+
+    def __init__(self, errors: Iterable[str]):
+        self.errors = list(dict.fromkeys(str(error) for error in errors if error))
+        super().__init__("; ".join(self.errors) or "invalid question template")
+
+
+def question_source_errors(
+    item: QuestionSuggestion,
+    report: MedicalInsightReport,
+    context: AnalysisContext | None = None,
+) -> list[str]:
+    """Defensively verify the binding on a normalized question row."""
+    if item.topic is None and item.source_kind is None and item.source_id is None:
+        # Direct V2-style validation remains compatible. New V3 rows are
+        # normalized before validation and always carry a source selector.
+        return []
+    try:
+        topic, _question, _rationale = _template_for(item, _language_key(report.language))
+        _source_kind, _source_id, evidence_ids = _resolve_source(
+            item,
+            topic,
+            report,
+            context,
+        )
+    except QuestionTemplateError as exc:
+        return list(exc.errors)
+    if item.evidence_ids != evidence_ids:
+        return ["evidence_ids do not match the selected report source"]
+    return []
+
+
+def _resolve_source(
+    item: QuestionSuggestion,
+    topic: str,
+    report: MedicalInsightReport,
+    context: AnalysisContext | None = None,
+) -> tuple[str, str, list[str]]:
+    expected = _TOPIC_SOURCES.get(topic)
+    if expected is None:
+        raise QuestionTemplateError(
+            [f"topic {topic!r} has no directly citable report source"]
+        )
+    expected_kind, fixed_id = expected
+    source_kind = item.source_kind or (expected_kind if fixed_id else None)
+    source_id = item.source_id or fixed_id
+    if source_kind != expected_kind:
+        raise QuestionTemplateError(
+            [f"topic {topic!r} requires source_kind {expected_kind!r}"]
+        )
+    if not source_id:
+        raise QuestionTemplateError(
+            [f"topic {topic!r} requires a source_id for the selected report object"]
+        )
+
+    evidence_ids = _source_evidence_ids(report, source_kind, source_id)
+    if not evidence_ids:
+        raise QuestionTemplateError(
+            [f"source {source_kind}.{source_id} has no supported evidence"]
+        )
+    if context is not None:
+        invalid_sections = _invalid_source_sections(topic, evidence_ids, context)
+        if invalid_sections:
+            raise QuestionTemplateError(
+                [
+                    f"source {source_kind}.{source_id} points to incompatible "
+                    f"evidence section(s): {', '.join(invalid_sections)}"
+                ]
+            )
+    return source_kind, source_id, evidence_ids
+
+
+_SOURCE_SECTION_TYPES: dict[str, set[str]] = {
+    "study_population": {
+        "abstract",
+        "introduction",
+        "methods",
+        "participants",
+        "patients",
+        "population",
+        "scope",
+        "study_population",
+    },
+    "study_design": {
+        "abstract",
+        "introduction",
+        "methods",
+        "population",
+        "study_design",
+    },
+    "reported_result": {
+        "abstract",
+        "adverse_events",
+        "conclusion",
+        "discussion",
+        "evidence",
+        "outcomes",
+        "recommendations",
+        "result",
+        "results",
+    },
+    "monitoring": {
+        "abstract",
+        "adverse_events",
+        "conclusion",
+        "discussion",
+        "evidence",
+        "outcomes",
+        "recommendations",
+        "result",
+        "results",
+    },
+    "study_limitation": {"abstract", "discussion", "limitation", "limitations"},
+    "future_research": {"abstract", "discussion", "future_research", "limitations"},
+}
+
+
+def _invalid_source_sections(
+    topic: str,
+    evidence_ids: Iterable[str],
+    context: AnalysisContext,
+) -> list[str]:
+    allowed = _SOURCE_SECTION_TYPES.get(topic)
+    if not allowed:
+        return []
+    invalid: list[str] = []
+    for evidence_id in evidence_ids:
+        evidence = context.evidence_by_id.get(evidence_id)
+        if evidence is None:
+            continue
+        section_type = str(evidence.section_type or "unknown").strip().lower()
+        if section_type not in allowed and section_type not in invalid:
+            invalid.append(section_type)
+    return invalid
+
+
+def _source_evidence_ids(
+    report: MedicalInsightReport,
+    source_kind: str,
+    source_id: str,
+) -> list[str]:
+    if source_kind == "study_methods":
+        if source_id not in {"population", "design"}:
+            return []
+        attribute = getattr(report.study_methods, source_id)
+        if attribute.support_status == "not_reported":
+            return []
+        return _unique_ids(attribute.evidence_ids)
+
+    if source_kind == "key_findings":
+        return _finding_evidence_ids(report.key_findings, source_id)
+    if source_kind == "limitations":
+        return _finding_evidence_ids(report.limitations, source_id)
+    if source_kind == "future_research":
+        return _finding_evidence_ids(report.future_research, source_id)
+    if source_kind == "medical_terms":
+        for item in report.medical_terms:
+            if item.term == source_id:
+                return _unique_ids(item.evidence_ids)
+    return []
+
+
+def _finding_evidence_ids(items: Iterable[Any], source_id: str) -> list[str]:
+    for item in items:
+        if item.id == source_id:
+            return _unique_ids(item.evidence_ids)
+    return []
+
+
+def _unique_ids(values: Iterable[Any]) -> list[str]:
+    return list(dict.fromkeys(str(value) for value in values if str(value)))
 
 
 def _language_key(language: str) -> str:

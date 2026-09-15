@@ -20,7 +20,10 @@ from app.services.medical.ai.models import MedicalInsightReport
 from app.services.medical.ai.prompt_builder import build_prompt, build_repair_prompt
 from app.services.medical.ai.provider import MedicalAIProvider, get_provider
 from app.services.medical.ai.question_validator import QuestionValidation, validate_questions
-from app.services.medical.ai.question_templates import normalize_question_suggestions
+from app.services.medical.ai.question_templates import (
+    QuestionTemplateError,
+    normalize_question_suggestions,
+)
 from app.services.medical.ai.safety_validator import SafetyValidation, validate_safety
 from app.services.medical.ai.support_validator import SupportValidation, validate_support
 
@@ -99,11 +102,16 @@ class MedicalInsightAnalyzer:
         candidate = self._generate(prompt, context)
         report, errors = self._parse_report(candidate)
         if report is not None:
-            report = self._normalize_report(report, context)
-            validation = self._validate(report, context)
-            if validation is None:
-                return self._output(report, context)
-            errors.extend(validation)
+            try:
+                report = self._normalize_report(report, context)
+            except QuestionTemplateError as exc:
+                errors.extend(exc.errors)
+                report = None
+            if report is not None:
+                validation = self._validate(report, context)
+                if validation is None:
+                    return self._output(report, context)
+                errors.extend(validation)
 
         repair_prompt = build_repair_prompt(
             context,
@@ -114,11 +122,16 @@ class MedicalInsightAnalyzer:
         repaired = self._generate(repair_prompt, context)
         repaired_report, repair_errors = self._parse_report(repaired)
         if repaired_report is not None:
-            repaired_report = self._normalize_report(repaired_report, context)
-            validation = self._validate(repaired_report, context)
-            if validation is None:
-                return self._output(repaired_report, context)
-            repair_errors.extend(validation)
+            try:
+                repaired_report = self._normalize_report(repaired_report, context)
+            except QuestionTemplateError as exc:
+                repair_errors.extend(exc.errors)
+                repaired_report = None
+            if repaired_report is not None:
+                validation = self._validate(repaired_report, context)
+                if validation is None:
+                    return self._output(repaired_report, context)
+                repair_errors.extend(validation)
 
         raise MedicalInsightValidationError(
             "Medical insight output failed citation or safety validation.",
@@ -222,6 +235,8 @@ class MedicalInsightAnalyzer:
             updates["question_suggestions"] = normalize_question_suggestions(
                 report.question_suggestions,
                 context.language,
+                report=report,
+                context=context,
             )
             updates["questions_for_professional"] = []
         return report.model_copy(update=updates)

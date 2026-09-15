@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from app.services.medical.ai.context_builder import AnalysisContext
 from app.services.medical.ai.models import MedicalInsightReport
+from app.services.medical.ai.question_templates import question_source_errors
 
 
 _REFERENCE_SECTION_TYPES = {
@@ -68,6 +69,10 @@ def validate_questions(
             errors.append(f"{label} is not phrased as a question")
         if _is_vague(item.question):
             errors.append(f"{label} is too vague to discuss the source document")
+        errors.extend(
+            f"{label} {error}"
+            for error in question_source_errors(item, report, context=context)
+        )
         if not item.evidence_ids:
             errors.append(f"{label} has no evidence_ids")
             continue

@@ -12,6 +12,7 @@ from app.services.medical.ai.models import MedicalInsightReport, QuestionSuggest
 from app.services.medical.ai.prompt_builder import build_prompt
 from app.services.medical.ai.provider import ExtractiveMedicalAIProvider
 from app.services.medical.ai.question_validator import validate_questions
+from app.services.medical.ai.question_templates import QuestionTemplateError
 from app.services.medical.ai.safety_validator import validate_safety
 from app.services.medical.ai.support_validator import validate_support
 
@@ -71,6 +72,38 @@ def _report(*questions: dict) -> MedicalInsightReport:
     )
 
 
+def _structured_question(
+    *,
+    suggestion_id: str = "question_001",
+    topic: str = "study_population",
+    source_kind: str = "study_methods",
+    source_id: str = "population",
+    **overrides,
+) -> dict:
+    question = _question(suggestion_id=suggestion_id, **overrides)
+    question.update(
+        {
+            "topic": topic,
+            "source_kind": source_kind,
+            "source_id": source_id,
+            "evidence_ids": [],
+        }
+    )
+    return question
+
+
+def _structured_report(question: dict) -> MedicalInsightReport:
+    payload = _report(question).model_dump()
+    payload["study_methods"] = {
+        "population": {
+            "value": "The study included adults with the condition.",
+            "support_status": "supported",
+            "evidence_ids": ["EVIDENCE_001"],
+        }
+    }
+    return MedicalInsightReport.model_validate(payload)
+
+
 def _question(
     *,
     suggestion_id: str = "question_001",
@@ -95,8 +128,10 @@ def test_question_suggestion_has_bounded_structured_fields():
     assert item.category == "applicability"
     assert item.evidence_ids == ["EVIDENCE_001"]
 
-    with pytest.raises(ValidationError):
-        QuestionSuggestion.model_validate({**_question(), "evidence_ids": []})
+    draft_without_provider_evidence = QuestionSuggestion.model_validate(
+        {**_question(), "evidence_ids": []}
+    )
+    assert draft_without_provider_evidence.evidence_ids == []
     with pytest.raises(ValidationError):
         QuestionSuggestion.model_validate({**_question(), "category": "diagnosis"})
     draft = QuestionSuggestion.model_validate(
@@ -339,11 +374,91 @@ def test_extractive_provider_emits_cited_question_suggestions():
     assert output.report.schema_version == "medical-insights-v3"
     assert output.report.question_suggestions
     assert all(item.evidence_ids for item in output.report.question_suggestions)
+    assert all(item.source_kind and item.source_id for item in output.report.question_suggestions)
+
+
+def test_question_source_binding_rejects_an_existing_but_unrelated_evidence_id():
+    report = _structured_report(
+        _structured_question(
+            topic="study_population",
+            source_kind="study_methods",
+            source_id="population",
+        )
+    )
+    context = _context(
+        ("EVIDENCE_001", "results", "The study reported a result."),
+    )
+
+    validation = validate_questions(report, context)
+
+    assert not validation.valid
+    assert any("population" in error for error in validation.errors)
+
+
+def test_question_source_binding_resolves_report_object_evidence():
+    report = _structured_report(
+        _structured_question(
+            topic="study_population",
+            source_kind="study_methods",
+            source_id="population",
+        )
+    )
+    context = _context(
+        ("EVIDENCE_001", "population", "The study included adults with the condition."),
+    )
+
+    normalized = MedicalInsightAnalyzer(provider=ExtractiveMedicalAIProvider())._normalize_report(
+        report,
+        context,
+    )
+
+    question = normalized.question_suggestions[0]
+    assert question.evidence_ids == ["EVIDENCE_001"]
+    assert question.source_kind == "study_methods"
+    assert question.source_id == "population"
+
+
+def test_question_binding_replaces_provider_evidence_ids_with_source_evidence():
+    report = _structured_report(_structured_question())
+    payload = report.model_dump()
+    payload["question_suggestions"][0]["evidence_ids"] = ["EVIDENCE_UNRELATED"]
+    context = _context(
+        ("EVIDENCE_001", "population", "The study included adults with the condition."),
+    )
+
+    normalized = MedicalInsightAnalyzer(provider=ExtractiveMedicalAIProvider())._normalize_report(
+        MedicalInsightReport.model_validate(payload),
+        context,
+    )
+
+    assert normalized.question_suggestions[0].evidence_ids == ["EVIDENCE_001"]
+
+
+def test_question_binding_does_not_silently_replace_incompatible_topic():
+    report = _structured_report(
+        _structured_question(
+            category="applicability",
+            topic="future_research",
+            source_kind="future_research",
+            source_id="future_001",
+        )
+    )
+    context = _context(
+        ("EVIDENCE_001", "population", "The study included adults with the condition."),
+    )
+
+    with pytest.raises(QuestionTemplateError, match="incompatible"):
+        MedicalInsightAnalyzer(provider=ExtractiveMedicalAIProvider())._normalize_report(
+            report,
+            context,
+        )
 
 
 def test_analyzer_repairs_a_question_with_invalid_evidence():
-    invalid = _report(_question(evidence_ids=["EVIDENCE_UNKNOWN"])).model_dump()
-    valid = _report(_question()).model_dump()
+    invalid = _structured_report(
+        _structured_question(source_id="missing_population")
+    ).model_dump()
+    valid = _structured_report(_structured_question()).model_dump()
     provider = ExtractiveMedicalAIProvider()
 
     class RepairProvider(ExtractiveMedicalAIProvider):
@@ -356,7 +471,7 @@ def test_analyzer_repairs_a_question_with_invalid_evidence():
 
     repair_provider = RepairProvider()
     output = MedicalInsightAnalyzer(provider=repair_provider).run(
-        [{"id": "chunk-1", "text": "The study reports a result.", "section_type": "results"}],
+        [{"id": "chunk-1", "text": "The study included adults with the condition.", "section_type": "population"}],
         title="Example paper",
         document_kind="research_paper",
         language="en",
@@ -368,10 +483,15 @@ def test_analyzer_repairs_a_question_with_invalid_evidence():
 
 def test_analyzer_replaces_free_form_question_with_controlled_template():
     unsafe = _report(
-        _question(
-            question="Is migalastat a good option for me?"
-        )
+        _structured_question(question="Is migalastat a good option for me?")
     ).model_dump()
+    unsafe["study_methods"] = {
+        "population": {
+            "value": "The study included adults with the condition.",
+            "support_status": "supported",
+            "evidence_ids": ["EVIDENCE_001"],
+        }
+    }
 
     class UnsafeProvider(ExtractiveMedicalAIProvider):
         def __init__(self):
@@ -383,7 +503,7 @@ def test_analyzer_replaces_free_form_question_with_controlled_template():
 
     provider = UnsafeProvider()
     output = MedicalInsightAnalyzer(provider=provider).run(
-        [{"id": "chunk-1", "text": "The study reports a result.", "section_type": "results"}],
+        [{"id": "chunk-1", "text": "The study included adults with the condition.", "section_type": "population"}],
         title="Example paper",
         document_kind="research_paper",
         language="en",
@@ -398,7 +518,9 @@ def test_analyzer_replaces_free_form_question_with_controlled_template():
 
 
 def test_analyzer_localizes_controlled_question_templates():
-    payload = _report(_question(question="A free-form question from the provider?")).model_dump()
+    payload = _structured_report(
+        _structured_question(question="A free-form question from the provider?")
+    ).model_dump()
 
     class Provider(ExtractiveMedicalAIProvider):
         def generate(self, prompt, context):

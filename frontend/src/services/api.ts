@@ -131,12 +131,21 @@ export type QuestionSuggestionTopic =
   | "monitoring"
   | "future_research";
 
+export type QuestionSourceKind =
+  | "study_methods"
+  | "key_findings"
+  | "medical_terms"
+  | "limitations"
+  | "future_research";
+
 export interface MedicalQuestionSuggestion {
   id: string;
   question: string;
   rationale: string;
   category: QuestionSuggestionCategory;
   topic?: QuestionSuggestionTopic;
+  source_kind?: QuestionSourceKind;
+  source_id?: string;
   evidence_ids: string[];
   interpretation_type:
     | "direct_statement"
