@@ -46,3 +46,76 @@ jobs:
         env:
           GRAPHMIND_TEST_POSTGRES_URL: postgresql+psycopg://graphmind:graphmind@localhost:5432/graphmind_test
         run: python -m pytest -q
+
+  medical-eval:
+    name: Medical evaluation baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: python -m pip install -r requirements.txt
+
+      - name: Run evaluation tests
+        working-directory: backend
+        run: python -m pytest -q tests/test_medical_eval_*.py
+
+      - name: Run smoke evaluation
+        id: smoke
+        continue-on-error: true
+        working-directory: backend
+        run: |
+          mkdir -p reports
+          python scripts/run_medical_eval.py \
+            --suite smoke \
+            --json-output reports/medical-eval-smoke.json \
+            --markdown-output reports/medical-eval-smoke.md \
+            --fail-on-gate
+
+      - name: Run full evaluation
+        id: full
+        continue-on-error: true
+        working-directory: backend
+        run: |
+          mkdir -p reports
+          python scripts/run_medical_eval.py \
+            --suite full \
+            --json-output reports/medical-eval-full.json \
+            --markdown-output reports/medical-eval-full.md \
+            --fail-on-gate
+
+      - name: Publish evaluation summary
+        if: always()
+        working-directory: backend
+        run: |
+          for report in reports/*.md; do
+            if [ -f "$report" ]; then
+              cat "$report" >> "$GITHUB_STEP_SUMMARY"
+              printf '\n' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+      - name: Upload evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: medical-evaluation-reports
+          path: backend/reports
+          if-no-files-found: warn
+
+      - name: Enforce evaluation gates
+        if: always()
+        run: |
+          if [ "${{ steps.smoke.outcome }}" != "success" ] || [ "${{ steps.full.outcome }}" != "success" ]; then
+            echo "Medical evaluation hard gates failed."
+            exit 1
+          fi
