@@ -17,6 +17,7 @@ from app.core.errors import AppError
 from app.core.rate_limit import literature_limit
 from app.services.document_service import document_service
 from app.services.medical.literature.exceptions import LiteratureError
+from app.services.medical.literature.confirmation import confirm_literature_query
 from app.services.medical.literature.models import LiteratureQuery
 from app.services.medical.literature.pubmed_provider import PubMedProvider
 from app.services.medical.literature.query_builder import build_literature_query
@@ -211,27 +212,19 @@ def _require_confirmation(
     workspace_id: str,
 ) -> None:
     disclosure = _preview_payload(query, document_id, workspace_id)
-    if query.resolution_status != "ready":
+    try:
+        confirm_literature_query(
+            query,
+            external_search_confirmed=body.external_search_confirmed,
+            query_fingerprint=body.query_fingerprint,
+        )
+    except LiteratureError as exc:
         raise AppError(
-            "Choose a disease concept before starting the external search.",
-            code="literature_concept_confirmation_required",
+            str(exc),
+            code=exc.code,
             status_code=status.HTTP_409_CONFLICT,
             details=disclosure,
-        )
-    if not body.external_search_confirmed:
-        raise AppError(
-            "Confirm the PubMed query before starting the external search.",
-            code="external_search_confirmation_required",
-            status_code=status.HTTP_409_CONFLICT,
-            details=disclosure,
-        )
-    if body.query_fingerprint != query.query_hash:
-        raise AppError(
-            "The literature query changed. Review and confirm it again.",
-            code="external_search_query_changed",
-            status_code=status.HTTP_409_CONFLICT,
-            details=disclosure,
-        )
+        ) from exc
 
 
 def _enqueue(run_id: str, background_tasks: BackgroundTasks) -> None:

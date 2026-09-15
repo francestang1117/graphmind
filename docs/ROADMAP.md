@@ -21,13 +21,15 @@ Completed layers:
 - PR8: versioned local disease ontology with safe alias resolution and auditable source checksums
 - PR9: local finding-to-literature matching, abstract quote locations, and conservative study cards
 - PR11: evidence-backed questions for discussion with a healthcare professional
+- PR12: versioned offline medical evaluation cases, hard regression gates, and quality observations
 
 Next V2 layer:
 
 - add the workspace and paper workflow to the frontend
-- build a reviewed Chinese/English evaluation set and measure matching precision
+- manually evaluate the optional external provider on public, non-identifying papers
 - add durable question-list state only after the source-backed question flow is stable
 - compare multiple papers only after individual evidence remains traceable
+- expand ontology coverage and measure matcher performance at production scale
 
 ## Development Phases
 

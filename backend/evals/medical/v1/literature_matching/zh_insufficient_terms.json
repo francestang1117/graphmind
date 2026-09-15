@@ -1,0 +1,34 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_literature_insufficient_terms_001",
+  "suite": "literature_matching",
+  "language": "zh",
+  "tags": ["matching", "abstention"],
+  "review_status": "engineering_reviewed",
+  "fixtures": ["fixtures/pubmed/fabry.json"],
+  "input": {
+    "finding": {
+      "finding_id": "finding-empty",
+      "finding_type": "meaning",
+      "statement": "这是一条没有可检索术语的描述。",
+      "plain_explanation": "没有足够的匹配信息。",
+      "evidence_ids": ["EVIDENCE_001"],
+      "normalized_text": "这是一条没有可检索术语的描述",
+      "controlled_terms": [],
+      "condition_terms": [],
+      "biomedical_terms": [],
+      "keywords": [],
+      "phrases": [],
+      "condition_status": "unknown"
+    }
+  },
+  "expected": {
+    "match_status": "insufficient_terms",
+    "candidate_ids": [],
+    "relevant_article_ids": [],
+    "expected_abstention": true
+  },
+  "gate_fields": ["match_status", "candidate_ids"],
+  "rationale": "The matcher should abstain when a finding has no controlled condition or biomedical terms.",
+  "last_reviewed": "2026-09-15"
+}

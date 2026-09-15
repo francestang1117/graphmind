@@ -1,0 +1,36 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_literature_study_categories_001",
+  "suite": "literature_matching",
+  "language": "en",
+  "tags": ["matching", "study_type"],
+  "review_status": "engineering_reviewed",
+  "fixtures": ["fixtures/pubmed/study_types.json"],
+  "input": {
+    "finding": {
+      "finding_id": "finding-treatment",
+      "finding_type": "key_finding",
+      "statement": "Fabry disease treatment outcomes were reported.",
+      "plain_explanation": "The result concerns a treatment outcome.",
+      "evidence_ids": ["EVIDENCE_001"],
+      "normalized_text": "fabry disease treatment outcomes were reported",
+      "controlled_terms": ["Fabry disease"],
+      "condition_terms": ["Fabry disease"],
+      "biomedical_terms": [],
+      "keywords": ["treatment"],
+      "phrases": ["treatment study"],
+      "condition_status": "matched"
+    }
+  },
+  "expected": {
+    "match_status": "matched",
+    "candidate_ids": ["article-2001", "article-2002", "article-2003"],
+    "study_categories": ["randomized_controlled_trial", "clinical_trial_phase_4", "preclinical"],
+    "development_phases": ["phase_2", "phase_4", "not_reported"],
+    "relevant_article_ids": ["article-2001"],
+    "expected_abstention": false
+  },
+  "gate_fields": ["match_status", "candidate_ids", "study_categories", "development_phases"],
+  "rationale": "Study design and phase labels must remain structured metadata rather than being inferred from a summary.",
+  "last_reviewed": "2026-09-15"
+}

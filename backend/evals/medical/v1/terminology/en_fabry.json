@@ -1,0 +1,24 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_terminology_fabry_001",
+  "suite": "terminology",
+  "language": "en",
+  "tags": ["terminology", "alias", "smoke"],
+  "review_status": "engineering_reviewed",
+  "input": {"query": "What is known about Fabry disease?", "external_search_confirmed": true, "query_fingerprint": "e007f4235b7158eb286d68d5d59c2a977527ba978653edff91ff74ccd610c3d6"},
+  "expected": {
+    "resolution_status": "ready",
+    "external_query_allowed": true,
+    "external_query_count": 1,
+    "repository_create_count": 1,
+    "queue_count": 1,
+    "provider_search_count": 1,
+    "normalized_terms": ["Fabry disease"],
+    "concept_ids": ["mesh:D000795"],
+    "error_code": null,
+    "raw_fragments_in_query": []
+  },
+  "gate_fields": ["resolution_status", "external_query_allowed", "external_query_count", "repository_create_count", "queue_count", "provider_search_count", "normalized_terms", "concept_ids", "error_code", "raw_fragments_in_query"],
+  "rationale": "A known English disease alias may be normalized locally before a query is released.",
+  "last_reviewed": "2026-09-15"
+}

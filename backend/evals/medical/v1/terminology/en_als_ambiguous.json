@@ -1,0 +1,24 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_terminology_als_ambiguous_001",
+  "suite": "terminology",
+  "language": "en",
+  "tags": ["terminology", "abbreviation", "privacy", "smoke"],
+  "review_status": "engineering_reviewed",
+  "input": {"query": "What is known about ALS?", "external_search_confirmed": true, "query_fingerprint": null},
+  "expected": {
+    "resolution_status": "needs_confirmation",
+    "external_query_allowed": false,
+    "external_query_count": 0,
+    "repository_create_count": 0,
+    "queue_count": 0,
+    "provider_search_count": 0,
+    "normalized_terms": [],
+    "concept_ids": [],
+    "error_code": "literature_concept_confirmation_required",
+    "raw_fragments_in_query": []
+  },
+  "gate_fields": ["resolution_status", "external_query_allowed", "external_query_count", "repository_create_count", "queue_count", "provider_search_count", "normalized_terms", "concept_ids", "error_code"],
+  "rationale": "The ambiguous abbreviation ALS must not reach an external provider before a user selects a concept.",
+  "last_reviewed": "2026-09-15"
+}

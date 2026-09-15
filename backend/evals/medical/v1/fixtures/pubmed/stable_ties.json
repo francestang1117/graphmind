@@ -1,0 +1,28 @@
+[
+  {
+    "id": "article-3002",
+    "external_id": "3002",
+    "title": "Fabry disease biomarker study B",
+    "abstract": "Fabry disease biomarker results were reported.",
+    "journal": "Synthetic Biomarker Journal",
+    "publication_year": 2024,
+    "publication_types": ["Observational Study"],
+    "mesh_terms": ["Fabry Disease"],
+    "retraction_status": "normal",
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/3002/",
+    "provider_rank": 1
+  },
+  {
+    "id": "article-3001",
+    "external_id": "3001",
+    "title": "Fabry disease biomarker study A",
+    "abstract": "Fabry disease biomarker results were reported.",
+    "journal": "Synthetic Biomarker Journal",
+    "publication_year": 2024,
+    "publication_types": ["Observational Study"],
+    "mesh_terms": ["Fabry Disease"],
+    "retraction_status": "normal",
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/3001/",
+    "provider_rank": 1
+  }
+]

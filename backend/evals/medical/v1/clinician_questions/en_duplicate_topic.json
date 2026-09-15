@@ -1,0 +1,31 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_questions_duplicate_topic_001",
+  "suite": "clinician_questions",
+  "language": "en",
+  "tags": ["questions", "deduplication", "determinism"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "title": "Synthetic two-finding study",
+    "document_kind": "research_paper",
+    "language": "en",
+    "chunks": [{"id": "chunk-1", "text": "The first outcome was reported.", "section_type": "results"}, {"id": "chunk-2", "text": "The second outcome was reported.", "section_type": "results"}],
+    "report": {
+      "document_kind": "research_paper",
+      "language": "en",
+      "overview": {"title": "Synthetic two-finding study", "summary": "Two findings were reported.", "evidence_ids": ["EVIDENCE_001"]},
+      "key_findings": [
+        {"id": "finding_001", "statement": "The first outcome was reported.", "plain_explanation": "First result.", "evidence_ids": ["EVIDENCE_001"]},
+        {"id": "finding_002", "statement": "The second outcome was reported.", "plain_explanation": "Second result.", "evidence_ids": ["EVIDENCE_002"]}
+      ],
+      "question_suggestions": [
+        {"id": "question_001", "question": "First provider question?", "rationale": "First provider rationale.", "category": "clarify_finding", "topic": "reported_result", "source_kind": "key_findings", "source_id": "finding_001", "evidence_ids": []},
+        {"id": "question_002", "question": "Second provider question?", "rationale": "Second provider rationale.", "category": "clarify_finding", "topic": "reported_result", "source_kind": "key_findings", "source_id": "finding_002", "evidence_ids": []}
+      ]
+    }
+  },
+  "expected": {"report_valid": true, "normalization_valid": true, "all_bound": true, "question_count": 1, "normalized_topics": ["reported_result"], "source_ids": ["finding_001"], "evidence_ids": [["EVIDENCE_001"]], "questions_valid": true, "citation_valid": true, "support_valid": true, "safety_valid": true},
+  "gate_fields": ["report_valid", "normalization_valid", "all_bound", "question_count", "normalized_topics", "source_ids", "evidence_ids", "questions_valid", "citation_valid", "support_valid", "safety_valid"],
+  "rationale": "Two valid sources for the same topic must produce one stable question instead of a repair loop.",
+  "last_reviewed": "2026-09-15"
+}
