@@ -5,6 +5,9 @@ search, graph construction, chat, persistence, rate limiting, virus scanning,
 WebSocket progress, medical document analysis, citation validation, safety
 boundaries, the PubMed literature-search boundary, and local finding-to-literature
 matching with conservative study cards.
+It also includes a versioned, offline medical evaluation baseline covering
+terminology privacy, insight safety, literature matching, and clinician-question
+evidence binding.
 
 ## Quick Start
 
@@ -85,6 +88,46 @@ or unsafe.
 | `backend/tests/test_literature_search_task.py` | Worker claim, provider success, and safe failure persistence |
 | `backend/tests/test_literature_evidence_matching.py` | Evidence-backed finding extraction, deterministic local matching, abstract offsets, study cards, scope, idempotence, and deletion cleanup |
 | `backend/tests/test_config.py` | Runtime environment, authentication, and JWT secret safety guards |
+| `backend/tests/test_medical_eval_loader.py` | Strict dataset schema, path, fixture, balance, and PII checks |
+| `backend/tests/test_medical_eval_metrics.py` | Deterministic Precision/Recall/MRR and aggregate metric helpers |
+| `backend/tests/test_medical_eval_runner.py` | Full/smoke execution, hard gates, and byte-stable reports |
+| `backend/tests/test_medical_eval_regressions.py` | High-value privacy, safety, abstention, and preclinical classification regressions |
+
+## Offline Medical Evaluation Baseline
+
+The repository ships a versioned synthetic dataset under
+`backend/evals/medical/v1`. It currently contains 33 cases across four suites,
+with at least 16 English and 16 Chinese cases. The runner is filesystem-only:
+it does not call PubMed, OpenAI, or any other external service.
+
+From the project root:
+
+```bash
+PYTHONPATH=backend .venv/bin/python backend/scripts/run_medical_eval.py \
+  --suite smoke --fail-on-gate
+
+PYTHONPATH=backend .venv/bin/python backend/scripts/run_medical_eval.py \
+  --suite full \
+  --json-output /tmp/medical-eval.json \
+  --markdown-output /tmp/medical-eval.md \
+  --fail-on-gate
+```
+
+The command returns exit code `0` when the selected hard gates pass, `1` when
+`--fail-on-gate` is set and a gate fails, and `2` when the dataset is invalid.
+Hard gates cover privacy leaks, unsafe medical wording, invalid or unbound
+evidence, safe abstention, study-type boundaries, and deterministic matching
+behavior. Precision@3, Recall@5, MRR, and expected-behavior rates are reported
+as observations only; they are not clinical-quality claims or release
+thresholds.
+
+Every case must use synthetic or public non-identifying text, declare its
+rationale and review status, and keep fixtures local. When adding a case,
+update `manifest.json`, run the loader and runner tests, and review both JSON
+and Markdown output. Bump the dataset version when the case meaning or
+expected behavior changes. Do not weaken a production validator merely to
+make a case pass; a changed contract requires an explicit review and a new
+dataset version.
 
 ## Running Specific Tests
 
