@@ -12,7 +12,12 @@ from app.services.medical.ai.models import MedicalInsightReport, QuestionSuggest
 from app.services.medical.ai.prompt_builder import build_prompt
 from app.services.medical.ai.provider import ExtractiveMedicalAIProvider
 from app.services.medical.ai.question_validator import validate_questions
-from app.services.medical.ai.question_templates import QuestionTemplateError
+from app.services.medical.ai.question_templates import (
+    QuestionTemplateError,
+    _CATEGORY_TOPICS,
+    _TEMPLATES,
+    _TOPIC_SOURCES,
+)
 from app.services.medical.ai.safety_validator import validate_safety
 from app.services.medical.ai.support_validator import validate_support
 
@@ -145,6 +150,20 @@ def test_question_suggestion_has_bounded_structured_fields():
         QuestionSuggestion.model_validate({**_question(), "interpretation_type": "claim"})
     with pytest.raises(ValidationError):
         QuestionSuggestion.model_validate({**_question(), "topic": "personal_treatment"})
+    with pytest.raises(ValidationError):
+        QuestionSuggestion.model_validate({**_question(), "topic": "evidence_gap"})
+    with pytest.raises(ValidationError):
+        QuestionSuggestion.model_validate({**_question(), "category": "evidence_gap"})
+
+
+def test_every_advertised_question_topic_has_a_resolvable_source():
+    advertised_topics = {
+        topic for topics in _CATEGORY_TOPICS.values() for topic in topics
+    }
+
+    assert advertised_topics
+    assert advertised_topics <= set(_TOPIC_SOURCES)
+    assert all(advertised_topics <= set(templates) for templates in _TEMPLATES.values())
 
 
 def test_report_rejects_more_than_five_questions_and_keeps_v2_compatibility():
@@ -432,6 +451,34 @@ def test_question_binding_replaces_provider_evidence_ids_with_source_evidence():
     )
 
     assert normalized.question_suggestions[0].evidence_ids == ["EVIDENCE_001"]
+
+
+def test_question_binding_limits_source_evidence_to_five_ids():
+    report = _structured_report(
+        _structured_question(
+            category="clarify_finding",
+            topic="reported_result",
+            source_kind="key_findings",
+            source_id="finding_001",
+        )
+    )
+    payload = report.model_dump()
+    evidence_ids = [f"EVIDENCE_{index:03d}" for index in range(1, 8)]
+    payload["key_findings"][0]["evidence_ids"] = evidence_ids
+    report = MedicalInsightReport.model_validate(payload)
+    context = _context(
+        *(
+            (evidence_id, "results", f"The study reported result {index}.")
+            for index, evidence_id in enumerate(evidence_ids, start=1)
+        )
+    )
+
+    normalized = MedicalInsightAnalyzer(provider=ExtractiveMedicalAIProvider())._normalize_report(
+        report,
+        context,
+    )
+
+    assert normalized.question_suggestions[0].evidence_ids == evidence_ids[:5]
 
 
 def test_question_binding_does_not_silently_replace_incompatible_topic():

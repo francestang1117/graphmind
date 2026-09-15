@@ -15,7 +15,6 @@ _CATEGORY_TOPICS: dict[str, tuple[str, ...]] = {
     "clarify_finding": ("reported_result", "term_clarification"),
     "applicability": ("study_population", "study_design"),
     "study_limitation": ("study_limitation",),
-    "evidence_gap": ("evidence_gap",),
     "monitoring_discussion": ("monitoring",),
     "research_option": ("future_research",),
 }
@@ -57,10 +56,6 @@ _TEMPLATES: dict[str, dict[str, tuple[str, str]]] = {
             "What limitation should I keep in mind when interpreting these findings?",
             "The source describes a limitation, so a healthcare professional can help explain how it affects interpretation.",
         ),
-        "evidence_gap": (
-            "What important information was not reported in the available evidence?",
-            "The source may leave information unreported, so a healthcare professional can help identify what still needs clarification.",
-        ),
         "monitoring": (
             "Which outcomes or safety signals did the study monitor?",
             "The source describes monitored outcomes or safety signals, so a healthcare professional can help explain their meaning.",
@@ -91,10 +86,6 @@ _TEMPLATES: dict[str, dict[str, tuple[str, str]]] = {
             "解读这些结果时需要注意哪些局限？",
             "原文描述了研究局限，专业人员可以帮助解释它对结果解读的影响。",
         ),
-        "evidence_gap": (
-            "现有证据没有报告哪些重要信息？",
-            "原文可能没有报告部分信息，专业人员可以帮助确认哪些问题仍需澄清。",
-        ),
         "monitoring": (
             "研究监测了哪些结果或安全性信号？",
             "原文描述了监测的结果或安全性信号，专业人员可以帮助解释其含义。",
@@ -124,10 +115,6 @@ _TEMPLATES: dict[str, dict[str, tuple[str, str]]] = {
         "study_limitation": (
             "この結果を解釈するとき、どのような限界に注意すべきですか？",
             "原文は研究の限界を説明しているため、解釈への影響を専門家に確認できます。",
-        ),
-        "evidence_gap": (
-            "利用できる証拠で報告されていない重要な情報は何ですか？",
-            "原文に報告されていない情報がある可能性があるため、残る疑問を専門家に確認できます。",
         ),
         "monitoring": (
             "研究ではどのような結果や安全性の指標を監視しましたか？",
@@ -299,7 +286,9 @@ def _resolve_source(
             [f"topic {topic!r} requires a source_id for the selected report object"]
         )
 
-    evidence_ids = _source_evidence_ids(report, source_kind, source_id)
+    # QuestionSuggestion has a five-citation limit. Keep the binding
+    # deterministic when a report field contains a broader citation set.
+    evidence_ids = _source_evidence_ids(report, source_kind, source_id)[:5]
     if not evidence_ids:
         raise QuestionTemplateError(
             [f"source {source_kind}.{source_id} has no supported evidence"]

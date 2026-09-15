@@ -117,7 +117,6 @@ export type QuestionSuggestionCategory =
   | "clarify_finding"
   | "applicability"
   | "study_limitation"
-  | "evidence_gap"
   | "monitoring_discussion"
   | "research_option";
 
@@ -127,7 +126,6 @@ export type QuestionSuggestionTopic =
   | "reported_result"
   | "term_clarification"
   | "study_limitation"
-  | "evidence_gap"
   | "monitoring"
   | "future_research";
 

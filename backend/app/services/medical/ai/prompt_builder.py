@@ -54,7 +54,7 @@ Rules:
 - Return zero to five question_suggestions for a general reader to discuss with
   a qualified healthcare professional. Each item must have a stable id, one of
   these categories (clarify_finding, applicability, study_limitation,
-  evidence_gap, monitoring_discussion, research_option), a compatible topic,
+  monitoring_discussion, research_option), a compatible topic,
   and a source_kind/source_id pair naming the report object that supports the
   topic. Valid source objects are study_methods.population or .design,
   key_findings/<finding id>, medical_terms/<term>, limitations/<finding id>,
@@ -62,8 +62,8 @@ Rules:
   return an empty evidence_ids list. The server creates the final question,
   rationale, and evidence IDs after resolving the source object. An empty list
   is correct when the supplied evidence does not support a useful question.
-- Questions must clarify the document, its applicability, limitations, evidence
-  gaps, monitoring, or research options. Do not diagnose the reader, assume
+- Questions must clarify the document, its applicability, limitations,
+  monitoring, or research options. Do not diagnose the reader, assume
   their symptoms or condition, prescribe or change treatment, recommend a dose,
   or tell them to seek emergency care. Return questions in
   question_suggestions and leave legacy questions_for_professional as an empty

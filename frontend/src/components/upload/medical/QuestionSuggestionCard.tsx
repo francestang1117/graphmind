@@ -9,7 +9,6 @@ const CATEGORY_LABELS: Record<string, string> = {
   clarify_finding: "Helps clarify the finding",
   applicability: "Applicability",
   study_limitation: "Study limitation",
-  evidence_gap: "Not yet answered",
   monitoring_discussion: "Monitoring discussion",
   research_option: "Research direction",
 };
