@@ -75,7 +75,7 @@ jobs:
         working-directory: backend
         run: |
           mkdir -p reports
-          python scripts/run_medical_eval.py \
+          PYTHONPATH=. python scripts/run_medical_eval.py \
             --suite smoke \
             --json-output reports/medical-eval-smoke.json \
             --markdown-output reports/medical-eval-smoke.md \
@@ -87,7 +87,7 @@ jobs:
         working-directory: backend
         run: |
           mkdir -p reports
-          python scripts/run_medical_eval.py \
+          PYTHONPATH=. python scripts/run_medical_eval.py \
             --suite full \
             --json-output reports/medical-eval-full.json \
             --markdown-output reports/medical-eval-full.md \
