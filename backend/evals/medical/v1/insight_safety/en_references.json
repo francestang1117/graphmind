@@ -1,0 +1,23 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_insight_references_001",
+  "suite": "insight_safety",
+  "language": "en",
+  "tags": ["citation", "references"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "title": "Synthetic reference section",
+    "document_kind": "research_paper",
+    "language": "en",
+    "chunks": [{"id": "chunk-1", "text": "Fabry disease is discussed in a cited article.", "section_type": "references"}],
+    "report": {
+      "document_kind": "research_paper",
+      "language": "en",
+      "overview": {"title": "Synthetic reference section", "summary": "The references report that Fabry disease is common.", "evidence_ids": ["EVIDENCE_001"]}
+    }
+  },
+  "expected": {"report_valid": true, "citation_valid": false, "support_valid": true, "safety_valid": true, "questions_valid": true},
+  "gate_fields": ["report_valid", "citation_valid", "support_valid", "safety_valid", "questions_valid"],
+  "rationale": "Reference-list text must not be accepted as primary evidence for a report claim.",
+  "last_reviewed": "2026-09-15"
+}

@@ -1,0 +1,35 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_literature_preclinical_card_001",
+  "suite": "literature_matching",
+  "language": "zh",
+  "tags": ["matching", "preclinical", "safety"],
+  "review_status": "engineering_reviewed",
+  "fixtures": ["fixtures/pubmed/study_types.json"],
+  "input": {
+    "finding": {
+      "finding_id": "finding-mouse",
+      "finding_type": "key_finding",
+      "statement": "法布雷病小鼠模型中的结果值得关注。",
+      "plain_explanation": "这是一项动物模型研究。",
+      "evidence_ids": ["EVIDENCE_001"],
+      "normalized_text": "法布雷病小鼠模型中的结果值得关注",
+      "controlled_terms": ["Fabry disease"],
+      "condition_terms": ["Fabry disease"],
+      "biomedical_terms": [],
+      "keywords": ["mouse"],
+      "phrases": ["mouse model"],
+      "condition_status": "matched"
+    }
+  },
+  "expected": {
+    "match_status": "matched",
+    "candidate_ids": ["article-2003", "article-2001", "article-2002"],
+    "study_categories": ["preclinical", "randomized_controlled_trial", "clinical_trial_phase_4"],
+    "relevant_article_ids": ["article-2003"],
+    "expected_abstention": false
+  },
+  "gate_fields": ["match_status", "candidate_ids", "study_categories"],
+  "rationale": "A preclinical article may be relevant, but its study category must stay visibly distinct from human treatment evidence.",
+  "last_reviewed": "2026-09-15"
+}

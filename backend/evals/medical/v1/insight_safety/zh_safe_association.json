@@ -1,0 +1,23 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_insight_safe_association_002",
+  "suite": "insight_safety",
+  "language": "zh",
+  "tags": ["safety", "association", "bilingual"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "title": "合成相关性研究",
+    "document_kind": "research_paper",
+    "language": "zh",
+    "chunks": [{"id": "chunk-1", "text": "该暴露因素与结局相关。", "section_type": "results"}],
+    "report": {
+      "document_kind": "research_paper",
+      "language": "zh",
+      "overview": {"title": "合成相关性研究", "summary": "研究报告该暴露因素与结局相关。", "evidence_ids": ["EVIDENCE_001"]}
+    }
+  },
+  "expected": {"report_valid": true, "citation_valid": true, "support_valid": true, "safety_valid": true, "questions_valid": true},
+  "gate_fields": ["report_valid", "citation_valid", "support_valid", "safety_valid", "questions_valid"],
+  "rationale": "A cautious Chinese association statement should remain distinct from a causal claim.",
+  "last_reviewed": "2026-09-15"
+}

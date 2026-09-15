@@ -1,0 +1,41 @@
+[
+  {
+    "id": "article-2001",
+    "external_id": "2001",
+    "title": "Fabry disease randomized treatment study",
+    "abstract": "Fabry disease was studied in adults receiving a treatment.",
+    "journal": "Synthetic Clinical Journal",
+    "publication_year": 2024,
+    "publication_types": ["Randomized Controlled Trial", "Clinical Trial", "Phase II"],
+    "mesh_terms": ["Fabry Disease"],
+    "retraction_status": "normal",
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/2001/",
+    "provider_rank": 1
+  },
+  {
+    "id": "article-2002",
+    "external_id": "2002",
+    "title": "Fabry disease phase four follow-up",
+    "abstract": "Fabry disease participants were followed after treatment.",
+    "journal": "Synthetic Clinical Journal",
+    "publication_year": 2023,
+    "publication_types": ["Clinical Trial", "Phase IV"],
+    "mesh_terms": ["Fabry Disease"],
+    "retraction_status": "normal",
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/2002/",
+    "provider_rank": 2
+  },
+  {
+    "id": "article-2003",
+    "external_id": "2003",
+    "title": "Fabry disease mouse model study",
+    "abstract": "A mouse model was used to study Fabry disease biology.",
+    "journal": "Synthetic Preclinical Journal",
+    "publication_year": 2022,
+    "publication_types": ["Animal Experimentation", "Preclinical Study"],
+    "mesh_terms": ["Fabry Disease"],
+    "retraction_status": "normal",
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/2003/",
+    "provider_rank": 3
+  }
+]

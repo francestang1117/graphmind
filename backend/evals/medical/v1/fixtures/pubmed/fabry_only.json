@@ -1,0 +1,41 @@
+[
+  {
+    "id": "article-1001",
+    "external_id": "1001",
+    "title": "Fabry disease and migalastat treatment outcomes",
+    "abstract": "Fabry disease patients received migalastat. Proteinuria was reduced after treatment.",
+    "journal": "Synthetic Journal of Rare Diseases",
+    "publication_year": 2024,
+    "publication_types": ["Randomized Controlled Trial"],
+    "mesh_terms": ["Fabry Disease"],
+    "retraction_status": "normal",
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/1001/",
+    "provider_rank": 1
+  },
+  {
+    "id": "article-1002",
+    "external_id": "1002",
+    "title": "Fabry disease natural history",
+    "abstract": "Fabry disease was followed in a registry of affected adults.",
+    "journal": "Synthetic Journal of Rare Diseases",
+    "publication_year": 2023,
+    "publication_types": ["Observational Study"],
+    "mesh_terms": ["Fabry Disease"],
+    "retraction_status": "normal",
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/1002/",
+    "provider_rank": 2
+  },
+  {
+    "id": "article-1004",
+    "external_id": "1004",
+    "title": "Fabry disease treatment retracted report",
+    "abstract": "Fabry disease and treatment were described in a retracted report.",
+    "journal": "Synthetic Journal of Rare Diseases",
+    "publication_year": 2022,
+    "publication_types": ["Clinical Trial"],
+    "mesh_terms": ["Fabry Disease"],
+    "retraction_status": "retracted",
+    "source_url": "https://pubmed.ncbi.nlm.nih.gov/1004/",
+    "provider_rank": 4
+  }
+]

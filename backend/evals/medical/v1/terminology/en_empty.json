@@ -1,0 +1,21 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_terminology_empty_001",
+  "suite": "terminology",
+  "language": "en",
+  "tags": ["terminology", "empty", "privacy"],
+  "review_status": "engineering_reviewed",
+  "input": {"query": ""},
+  "expected": {
+    "resolution_status": "rejected",
+    "external_query_allowed": false,
+    "external_query_count": 0,
+    "normalized_terms": [],
+    "concept_ids": [],
+    "error_code": "literature_question_required",
+    "raw_fragments_in_query": []
+  },
+  "gate_fields": ["resolution_status", "external_query_allowed", "external_query_count", "error_code"],
+  "rationale": "An empty question cannot produce a safe external query.",
+  "last_reviewed": "2026-09-15"
+}
