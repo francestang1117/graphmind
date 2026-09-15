@@ -396,6 +396,57 @@ def test_extractive_provider_emits_cited_question_suggestions():
     assert all(item.source_kind and item.source_id for item in output.report.question_suggestions)
 
 
+def test_analyzer_deduplicates_multiple_sources_for_same_topic():
+    first = _structured_question(
+        category="clarify_finding",
+        topic="reported_result",
+        source_kind="key_findings",
+        source_id="finding_001",
+    )
+    second = _structured_question(
+        suggestion_id="question_002",
+        category="clarify_finding",
+        topic="reported_result",
+        source_kind="key_findings",
+        source_id="finding_002",
+    )
+    payload = _structured_report(first).model_dump()
+    payload["question_suggestions"] = [first, second]
+    payload["key_findings"].append(
+        {
+            "id": "finding_002",
+            "statement": "The paper reports another result.",
+            "plain_explanation": "This is another reported finding.",
+            "evidence_ids": ["EVIDENCE_002"],
+            "evidence_level": "reported_in_document",
+            "interpretation_type": "direct_statement",
+        }
+    )
+
+    class Provider(ExtractiveMedicalAIProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, prompt, context):
+            self.calls += 1
+            return payload
+
+    provider = Provider()
+    output = MedicalInsightAnalyzer(provider=provider).run(
+        [
+            {"id": "chunk-1", "text": "The study reported result one.", "section_type": "results"},
+            {"id": "chunk-2", "text": "The study reported result two.", "section_type": "results"},
+        ],
+        title="Example paper",
+        document_kind="research_paper",
+        language="en",
+    )
+
+    assert provider.calls == 1
+    assert len(output.report.question_suggestions) == 1
+    assert output.report.question_suggestions[0].source_id == "finding_001"
+
+
 def test_question_source_binding_rejects_an_existing_but_unrelated_evidence_id():
     report = _structured_report(
         _structured_question(
@@ -611,3 +662,4 @@ def test_prompt_describes_structured_questions():
     assert "question_suggestions" in prompt
     assert "healthcare professional" in prompt
     assert "questions_for_professional" in prompt
+    assert "at most one question_suggestion for each topic" in prompt

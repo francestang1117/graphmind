@@ -56,7 +56,8 @@ Rules:
   these categories (clarify_finding, applicability, study_limitation,
   monitoring_discussion, research_option), a compatible topic,
   and a source_kind/source_id pair naming the report object that supports the
-  topic. Valid source objects are study_methods.population or .design,
+  topic. Return at most one question_suggestion for each topic. Valid source
+  objects are study_methods.population or .design,
   key_findings/<finding id>, medical_terms/<term>, limitations/<finding id>,
   and future_research/<finding id>. Do not choose evidence_ids yourself;
   return an empty evidence_ids list. The server creates the final question,

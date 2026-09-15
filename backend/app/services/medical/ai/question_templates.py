@@ -139,6 +139,7 @@ def normalize_question_suggestions(
     language_key = _language_key(language)
     normalized: list[QuestionSuggestion] = []
     errors: list[str] = []
+    seen_topics: set[tuple[str, str]] = set()
     for index, item in enumerate(suggestions, start=1):
         try:
             topic, question, rationale = _template_for(item, language_key)
@@ -151,6 +152,10 @@ def normalize_question_suggestions(
         except QuestionTemplateError as exc:
             errors.extend(f"question_suggestions[{index}]: {error}" for error in exc.errors)
             continue
+        topic_key = (item.category, topic)
+        if topic_key in seen_topics:
+            continue
+        seen_topics.add(topic_key)
         normalized.append(
             item.model_copy(
                 update={
@@ -178,23 +183,23 @@ def normalize_saved_question_payload(
     if not isinstance(values, list) or report is None:
         return []
     normalized: list[dict[str, Any]] = []
+    seen_topics: set[tuple[str, str]] = set()
     for value in values:
         try:
             item = QuestionSuggestion.model_validate(value)
         except ValidationError:
             continue
         try:
-            normalized.extend(
-                item.model_dump(mode="json")
-                for item in normalize_question_suggestions(
-                    [item],
-                    language,
-                    report=report,
-                )
-            )
+            rows = normalize_question_suggestions([item], language, report=report)
         except QuestionTemplateError:
             # A saved row without a valid report source is not safe to show.
             continue
+        for row in rows:
+            topic_key = (row.category, row.topic or "")
+            if topic_key in seen_topics:
+                continue
+            seen_topics.add(topic_key)
+            normalized.append(row.model_dump(mode="json"))
     return normalized
 
 
