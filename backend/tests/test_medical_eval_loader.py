@@ -102,6 +102,37 @@ def test_loader_rejects_personal_identifiers_in_fixture_text(tmp_path: Path) -> 
         load_dataset(root)
 
 
+def test_loader_allows_iso_publication_date(tmp_path: Path) -> None:
+    root = _copy_dataset(tmp_path)
+    case_path = root / "terminology" / "en_fabry.json"
+    case = _read_json(case_path)
+    case["input"]["publication_date"] = "2025-03-01"
+    _write_json(case_path, case)
+
+    load_dataset(root)
+
+
+def test_loader_allows_public_medical_identifier(tmp_path: Path) -> None:
+    root = _copy_dataset(tmp_path)
+    fixture_path = root / "fixtures" / "pubmed" / "fabry.json"
+    fixture = _read_json(fixture_path)
+    fixture[0]["pmid"] = "123456789"
+    _write_json(fixture_path, fixture)
+
+    load_dataset(root)
+
+
+def test_loader_rejects_explicit_phone_number(tmp_path: Path) -> None:
+    root = _copy_dataset(tmp_path)
+    case_path = root / "terminology" / "en_fabry.json"
+    case = _read_json(case_path)
+    case["input"]["contact"] = "Phone: +1 555-010-1234"
+    _write_json(case_path, case)
+
+    with pytest.raises(EvaluationDatasetError, match="disallowed personal identifier"):
+        load_dataset(root)
+
+
 def test_loader_rejects_unsupported_case_schema(tmp_path: Path) -> None:
     root = _copy_dataset(tmp_path)
     case_path = root / "terminology" / "en_fabry.json"

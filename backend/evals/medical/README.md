@@ -57,7 +57,8 @@ PYTHONPATH=backend .venv/bin/python backend/scripts/run_medical_eval.py \
 
 Exit code `0` means the selected hard gates passed. Exit code `1` means a hard
 gate failed when `--fail-on-gate` was supplied. Exit code `2` means the dataset
-could not be loaded or validated. The Markdown report is safe for an Actions
+or selection could not be loaded or validated. Empty selections and selections
+without hard-gated fields fail closed. The Markdown report is safe for an Actions
 summary and the JSON report is suitable for artifact comparison.
 
 ## Adding or Changing a Case
@@ -75,6 +76,10 @@ summary and the JSON report is suitable for artifact comparison.
    expected behavior. Do not silently rewrite expectations to hide a
    production regression.
 
-The hard gates intentionally cover safety and provenance boundaries. Precision,
-recall, MRR, abstention, and expected-behavior rates remain observations until
-they have an explicit review-approved threshold and a documented rationale.
+The terminology adapter records run creation, queue, and provider-release
+counts using an offline fake provider. The insight adapter replays cases through
+the full medical insight analyzer, including its repair attempt, using an
+offline fake provider. The hard gates intentionally cover safety and provenance
+boundaries. Precision, recall, MRR, abstention, and expected-behavior rates
+remain observations until they have an explicit review-approved threshold and a
+documented rationale.

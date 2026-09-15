@@ -1,7 +1,18 @@
 """End-to-end tests for the offline medical evaluation runner."""
 
-from app.services.medical.evaluation.loader import load_dataset, select_cases
-from app.services.medical.evaluation.models import EvaluationDataset
+import pytest
+
+from app.services.medical.evaluation.adapters import (
+    evaluate_insight_safety,
+    evaluate_terminology,
+)
+from app.services.medical.evaluation.gates import quality_metrics
+from app.services.medical.evaluation.loader import (
+    EvaluationDatasetError,
+    load_dataset,
+    select_cases,
+)
+from app.services.medical.evaluation.models import EvaluationDataset, EvaluationResult
 from app.services.medical.evaluation.report import render_json, render_markdown
 from app.services.medical.evaluation.runner import run_evaluation
 
@@ -26,6 +37,95 @@ def test_smoke_suite_is_a_stable_subset() -> None:
     assert selected
     assert report.case_count == len(selected)
     assert report.hard_gates_passed is True
+
+
+def test_empty_selection_fails_closed() -> None:
+    dataset = load_dataset(require_minimum=32)
+
+    with pytest.raises(EvaluationDatasetError, match="no evaluation cases selected"):
+        run_evaluation(dataset, suite="full", language="ja")
+
+
+def test_selection_without_hard_gates_fails_closed() -> None:
+    dataset = load_dataset(require_minimum=32)
+    ungated = dataset.cases[0].model_copy(update={"gate_fields": []})
+    limited = EvaluationDataset(
+        root=dataset.root,
+        manifest=dataset.manifest,
+        cases=(ungated,),
+    )
+
+    with pytest.raises(EvaluationDatasetError, match="declare no hard gates"):
+        run_evaluation(limited, suite="all")
+
+
+def test_terminology_evaluation_records_the_release_boundary() -> None:
+    dataset = load_dataset(require_minimum=32)
+    ready = next(case for case in dataset.cases if case.case_id == "en_terminology_fabry_001")
+    blocked = next(
+        case
+        for case in dataset.cases
+        if case.case_id == "en_terminology_als_ambiguous_001"
+    )
+
+    released = evaluate_terminology(ready, dataset.root)
+    withheld = evaluate_terminology(blocked, dataset.root)
+
+    assert released["repository_create_count"] == 1
+    assert released["queue_count"] == 1
+    assert released["provider_search_count"] == 1
+    assert len(released["released_queries"]) == 1
+    assert withheld["repository_create_count"] == 0
+    assert withheld["queue_count"] == 0
+    assert withheld["provider_search_count"] == 0
+    assert withheld["released_queries"] == []
+
+
+def test_terminology_privacy_case_only_releases_normalized_terms() -> None:
+    dataset = load_dataset(require_minimum=32)
+    case = next(
+        case
+        for case in dataset.cases
+        if case.case_id == "zh_terminology_privacy_001"
+    )
+
+    actual = evaluate_terminology(case, dataset.root)
+    released_query = " ".join(actual["released_queries"])
+
+    assert "戈谢病" not in released_query
+    assert "患者" not in released_query
+    assert "张三" not in released_query
+
+
+def test_insight_evaluation_runs_analyzer_and_repair_path() -> None:
+    dataset = load_dataset(require_minimum=32)
+    case = next(
+        case
+        for case in dataset.cases
+        if case.case_id == "en_insight_treatment_safety_001"
+    )
+
+    actual = evaluate_insight_safety(case, dataset.root)
+
+    assert actual["safety_valid"] is False
+    assert actual["provider_call_count"] == 2
+
+
+def test_abstention_does_not_count_as_complete_match_reasons() -> None:
+    result = EvaluationResult(
+        case_id="en_literature_abstention_001",
+        suite="literature_matching",
+        language="en",
+        passed=True,
+        hard_gate_checks=1,
+        expected={"expected_abstention": True},
+        actual={"abstained": True, "candidate_ids": [], "reason_complete": None},
+    )
+
+    metrics = quality_metrics([result])
+
+    assert metrics["correct_abstention_rate"] == 1.0
+    assert "match_reason_completeness" not in metrics
 
 
 def test_evaluation_report_is_byte_stable() -> None:

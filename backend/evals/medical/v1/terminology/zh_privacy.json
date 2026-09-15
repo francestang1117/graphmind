@@ -12,13 +12,16 @@
   "expected": {
     "resolution_status": "ready",
     "external_query_allowed": true,
-    "external_query_count": 0,
+    "external_query_count": 1,
+    "repository_create_count": 1,
+    "queue_count": 1,
+    "provider_search_count": 1,
     "normalized_terms": ["Gaucher disease"],
     "concept_ids": ["mesh:D005776"],
     "error_code": null,
     "raw_fragments_in_query": []
   },
-  "gate_fields": ["resolution_status", "external_query_allowed", "external_query_count", "normalized_terms", "concept_ids", "error_code", "raw_fragments_in_query"],
+  "gate_fields": ["resolution_status", "external_query_allowed", "external_query_count", "repository_create_count", "queue_count", "provider_search_count", "normalized_terms", "concept_ids", "error_code", "raw_fragments_in_query"],
   "rationale": "Only the locally recognized disease concept may be released; the synthetic name and patient marker must stay local.",
   "last_reviewed": "2026-09-15"
 }

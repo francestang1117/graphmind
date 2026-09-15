@@ -1802,20 +1802,21 @@ loader rejects unsupported schemas, duplicate IDs, path traversal, missing
 fixtures, malformed cases, and personal identifiers before execution.
 
 The evaluation adapters exercise the existing production boundaries directly:
-local disease query construction, insight citation/support/safety validators,
-deterministic finding-to-literature matching, and server-owned question
-template binding. The runner emits stable JSON and Markdown reports, separates
-hard regression gates from non-blocking Precision@3, Recall@5, MRR, abstention,
-and binding observations, and provides smoke/full CLI modes with explicit exit
-codes. No PubMed, OpenAI, or other remote service is contacted.
+local disease query construction and shared confirmation, a full
+MedicalInsightAnalyzer run with a recording provider, deterministic
+finding-to-literature matching, and server-owned question template binding.
+The runner emits stable JSON and Markdown reports, separates hard regression
+gates from non-blocking Precision@3, Recall@5, MRR, abstention, and binding
+observations, and provides smoke/full CLI modes with explicit exit codes. The
+recording providers never contact PubMed, OpenAI, or another remote service.
 
 The baseline also exposed and fixed a study-card classification boundary where
 the phrase `clinical study` could match the substring inside `preclinical
 study`. Publication-type matching now respects token boundaries, keeping
 preclinical evidence distinct from clinical studies.
 
-Focused PR12 tests pass (`16 passed`) and the full offline evaluation passes
-(`33/33` cases and `181/181` hard checks). GitHub Actions runs the evaluation
+Focused PR12 tests pass (`22 passed`) and the full offline evaluation passes
+(`33/33` cases and `205/205` hard checks). GitHub Actions runs the evaluation
 as a separate five-minute job, publishes the Markdown summary, and uploads the
 JSON/Markdown reports as an artifact. This baseline is an engineering
 regression guard, not a clinical validation set or a claim about external-model

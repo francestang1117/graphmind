@@ -6,7 +6,7 @@ from typing import Any, Iterable
 
 from app.services.medical.evaluation.adapters import EvaluationAdapterError, evaluate_case
 from app.services.medical.evaluation.gates import hard_gate_summary, quality_metrics
-from app.services.medical.evaluation.loader import select_cases
+from app.services.medical.evaluation.loader import EvaluationDatasetError, select_cases
 from app.services.medical.evaluation.models import (
     EvaluationCase,
     EvaluationDataset,
@@ -30,6 +30,10 @@ def run_evaluation(
 ) -> EvaluationReport:
     """Run selected cases and aggregate stable gates and observations."""
     cases = select_cases(dataset, suite=suite, language=language, tags=tags)
+    if not cases:
+        raise EvaluationDatasetError("no evaluation cases selected")
+    if not any(case.gate_fields for case in cases):
+        raise EvaluationDatasetError("selected evaluation cases declare no hard gates")
     results = [_run_case(case, dataset.root) for case in cases]
     gate = hard_gate_summary(results)
     report = EvaluationReport(

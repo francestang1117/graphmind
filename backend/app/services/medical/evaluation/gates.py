@@ -23,8 +23,8 @@ def hard_gate_summary(results: Iterable[EvaluationResult]) -> GateSummary:
     for result in rows:
         checks += result.hard_gate_checks
         failures.extend(f"{result.case_id}: {failure}" for failure in result.hard_gate_failures)
-    # A passed case with no declared gates is not counted as a check, but it
-    # also cannot manufacture a failure.
+    if not rows or checks == 0:
+        failures.append("no hard regression checks were executed")
     return GateSummary(
         name="hard_regression_gates",
         passed=not failures,
@@ -66,14 +66,12 @@ def quality_metrics(results: Iterable[EvaluationResult]) -> dict[str, float]:
                     bool(row.actual.get("abstained")) == bool(row.expected["expected_abstention"])
                 )
                 if row.expected["expected_abstention"]:
-                    if "reason_complete" in row.actual:
-                        reason_checks.append(bool(row.actual["reason_complete"]))
                     continue
             retrieved_rows.append(retrieved)
             relevant_rows.append(relevant)
             precisions.append(precision_at_k(retrieved, relevant, 3))
             recalls.append(recall_at_k(retrieved, relevant, 5))
-            if "reason_complete" in row.actual:
+            if row.actual.get("reason_complete") is not None:
                 reason_checks.append(bool(row.actual["reason_complete"]))
         if precisions:
             metrics["precision_at_3"] = round(sum(precisions) / len(precisions), 4)

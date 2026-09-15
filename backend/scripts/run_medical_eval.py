@@ -14,7 +14,7 @@ from app.services.medical.evaluation.runner import run_evaluation
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=("smoke", "full"), default="full")
-    parser.add_argument("--language", choices=("en", "zh", "ja"))
+    parser.add_argument("--language", choices=("en", "zh"))
     parser.add_argument("--json-output")
     parser.add_argument("--markdown-output")
     parser.add_argument(

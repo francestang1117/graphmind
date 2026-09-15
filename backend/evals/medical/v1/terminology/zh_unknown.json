@@ -10,12 +10,15 @@
     "resolution_status": "rejected",
     "external_query_allowed": false,
     "external_query_count": 0,
+    "repository_create_count": 0,
+    "queue_count": 0,
+    "provider_search_count": 0,
     "normalized_terms": [],
     "concept_ids": [],
     "error_code": "literature_no_medical_concepts",
     "raw_fragments_in_query": []
   },
-  "gate_fields": ["resolution_status", "external_query_allowed", "external_query_count", "concept_ids", "error_code"],
+  "gate_fields": ["resolution_status", "external_query_allowed", "external_query_count", "repository_create_count", "queue_count", "provider_search_count", "concept_ids", "error_code"],
   "rationale": "Unrecognized Chinese disease text fails closed instead of being sent as a raw search term.",
   "last_reviewed": "2026-09-15"
 }

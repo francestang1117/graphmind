@@ -98,7 +98,9 @@ or unsafe.
 The repository ships a versioned synthetic dataset under
 `backend/evals/medical/v1`. It currently contains 33 cases across four suites,
 with at least 16 English and 16 Chinese cases. The runner is filesystem-only:
-it does not call PubMed, OpenAI, or any other external service.
+it does not call PubMed, OpenAI, or any other external service. Recording fakes
+exercise the query release and medical insight analyzer boundaries without
+opening a network connection.
 
 From the project root:
 
@@ -114,7 +116,9 @@ PYTHONPATH=backend .venv/bin/python backend/scripts/run_medical_eval.py \
 ```
 
 The command returns exit code `0` when the selected hard gates pass, `1` when
-`--fail-on-gate` is set and a gate fails, and `2` when the dataset is invalid.
+`--fail-on-gate` is set and a gate fails, and `2` when the dataset or selection
+is invalid. Empty selections and selections with no hard-gated fields fail
+closed instead of producing a false PASS.
 Hard gates cover privacy leaks, unsafe medical wording, invalid or unbound
 evidence, safe abstention, study-type boundaries, and deterministic matching
 behavior. Precision@3, Recall@5, MRR, and expected-behavior rates are reported

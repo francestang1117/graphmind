@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -21,12 +22,23 @@ class EvaluationDatasetError(ValueError):
 
 
 _EMAIL = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
-_PHONE = re.compile(r"(?<!\w)\+?\d[\d .()\-]{7,}\d(?!\w)")
+_PHONE = re.compile(
+    r"(?i)(?:phone|telephone|mobile|tel|电话|手机|联系电话)\s*"
+    r"(?:number|no\.?|号码)?\s*[:：]?\s*\+?\d[\d .()\-]{7,}\d"
+    r"|(?<!\w)\+?\d{1,3}(?:[ .\-]\(?\d{3,4}\)?){2,3}(?!\w)"
+)
 _GOVERNMENT_ID = re.compile(r"(?<!\w)\d{17}[\dXx](?!\w)")
 _RECORD_ID = re.compile(
     r"(?i)(?:patient|medical\s+record|住院|病历|患者)\s*"
     r"(?:id|number|no\.?|编号|号)?\s*[:#-]\s*[A-Za-z0-9_-]{3,}"
 )
+_PUBLIC_DATE_FIELDS = {
+    "date_from",
+    "date_to",
+    "fetched_at",
+    "last_reviewed",
+    "publication_date",
+}
 
 
 def default_dataset_root() -> Path:
@@ -156,9 +168,7 @@ def _safe_child(root: Path, relative: str) -> Path:
 
 def _find_sensitive_text(value: Any, path: str = "$") -> str | None:
     if isinstance(value, str):
-        # The schema constrains this field to an ISO date, so its hyphens
-        # must not be mistaken for a phone number by the generic scanner.
-        if path.endswith(".last_reviewed"):
+        if _is_public_date_field(path, value):
             return None
         for pattern in (_EMAIL, _PHONE, _GOVERNMENT_ID, _RECORD_ID):
             if pattern.search(value):
@@ -175,3 +185,18 @@ def _find_sensitive_text(value: Any, path: str = "$") -> str | None:
             if result:
                 return result
     return None
+
+
+def _is_public_date_field(path: str, value: str) -> bool:
+    """Avoid treating valid public dates as phone numbers or identifiers."""
+    field_name = path.rsplit(".", 1)[-1].split("[", 1)[0]
+    if field_name not in _PUBLIC_DATE_FIELDS:
+        return False
+    try:
+        if "T" in value or "t" in value:
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
