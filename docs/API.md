@@ -337,9 +337,28 @@ scroll; it shows the traceable page/chunk location and quote.
 The report also includes `study_methods`, `applicability`, `future_research`,
 and `coverage`. Method fields use an explicit support status; missing values
 are returned as `not_reported`. Coverage lists included and omitted sections
-when the source exceeds the configured input budget. The run snapshot records
-the provider, model, prompt and schema versions, input/output budgets, timeout,
-retry count, and parsed source hash.
+when the source exceeds the configured input budget. Schema V3 also returns up
+to five `question_suggestions`. Each suggestion has a fixed category, a
+plain-language `rationale`, and one to five evidence IDs from the current
+source snapshot. Questions are for discussion with a qualified healthcare
+professional; they are not diagnosis, examination, or treatment instructions.
+The legacy `questions_for_professional` list remains readable for V2 reports and
+is empty for new provider output. The run snapshot records the provider, model,
+prompt and schema versions, input/output budgets, timeout, retry count, and
+parsed source hash.
+
+Example structured question:
+
+```json
+{
+  "id": "question_001",
+  "question": "Which people were included in this study?",
+  "rationale": "The study describes a population, so it is useful to discuss who the findings may apply to.",
+  "category": "applicability",
+  "evidence_ids": ["EVIDENCE_004"],
+  "interpretation_type": "inference"
+}
+```
 
 ```bash
 curl "http://localhost:8000/api/v1/documents/<document_id>/medical-insights/latest?workspace_id=$WORKSPACE_ID"

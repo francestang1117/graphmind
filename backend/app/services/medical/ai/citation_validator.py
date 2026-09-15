@@ -126,6 +126,8 @@ def _core_items(
             yield f"{field_name}[{index}]", item, item.evidence_ids
     for index, item in enumerate(report.medical_terms, start=1):
         yield f"medical_terms[{index}]", item, item.evidence_ids
+    for index, item in enumerate(report.question_suggestions, start=1):
+        yield f"question_suggestions[{index}]", item, item.evidence_ids
     for field_name, item in report.study_methods.model_dump().items():
         if item["support_status"] != "not_reported":
             yield f"study_methods.{field_name}", item, item["evidence_ids"]
@@ -145,6 +147,8 @@ def _report_citations(report: MedicalInsightReport) -> Iterable[tuple[str, list[
             yield item.id, item.evidence_ids
     for item in report.medical_terms:
         yield item.term, item.evidence_ids
+    for item in report.question_suggestions:
+        yield f"question:{item.id}", item.evidence_ids
     for field_name, item in report.study_methods.model_dump().items():
         if item["support_status"] != "not_reported":
             yield f"study_methods.{field_name}", item["evidence_ids"]

@@ -1739,3 +1739,54 @@ type classification, retraction handling, idempotence, stale article warnings,
 workspace scope, migration constraints, and deletion cleanup. The local backend
 suite is now `439 passed, 3 skipped`; the PostgreSQL-specific checks remain
 conditional when `GRAPHMIND_TEST_POSTGRES_URL` is not configured.
+
+## 2026-09 - V2 PR11: Evidence-Backed Questions for Clinicians
+
+The medical insight report now has a V3 `question_suggestions` field for a
+small, source-backed list of questions that a general reader can discuss with a
+qualified healthcare professional. Each suggestion has a fixed category, topic,
+interpretation type, plain-language rationale, and up to five evidence IDs. The
+list is deliberately optional: when the source does not support a useful
+question, an empty list is valid. The previous V2
+`questions_for_professional` field remains readable for old saved reports and
+is left empty by new provider output.
+
+External providers may select only a structured intent and a server-owned report
+source (`source_kind` and `source_id`). The server generates the final question
+and rationale from controlled Chinese, English, or Japanese templates and
+resolves Evidence IDs from validated report objects. Provider-supplied question
+text and arbitrary Evidence IDs are never displayed or trusted. Supported
+sources include study methods, key findings, medical terms, limitations, and
+future research items. `evidence_gap` is intentionally not advertised because
+the absence of a report cannot be proved by attaching an unrelated evidence
+passage.
+
+Category/topic compatibility, source existence, source evidence, and section
+compatibility are checked before persistence. Incompatible selections fail
+validation instead of silently changing topic. Resolved evidence is capped at
+five unique IDs, and multiple suggestions for the same normalized category/topic
+are deduplicated while retaining the first valid source. Saved V3 reports go
+through the same normalization and unbound suggestions are removed before being
+returned. Invalid output receives the existing single repair attempt; a report
+is not saved when validation still fails.
+
+Questions participate in the same citation, support, and medical safety checks
+as the rest of the report. The safety validator rejects personal diagnosis and
+treatment decisions while allowing questions explicitly scoped to study
+findings, evidence, populations, or applicability. The prompt and local
+extractive provider follow the structured intent contract and keep the question
+list conservative.
+
+The frontend renders structured question cards with category and rationale,
+opens the cited source passage, and copies only the human-readable question and
+reason to the clipboard. Legacy reports fall back to their old string list only
+when they are identified as V2 or unversioned legacy data. The API and saved
+report paths apply the same compatibility normalization.
+
+Verification for the current implementation: local backend `499 passed, 3
+skipped`, focused medical question and insight regressions `98 passed, 2
+skipped`, and frontend `24 passed`. Frontend lint and production build,
+Python `compileall`, and `git diff --check` also pass. The PR has no database
+migration; reports remain JSON-backed. External model quality and semantic
+question-to-evidence evaluation remain follow-up work before enabling that
+provider for general users.

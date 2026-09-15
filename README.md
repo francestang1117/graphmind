@@ -55,6 +55,8 @@ planned upgrade. It does not provide a diagnosis or treatment recommendation.
   redaction, coverage reporting, and safety checks
 - Optional OpenAI medical insight provider with schema-constrained output,
   bounded retries, server-side credentials, and disabled response storage
+- Evidence-backed questions for discussion with a healthcare professional, with
+  source locations, plain-language rationales, safety checks, and copy support
 - Fails-closed runtime auth defaults and startup validation for API and workers
 - Privacy-bounded PubMed search with query preview, explicit confirmation,
   normalized metadata, retraction/correction flags, scoped caching, worker
@@ -65,7 +67,7 @@ planned upgrade. It does not provide a diagnosis or treatment recommendation.
 - Versioned local disease ontology with exact alias matching, privacy-bounded
   Chinese disease handling, explicit confirmation for ambiguous aliases, and
   auditable MeSH/curated source checksums
-- 432 backend tests covering the current core modules
+- Backend tests covering the current core modules and medical workflows
 
 ## Project Status
 
@@ -83,6 +85,7 @@ planned upgrade. It does not provide a diagnosis or treatment recommendation.
 | V2 medical analysis | PR5 implementation | Local or OpenAI single-document interpretation with traceable evidence and coverage |
 | V2 literature search | PR8 implementation | Versioned local disease matching, confirmed PubMed terms, official metadata/abstracts, scoped runs, and cache |
 | V2 evidence matching | PR9 implementation | Local finding-to-PubMed candidates, explainable scoring, abstract quotes, and study cards |
+| V2 clinician questions | PR11 implementation | Source-backed questions for professional discussion with structured safety and citation validation |
 | Observability | Working MVP | Prometheus metrics and optional Sentry |
 | File storage backend | Working MVP | Local by default; optional S3/MinIO keeps a local parser cache |
 | Authentication | Working MVP | Email/password, optional GitHub OAuth, user-scoped workspaces |
@@ -164,6 +167,9 @@ Base URL: `http://localhost:8000/api/v1`
 - `POST /documents/{document_id}/literature-matches` matches a completed medical report to a completed local PubMed search.
 - `GET /literature-match-runs/{run_id}` returns finding candidates and study cards.
 - `GET /documents/{document_id}/literature-matches/latest` returns the newest scoped match run.
+- Successful medical insight reports include `question_suggestions`, each with a
+  category, plain-language rationale, and source evidence IDs. Older reports
+  continue to use `questions_for_professional` as a fallback.
 - `GET /documents/{filename}/open` safely previews or downloads an uploaded file.
 - `DELETE /documents/{filename}` deletes a stored document.
 - `GET /jobs/` lists recent background jobs.

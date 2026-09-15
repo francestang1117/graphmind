@@ -102,8 +102,8 @@ class Settings(BaseSettings):
     # expire. The values are deliberately longer than one normal provider call.
     MEDICAL_AI_QUEUE_LEASE_SECONDS: int = 300
     MEDICAL_AI_RUNNING_LEASE_SECONDS: int = 900
-    MEDICAL_AI_PROMPT_VERSION: str = "medical-insights-v2"
-    MEDICAL_AI_SCHEMA_VERSION: str = "medical-insights-v2"
+    MEDICAL_AI_PROMPT_VERSION: str = "medical-insights-v3"
+    MEDICAL_AI_SCHEMA_VERSION: str = "medical-insights-v3"
     MEDICAL_AI_OPENAI_API_KEY: str = ""
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = ""

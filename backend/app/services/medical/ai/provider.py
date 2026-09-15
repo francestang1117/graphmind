@@ -133,9 +133,49 @@ class ExtractiveMedicalAIProvider:
                 )
             )
 
+        question_suggestions = []
+        population_item = _first_of(
+            evidence,
+            "population",
+            "scope",
+            "methods",
+            "abstract",
+            "introduction",
+        )
+        if population_item:
+            question_suggestions.append(
+                _question_suggestion(
+                    "question_001",
+                    "applicability",
+                    "study_population",
+                    source_kind="study_methods",
+                    source_id="population",
+                )
+            )
+        limitation_item = _first_of(evidence, "limitations", "limitation")
+        limitation_finding = next(
+            (
+                finding
+                for finding in limitations
+                if finding.get("evidence_ids", [None])[0]
+                == (limitation_item.evidence_id if limitation_item else None)
+            ),
+            None,
+        )
+        if limitation_item:
+            question_suggestions.append(
+                _question_suggestion(
+                    "question_002",
+                    "study_limitation",
+                    "study_limitation",
+                    source_kind="limitations",
+                    source_id=(limitation_finding or {}).get("id", ""),
+                )
+            )
+
         warnings = ["not_medical_advice", *context.warnings]
         return {
-            "schema_version": "medical-insights-v2",
+            "schema_version": "medical-insights-v3",
             "document_kind": context.document_kind,
             "language": context.language,
             "overview": {
@@ -144,7 +184,17 @@ class ExtractiveMedicalAIProvider:
                 "study_type": _study_type(context.document_kind),
                 "evidence_ids": [overview_item.evidence_id] if overview_item else [],
             },
-            "study_methods": {},
+            "study_methods": {
+                "population": (
+                    {
+                        "value": _summary(population_item.text),
+                        "support_status": "supported",
+                        "evidence_ids": [population_item.evidence_id],
+                    }
+                    if population_item
+                    else {}
+                ),
+            },
             "key_findings": findings,
             "limitations": limitations,
             "medical_terms": [],
@@ -152,10 +202,8 @@ class ExtractiveMedicalAIProvider:
             "what_it_does_not_mean": does_not_mean,
             "applicability": [],
             "future_research": [],
-            "questions_for_professional": [
-                "Which people were included in this document, and who was not included?",
-                "How strong are the reported findings and their limitations?",
-            ],
+            "question_suggestions": question_suggestions[:5],
+            "questions_for_professional": [],
             "coverage": _coverage(context),
             "warnings": warnings,
         }
@@ -377,6 +425,27 @@ def _finding(
         "evidence_ids": [item.evidence_id],
         "evidence_level": "reported_in_document",
         "interpretation_type": interpretation_type,
+    }
+
+
+def _question_suggestion(
+    suggestion_id: str,
+    category: str,
+    topic: str,
+    *,
+    source_kind: str,
+    source_id: str,
+) -> dict[str, Any]:
+    return {
+        "id": suggestion_id,
+        "question": "",
+        "rationale": "",
+        "category": category,
+        "topic": topic,
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "evidence_ids": [],
+        "interpretation_type": "inference",
     }
 
 

@@ -101,6 +101,7 @@ def _article(
 def _report(findings: list[dict]) -> MedicalInsightReport:
     return MedicalInsightReport.model_validate(
         {
+            "schema_version": "medical-insights-v2",
             "document_kind": "research_paper",
             "language": "en",
             "overview": {

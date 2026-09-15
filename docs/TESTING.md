@@ -14,8 +14,8 @@ From the project root:
 PYTHONPATH=backend .venv/bin/python -m pytest backend/tests
 ```
 
-The exact count can change as tests are added. The latest local result is
-`439 passed, 3 skipped`.
+The exact count can change as tests are added. Run the command above for the
+current count; it includes the structured clinician-question tests.
 
 The three skipped checks are the PostgreSQL migration test and two PostgreSQL
 row-lock tests when `GRAPHMIND_TEST_POSTGRES_URL` is not set. GitHub Actions
@@ -76,6 +76,7 @@ or unsafe.
 | `backend/tests/test_medical_repository.py` | Scoped profile/section replacement, cleanup, and deleted-document guard |
 | `backend/tests/test_medical_api.py` | User/workspace scope on the medical analysis endpoint |
 | `backend/tests/test_medical_ai_insights.py` | Bounded evidence context, provider output, citation/safety validation, versioned persistence, and stale-result handling |
+| `backend/tests/test_medical_ai_questions.py` | Structured clinician questions, evidence, support, safety, provider output, and V2 compatibility |
 | `backend/tests/test_literature_query_builder.py` | Explainable concept extraction, PII redaction, filters, and safe query fingerprints |
 | `backend/tests/test_literature_provider.py` | Mocked PubMed ESearch/EFetch, metadata normalization, retries, size limits, XML safety, and retraction flags |
 | `backend/tests/test_literature_repository.py` | Scoped run lifecycle, cache reuse, lease recovery, idempotency, and deletion cleanup |

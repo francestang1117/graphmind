@@ -15,6 +15,7 @@ import {
   type MedicalInsightRun,
 } from "../../services/api";
 import LiteratureEvidencePanel from "./literature/LiteratureEvidencePanel";
+import QuestionSuggestionList from "./medical/QuestionSuggestionList";
 
 function consentStorageKey(
   config: MedicalInsightConfig,
@@ -282,16 +283,11 @@ function ReportView({
         </section>
       )}
 
-      {report.questions_for_professional.length > 0 && (
-        <section className="insight-report-section insight-questions">
-          <h3>Questions for a professional</h3>
-          <ul>
-            {report.questions_for_professional.map((question) => (
-              <li key={question}>{question}</li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <QuestionSuggestionList
+        report={report}
+        evidenceById={evidenceById}
+        onSelectEvidence={onSelectEvidence}
+      />
 
       {run.warnings && run.warnings.length > 0 && (
         <div className="insight-warning">
