@@ -39,6 +39,27 @@ _PUBLIC_DATE_FIELDS = {
     "last_reviewed",
     "publication_date",
 }
+_SENSITIVE_FIELD_NAMES = {
+    "phone",
+    "phone_number",
+    "mobile",
+    "mobile_number",
+    "telephone",
+    "telephone_number",
+    "tel",
+    "email",
+    "patient_id",
+    "patientid",
+    "medical_record_id",
+    "medicalrecordid",
+    "medical_record_number",
+    "hospital_number",
+    "hospital_no",
+    "住院号",
+    "病历号",
+    "手机号",
+    "联系电话",
+}
 
 
 def default_dataset_root() -> Path:
@@ -176,6 +197,8 @@ def _find_sensitive_text(value: Any, path: str = "$") -> str | None:
         return None
     if isinstance(value, dict):
         for key in sorted(value):
+            if _is_sensitive_field_name(key) and _has_sensitive_value(value[key]):
+                return f"{path}.{key}"
             result = _find_sensitive_text(value[key], f"{path}.{key}")
             if result:
                 return result
@@ -185,6 +208,23 @@ def _find_sensitive_text(value: Any, path: str = "$") -> str | None:
             if result:
                 return result
     return None
+
+
+def _is_sensitive_field_name(value: str) -> bool:
+    """Recognize structured PII keys even when their values have no label."""
+    normalized = str(value).strip().casefold().replace("-", "_")
+    return normalized in _SENSITIVE_FIELD_NAMES
+
+
+def _has_sensitive_value(value: Any) -> bool:
+    """Ignore empty optional fields while treating numeric IDs as content."""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, (list, tuple, set, dict)):
+        return bool(value)
+    return True
 
 
 def _is_public_date_field(path: str, value: str) -> bool:

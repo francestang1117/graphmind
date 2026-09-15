@@ -5,7 +5,7 @@
   "language": "zh",
   "tags": ["terminology", "chinese", "alias"],
   "review_status": "engineering_reviewed",
-  "input": {"query": "关于法布雷病的研究"},
+  "input": {"query": "关于法布雷病的研究", "external_search_confirmed": true, "query_fingerprint": "e007f4235b7158eb286d68d5d59c2a977527ba978653edff91ff74ccd610c3d6"},
   "expected": {
     "resolution_status": "ready",
     "external_query_allowed": true,

@@ -7,6 +7,8 @@
   "review_status": "engineering_reviewed",
   "input": {
     "query": "患者张三患有戈谢病，有什么新研究？",
+    "external_search_confirmed": true,
+    "query_fingerprint": "8dc6b9ae23a33c8e72a61666f5de59cca63d649b44b79d8ce05b6e5a12bce099",
     "leak_checks": ["患者", "张三"]
   },
   "expected": {

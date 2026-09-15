@@ -1815,8 +1815,8 @@ the phrase `clinical study` could match the substring inside `preclinical
 study`. Publication-type matching now respects token boundaries, keeping
 preclinical evidence distinct from clinical studies.
 
-Focused PR12 tests pass (`22 passed`) and the full offline evaluation passes
-(`33/33` cases and `205/205` hard checks). GitHub Actions runs the evaluation
+Focused PR12 tests pass (`26 passed`) and the full offline evaluation passes
+(`35/35` cases and `247/247` hard checks). GitHub Actions runs the evaluation
 as a separate five-minute job, publishes the Markdown summary, and uploads the
 JSON/Markdown reports as an artifact. This baseline is an engineering
 regression guard, not a clinical validation set or a claim about external-model

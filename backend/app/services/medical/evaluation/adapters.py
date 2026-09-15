@@ -59,9 +59,8 @@ class _RecordingLiteratureBoundary:
         self.queue_count = 0
         self.released_queries: list[str] = []
 
-    def release_confirmed(self, query: LiteratureQuery) -> None:
-        if query.resolution_status != "ready" or not query.normalized_query:
-            return
+    def release(self, query: LiteratureQuery) -> None:
+        """Record a release after the caller has passed production checks."""
         self.repository_create_count += 1
         self.queue_count += 1
         self.released_queries.append(query.normalized_query)
@@ -124,24 +123,36 @@ def evaluate_terminology(case: EvaluationCase, _dataset_root: Path) -> dict[str,
     except ValidationError as exc:
         raise EvaluationAdapterError("invalid concept selection in terminology case") from exc
 
-    if query.resolution_status == "ready":
-        try:
-            # Reuse the production confirmation contract before entering the
-            # recording repository/queue/provider boundary.
-            confirm_literature_query(
-                query,
-                external_search_confirmed=True,
-                query_fingerprint=query.query_hash,
-            )
-        except LiteratureQueryError as exc:
-            raise EvaluationAdapterError("safe literature confirmation failed") from exc
-    boundary.release_confirmed(query)
+    try:
+        # Reuse the production confirmation contract before entering the
+        # recording repository/queue/provider boundary. The case controls
+        # confirmation inputs so stale and missing consent are testable.
+        confirm_literature_query(
+            query,
+            external_search_confirmed=bool(case.input.get("external_search_confirmed", False)),
+            query_fingerprint=case.input.get("query_fingerprint"),
+        )
+    except LiteratureQueryError as exc:
+        return _terminology_payload(query, boundary, case, error_code=exc.code)
+
+    boundary.release(query)
+    return _terminology_payload(query, boundary, case, error_code=None)
+
+
+def _terminology_payload(
+    query: LiteratureQuery,
+    boundary: _RecordingLiteratureBoundary,
+    case: EvaluationCase,
+    *,
+    error_code: str | None,
+) -> dict[str, Any]:
+    """Build stable terminology observations from the recording boundary."""
     normalized_query = query.normalized_query
     fragments = [str(value) for value in case.input.get("leak_checks", [])]
     released_query = "\n".join(boundary.released_queries)
     return {
         "resolution_status": query.resolution_status,
-        "external_query_allowed": query.resolution_status == "ready" and bool(normalized_query),
+        "external_query_allowed": bool(boundary.provider.calls),
         "external_query_count": len(boundary.provider.calls),
         "repository_create_count": boundary.repository_create_count,
         "queue_count": boundary.queue_count,
@@ -150,7 +161,7 @@ def evaluate_terminology(case: EvaluationCase, _dataset_root: Path) -> dict[str,
         "normalized_terms": [item.normalized for item in query.detected_concepts],
         "concept_ids": [item.concept_id for item in query.detected_concepts if item.concept_id],
         "normalized_query": normalized_query,
-        "error_code": None,
+        "error_code": error_code,
         "raw_fragments_in_query": [
             value for value in fragments if value and value.casefold() in released_query.casefold()
         ],
@@ -192,6 +203,7 @@ def evaluate_insight_safety(case: EvaluationCase, _dataset_root: Path) -> dict[s
         return _insight_pipeline_failure(exc.errors, provider_call_count=len(provider.calls))
     except MedicalInsightError as exc:
         return {
+            "pipeline_status": "rejected",
             "report_valid": False,
             "citation_valid": False,
             "support_valid": False,
@@ -209,6 +221,7 @@ def evaluate_insight_safety(case: EvaluationCase, _dataset_root: Path) -> dict[s
         *output.questions.errors,
     ]
     return {
+        "pipeline_status": "accepted",
         "report_valid": True,
         "citation_valid": output.citations.valid,
         "support_valid": output.support.valid,
@@ -265,6 +278,7 @@ def _insight_pipeline_failure(
         for value in lowered
     )
     return {
+        "pipeline_status": "rejected",
         "report_valid": report_valid,
         "citation_valid": citation_valid,
         "support_valid": support_valid,

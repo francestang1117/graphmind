@@ -77,9 +77,11 @@ summary and the JSON report is suitable for artifact comparison.
    production regression.
 
 The terminology adapter records run creation, queue, and provider-release
-counts using an offline fake provider. The insight adapter replays cases through
-the full medical insight analyzer, including its repair attempt, using an
-offline fake provider. The hard gates intentionally cover safety and provenance
-boundaries. Precision, recall, MRR, abstention, and expected-behavior rates
-remain observations until they have an explicit review-approved threshold and a
+counts using an offline fake provider, but only after the shared confirmation
+contract accepts the case inputs. The insight adapter replays cases through the
+full medical insight analyzer, including its repair attempt, using an offline
+fake provider; pipeline acceptance/rejection and provider call counts are hard
+gates. The hard gates intentionally cover safety and provenance boundaries.
+Precision, recall, MRR, abstention, and expected-behavior rates remain
+observations until they have an explicit review-approved threshold and a
 documented rationale.

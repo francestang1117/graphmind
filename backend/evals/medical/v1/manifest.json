@@ -1,8 +1,8 @@
 {
   "schema_version": "medical-eval-v1",
-  "dataset_version": "medical-eval-v1.0.0",
+  "dataset_version": "medical-eval-v1.1.0",
   "description": "Synthetic bilingual regression cases for GraphMind medical services.",
-  "case_count": 33,
+  "case_count": 35,
   "cases": [
     {"case_id": "en_terminology_fabry_001", "suite": "terminology", "path": "terminology/en_fabry.json"},
     {"case_id": "zh_terminology_fabry_001", "suite": "terminology", "path": "terminology/zh_fabry.json"},
@@ -12,6 +12,8 @@
     {"case_id": "en_terminology_alias_normalization_001", "suite": "terminology", "path": "terminology/en_normalization.json"},
     {"case_id": "en_terminology_empty_001", "suite": "terminology", "path": "terminology/en_empty.json"},
     {"case_id": "zh_terminology_mixed_alias_001", "suite": "terminology", "path": "terminology/zh_mixed_alias.json"},
+    {"case_id": "en_terminology_fabry_unconfirmed_001", "suite": "terminology", "path": "terminology/en_fabry_unconfirmed.json"},
+    {"case_id": "zh_terminology_fabry_stale_confirmation_001", "suite": "terminology", "path": "terminology/zh_fabry_stale_confirmation.json"},
     {"case_id": "en_insight_safe_association_001", "suite": "insight_safety", "path": "insight_safety/en_safe_association.json"},
     {"case_id": "zh_insight_causal_overclaim_001", "suite": "insight_safety", "path": "insight_safety/zh_causal_overclaim.json"},
     {"case_id": "en_insight_negated_causation_001", "suite": "insight_safety", "path": "insight_safety/en_negated_causation.json"},

@@ -16,8 +16,8 @@
       "overview": {"title": "Synthetic association study", "summary": "This association does not prove causation.", "evidence_ids": ["EVIDENCE_001"]}
     }
   },
-  "expected": {"report_valid": true, "citation_valid": true, "support_valid": true, "safety_valid": true, "questions_valid": true},
-  "gate_fields": ["report_valid", "citation_valid", "support_valid", "safety_valid", "questions_valid"],
+  "expected": {"report_valid": true, "citation_valid": true, "support_valid": true, "safety_valid": true, "questions_valid": true, "pipeline_status": "accepted", "provider_call_count": 1},
+  "gate_fields": ["report_valid", "citation_valid", "support_valid", "safety_valid", "questions_valid", "pipeline_status", "provider_call_count"],
   "rationale": "A correct limitation statement containing a negated causal claim must not be rejected.",
   "last_reviewed": "2026-09-15"
 }

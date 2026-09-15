@@ -5,7 +5,7 @@
   "language": "en",
   "tags": ["terminology", "abbreviation", "privacy", "smoke"],
   "review_status": "engineering_reviewed",
-  "input": {"query": "What is known about ALS?"},
+  "input": {"query": "What is known about ALS?", "external_search_confirmed": true, "query_fingerprint": null},
   "expected": {
     "resolution_status": "needs_confirmation",
     "external_query_allowed": false,
@@ -15,7 +15,7 @@
     "provider_search_count": 0,
     "normalized_terms": [],
     "concept_ids": [],
-    "error_code": null,
+    "error_code": "literature_concept_confirmation_required",
     "raw_fragments_in_query": []
   },
   "gate_fields": ["resolution_status", "external_query_allowed", "external_query_count", "repository_create_count", "queue_count", "provider_search_count", "normalized_terms", "concept_ids", "error_code"],

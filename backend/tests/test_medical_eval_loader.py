@@ -133,6 +133,28 @@ def test_loader_rejects_explicit_phone_number(tmp_path: Path) -> None:
         load_dataset(root)
 
 
+def test_loader_rejects_structured_phone_without_label(tmp_path: Path) -> None:
+    root = _copy_dataset(tmp_path)
+    case_path = root / "terminology" / "en_fabry.json"
+    case = _read_json(case_path)
+    case["input"]["phone"] = "13800138000"
+    _write_json(case_path, case)
+
+    with pytest.raises(EvaluationDatasetError, match="disallowed personal identifier"):
+        load_dataset(root)
+
+
+def test_loader_rejects_structured_patient_id(tmp_path: Path) -> None:
+    root = _copy_dataset(tmp_path)
+    case_path = root / "terminology" / "en_fabry.json"
+    case = _read_json(case_path)
+    case["input"]["patient_id"] = "ABC123"
+    _write_json(case_path, case)
+
+    with pytest.raises(EvaluationDatasetError, match="disallowed personal identifier"):
+        load_dataset(root)
+
+
 def test_loader_rejects_unsupported_case_schema(tmp_path: Path) -> None:
     root = _copy_dataset(tmp_path)
     case_path = root / "terminology" / "en_fabry.json"

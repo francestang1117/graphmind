@@ -16,8 +16,8 @@
       "overview": {"title": "合成相关性研究", "summary": "研究报告该暴露因素与结局相关。", "evidence_ids": ["EVIDENCE_001"]}
     }
   },
-  "expected": {"report_valid": true, "citation_valid": true, "support_valid": true, "safety_valid": true, "questions_valid": true},
-  "gate_fields": ["report_valid", "citation_valid", "support_valid", "safety_valid", "questions_valid"],
+  "expected": {"report_valid": true, "citation_valid": true, "support_valid": true, "safety_valid": true, "questions_valid": true, "pipeline_status": "accepted", "provider_call_count": 1},
+  "gate_fields": ["report_valid", "citation_valid", "support_valid", "safety_valid", "questions_valid", "pipeline_status", "provider_call_count"],
   "rationale": "A cautious Chinese association statement should remain distinct from a causal claim.",
   "last_reviewed": "2026-09-15"
 }

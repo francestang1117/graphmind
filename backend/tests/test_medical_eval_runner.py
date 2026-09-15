@@ -97,6 +97,29 @@ def test_terminology_privacy_case_only_releases_normalized_terms() -> None:
     assert "张三" not in released_query
 
 
+def test_terminology_confirmation_failures_never_reach_release_boundary() -> None:
+    dataset = load_dataset(require_minimum=32)
+
+    for case_id, error_code in (
+        (
+            "en_terminology_fabry_unconfirmed_001",
+            "external_search_confirmation_required",
+        ),
+        (
+            "zh_terminology_fabry_stale_confirmation_001",
+            "external_search_query_changed",
+        ),
+    ):
+        case = next(case for case in dataset.cases if case.case_id == case_id)
+        actual = evaluate_terminology(case, dataset.root)
+
+        assert actual["error_code"] == error_code
+        assert actual["external_query_allowed"] is False
+        assert actual["repository_create_count"] == 0
+        assert actual["queue_count"] == 0
+        assert actual["provider_search_count"] == 0
+
+
 def test_insight_evaluation_runs_analyzer_and_repair_path() -> None:
     dataset = load_dataset(require_minimum=32)
     case = next(
@@ -109,6 +132,19 @@ def test_insight_evaluation_runs_analyzer_and_repair_path() -> None:
 
     assert actual["safety_valid"] is False
     assert actual["provider_call_count"] == 2
+
+
+def test_insight_evaluation_gates_pipeline_acceptance_and_rejection() -> None:
+    dataset = load_dataset(require_minimum=32)
+    cases = {
+        "en_insight_safe_association_001": ("accepted", 1),
+        "en_insight_speculation_001": ("rejected", 2),
+    }
+
+    for case_id, expected in cases.items():
+        case = next(case for case in dataset.cases if case.case_id == case_id)
+        actual = evaluate_insight_safety(case, dataset.root)
+        assert (actual["pipeline_status"], actual["provider_call_count"]) == expected
 
 
 def test_abstention_does_not_count_as_complete_match_reasons() -> None:

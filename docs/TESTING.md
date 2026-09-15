@@ -96,8 +96,8 @@ or unsafe.
 ## Offline Medical Evaluation Baseline
 
 The repository ships a versioned synthetic dataset under
-`backend/evals/medical/v1`. It currently contains 33 cases across four suites,
-with at least 16 English and 16 Chinese cases. The runner is filesystem-only:
+`backend/evals/medical/v1`. It currently contains 35 cases across four suites,
+with at least 17 English and 17 Chinese cases. The runner is filesystem-only:
 it does not call PubMed, OpenAI, or any other external service. Recording fakes
 exercise the query release and medical insight analyzer boundaries without
 opening a network connection.

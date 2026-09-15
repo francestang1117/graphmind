@@ -16,8 +16,8 @@
       "overview": {"title": "小鼠模型合成研究", "summary": "该治疗对患者有效。", "evidence_ids": ["EVIDENCE_001"]}
     }
   },
-  "expected": {"report_valid": true, "citation_valid": true, "support_valid": false, "safety_valid": true, "questions_valid": true},
-  "gate_fields": ["report_valid", "citation_valid", "support_valid", "safety_valid", "questions_valid"],
+  "expected": {"report_valid": true, "citation_valid": true, "support_valid": false, "safety_valid": true, "questions_valid": true, "pipeline_status": "rejected", "provider_call_count": 2},
+  "gate_fields": ["report_valid", "citation_valid", "support_valid", "safety_valid", "questions_valid", "pipeline_status", "provider_call_count"],
   "rationale": "Animal evidence must not be presented as established human efficacy.",
   "last_reviewed": "2026-09-15"
 }
