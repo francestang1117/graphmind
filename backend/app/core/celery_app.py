@@ -104,6 +104,7 @@ else:
             "app.tasks.process_document",
             "app.tasks.medical_analysis",
             "app.tasks.literature_search",
+            "app.tasks.document_cleanup",
         ],
     )
     celery_app.conf.update(
@@ -118,6 +119,7 @@ else:
             "app.tasks.process_document.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
             "app.tasks.medical_analysis.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
             "app.tasks.literature_search.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
+            "app.tasks.document_cleanup.*": {"queue": settings.CELERY_TASK_DEFAULT_QUEUE},
         },
     )
     # Beat is opt-in. Reindexing is useful, but local dev should not suddenly

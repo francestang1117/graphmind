@@ -11,6 +11,7 @@ import uuid
 
 import pytest
 from sqlalchemy import create_engine, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool, StaticPool
 
@@ -661,6 +662,67 @@ def test_questions_are_scoped_and_document_cleanup_removes_copied_content():
             assert db.scalar(select(func.count()).select_from(ClinicianQuestionRecord)) == 0
             assert db.scalar(select(func.count()).select_from(VisitBriefItemRecord)) == 0
             assert db.scalar(select(func.count()).select_from(VisitBriefRecord)) == 0
+    finally:
+        engine.dispose()
+
+
+def test_document_cleanup_surfaces_database_failures():
+    class FailingSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def scalars(self, *_args, **_kwargs):
+            raise SQLAlchemyError("simulated cleanup failure")
+
+    repository = VisitPreparationRepository(
+        session_factory=FailingSession,
+        enabled=lambda: True,
+    )
+
+    with pytest.raises(VisitPreparationError) as exc:
+        repository.delete_for_document(
+            "document-1",
+            user_id="user-1",
+            workspace_id="workspace-1",
+        )
+
+    assert exc.value.code == "visit_preparation_cleanup_failed"
+
+
+def test_brief_reads_ignore_empty_legacy_rows():
+    engine, sessions = _session_factory()
+    try:
+        _seed(sessions)
+        now = datetime.now(timezone.utc)
+        with sessions() as db:
+            db.add(
+                VisitBriefRecord(
+                    id="empty-brief",
+                    user_id="user-1",
+                    workspace_id="workspace-1",
+                    status="active",
+                    language="en",
+                    generated_at=now,
+                    data_cutoff_at=now,
+                    disclaimer="For discussion only.",
+                    created_at=now,
+                )
+            )
+            db.commit()
+
+        service = _service(sessions)
+        assert service.list_briefs(user_id="user-1", workspace_id="workspace-1") == {
+            "items": [],
+            "total": 0,
+        }
+        assert service.get_brief(
+            "empty-brief",
+            user_id="user-1",
+            workspace_id="workspace-1",
+        ) is None
     finally:
         engine.dispose()
 

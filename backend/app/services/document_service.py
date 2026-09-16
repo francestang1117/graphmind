@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.database import db_enabled
 from app.core.workspace import default_workspace_id
 from app.core.errors import (
+    DocumentCleanupError,
     DuplicateUploadError,
     MalwareDetectedError,
     StorageOperationError,
@@ -14,6 +15,7 @@ from app.core.errors import (
 )
 from app.services.document_repository import DocumentRepository, document_repository
 from app.services.file_storage import DuplicateFileError, FileStorage, FileStorageError, file_storage
+from app.services.medical.visit_preparation.exceptions import VisitPreparationError
 from app.services.virus_scanner import VirusScanner, virus_scanner
 from app.utils.file_validator import FileValidator
 
@@ -203,9 +205,6 @@ class DocumentService:
                 evidence_matching_repository,
             )
             from app.services.medical.literature.repository import literature_repository
-            from app.services.medical.visit_preparation.repository import (
-                visit_preparation_repository,
-            )
 
             self._cancel_document_jobs(document_id, user_id, workspace_id)
             if workspace_id is not None:
@@ -230,7 +229,7 @@ class DocumentService:
                     user_id=user_id,
                     workspace_id=workspace_id,
                 )
-                visit_preparation_repository.delete_for_document(
+                self._delete_visit_preparation_data(
                     document_id,
                     user_id=user_id,
                     workspace_id=workspace_id,
@@ -246,9 +245,71 @@ class DocumentService:
                 medical_repository.delete_for_document(document_id, user_id=user_id)
                 medical_analysis_repository.delete_for_document(document_id, user_id=user_id)
                 evidence_matching_repository.delete_for_document(document_id, user_id=user_id)
-                visit_preparation_repository.delete_for_document(document_id, user_id=user_id)
+                self._delete_visit_preparation_data(
+                    document_id,
+                    user_id=user_id,
+                    workspace_id=None,
+                )
                 literature_repository.delete_for_document(document_id, user_id=user_id)
         return deleted
+
+    def _delete_visit_preparation_data(
+        self,
+        document_id: str,
+        *,
+        user_id: str,
+        workspace_id: Optional[str],
+    ) -> None:
+        """Surface cleanup failures and arrange an idempotent retry."""
+        from app.services.medical.visit_preparation.repository import (
+            visit_preparation_repository,
+        )
+
+        try:
+            visit_preparation_repository.delete_for_document(
+                document_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+        except VisitPreparationError as exc:
+            log.error(
+                "Visit preparation cleanup is incomplete for deleted document %s",
+                document_id,
+            )
+            self._schedule_visit_preparation_cleanup(
+                document_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+            raise DocumentCleanupError() from exc
+
+    @staticmethod
+    def _schedule_visit_preparation_cleanup(
+        document_id: str,
+        *,
+        user_id: str,
+        workspace_id: Optional[str],
+    ) -> None:
+        """Queue a retry after the document tombstone has been written."""
+        try:
+            from app.tasks.document_cleanup import retry_visit_preparation_cleanup
+
+            retry_visit_preparation_cleanup.apply_async(
+                kwargs={
+                    "document_id": document_id,
+                    "user_id": user_id,
+                    "workspace_id": workspace_id,
+                },
+                countdown=5,
+            )
+        except Exception as exc:
+            # The original deletion failure is still surfaced to the caller;
+            # this log records that a broker outage also blocked the retry.
+            log.error(
+                "Could not schedule visit preparation cleanup for document %s: %s",
+                document_id,
+                exc,
+            )
 
     def _cancel_document_jobs(
         self,

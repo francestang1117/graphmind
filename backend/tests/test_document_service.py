@@ -1,5 +1,8 @@
 """Document service behavior that spans metadata and file storage."""
 
+import pytest
+
+from app.core.errors import DocumentCleanupError
 from app.services.document_service import DocumentService
 
 
@@ -122,3 +125,46 @@ def test_delete_marks_active_jobs_revoked_before_revoke(monkeypatch):
         )
     ]
     assert celery.control.revoked == [("job-1", True)]
+
+
+def test_delete_does_not_report_success_when_visit_cleanup_fails(monkeypatch):
+    service = DocumentService(
+        storage=MissingFileStorage(),
+        repository=ActiveDocumentRepository(),
+        use_database=True,
+        virus_scan_enabled=False,
+        job_repo=EmptyJobRepository(),
+    )
+
+    for path in (
+        "app.services.parsed_artifact_repository.parsed_artifact_repository.delete_for_document",
+        "app.services.graph_repository.graph_repository.delete_for_document",
+        "app.services.medical.repository.medical_repository.delete_for_document",
+        "app.services.medical.ai.analysis_repository.medical_analysis_repository.delete_for_document",
+        "app.services.medical.evidence_matching.repository.evidence_matching_repository.delete_for_document",
+        "app.services.medical.literature.repository.literature_repository.delete_for_document",
+    ):
+        monkeypatch.setattr(path, lambda *args, **kwargs: None)
+
+    def fail_cleanup(*_args, **_kwargs):
+        from app.services.medical.visit_preparation.exceptions import VisitPreparationError
+
+        raise VisitPreparationError(
+            "simulated cleanup failure",
+            code="visit_preparation_cleanup_failed",
+        )
+
+    monkeypatch.setattr(
+        "app.services.medical.visit_preparation.repository.visit_preparation_repository.delete_for_document",
+        fail_cleanup,
+    )
+    monkeypatch.setattr(
+        service,
+        "_schedule_visit_preparation_cleanup",
+        lambda *args, **kwargs: None,
+    )
+
+    with pytest.raises(DocumentCleanupError) as exc:
+        service.delete_document("notes.md", "u1")
+
+    assert exc.value.code == "document_cleanup_incomplete"

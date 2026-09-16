@@ -560,10 +560,14 @@ class VisitPreparationRepository:
     def list_briefs(self, *, user_id: str, workspace_id: str, limit: int = 50) -> dict[str, Any]:
         self._require_available()
         with self.session_factory() as db:
+            has_items = select(VisitBriefItemRecord.id).where(
+                VisitBriefItemRecord.visit_brief_id == VisitBriefRecord.id
+            ).exists()
             conditions = (
                 VisitBriefRecord.user_id == user_id,
                 VisitBriefRecord.workspace_id == workspace_id,
                 VisitBriefRecord.status == "active",
+                has_items,
             )
             total = int(db.scalar(select(func.count()).select_from(VisitBriefRecord).where(*conditions)) or 0)
             rows = db.scalars(
@@ -577,12 +581,16 @@ class VisitPreparationRepository:
     def get_brief(self, brief_id: str, *, user_id: str, workspace_id: str) -> dict[str, Any] | None:
         self._require_available()
         with self.session_factory() as db:
+            has_items = select(VisitBriefItemRecord.id).where(
+                VisitBriefItemRecord.visit_brief_id == VisitBriefRecord.id
+            ).exists()
             row = db.scalars(
                 select(VisitBriefRecord).where(
                     VisitBriefRecord.id == brief_id,
                     VisitBriefRecord.user_id == user_id,
                     VisitBriefRecord.workspace_id == workspace_id,
                     VisitBriefRecord.status == "active",
+                    has_items,
                 )
             ).first()
             return _brief_dict(db, row) if row else None
@@ -670,8 +678,14 @@ class VisitPreparationRepository:
                     )
                 self._delete_empty_briefs(db, user_id=user_id, workspace_id=scope)
                 db.commit()
+        except VisitPreparationError:
+            raise
         except SQLAlchemyError as exc:
             log.warning("Could not delete visit preparation data for %s: %s", document_id, exc)
+            raise VisitPreparationError(
+                "Could not clean up visit preparation data for this document.",
+                code="visit_preparation_cleanup_failed",
+            ) from exc
 
     def _question_conditions(
         self,

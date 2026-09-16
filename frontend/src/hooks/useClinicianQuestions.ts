@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   deleteClinicianQuestion,
@@ -27,10 +27,20 @@ export function useClinicianQuestions(
     refetchOnWindowFocus: false,
   });
 
+  useEffect(() => {
+    for (const item of query.data?.items ?? []) {
+      const rememberedVersion = latestVersions.current.get(item.id) ?? 0;
+      latestVersions.current.set(item.id, Math.max(rememberedVersion, item.version));
+    }
+  }, [query.data?.items]);
+
   const replaceQuestionCache = (updated: ClinicianQuestion | ClinicianQuestion[]) => {
-    const updates = new Map(
-      (Array.isArray(updated) ? updated : [updated]).map((item) => [item.id, item]),
-    );
+    const updatedItems = Array.isArray(updated) ? updated : [updated];
+    const updates = new Map(updatedItems.map((item) => [item.id, item]));
+    for (const item of updatedItems) {
+      const rememberedVersion = latestVersions.current.get(item.id) ?? 0;
+      latestVersions.current.set(item.id, Math.max(rememberedVersion, item.version));
+    }
     queryClient.setQueryData<ClinicianQuestionList>(queryKey, (current) => {
       if (!current) return current;
       return {
@@ -46,7 +56,8 @@ export function useClinicianQuestions(
         analysis_run_id: input.analysisRunId,
         suggestion_id: input.suggestionId,
       }),
-    onSuccess: () => {
+    onSuccess: ({ item }) => {
+      replaceQuestionCache(item);
       void queryClient.invalidateQueries({ queryKey });
     },
   });
@@ -81,8 +92,8 @@ export function useClinicianQuestions(
     const run: Promise<ClinicianQuestion> = (previous ?? Promise.resolve()).then(async () => {
       // A queued edit must use the version returned by the preceding edit,
       // even when both UI events captured the same rendered question object.
-      const expectedVersion = latestVersions.current.get(input.questionId)
-        ?? input.expected_version;
+      const rememberedVersion = latestVersions.current.get(input.questionId) ?? 0;
+      const expectedVersion = Math.max(input.expected_version, rememberedVersion);
       const updated = await updateMutation.mutateAsync({
         ...input,
         expected_version: expectedVersion,
@@ -106,8 +117,10 @@ export function useClinicianQuestions(
   const deleteMutation = useMutation({
     mutationFn: (questionId: string) =>
       deleteClinicianQuestion(workspaceId as string, questionId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey });
+    onSuccess: async () => {
+      // Wait for the compacted positions and versions before allowing the
+      // next edit to use the refreshed question list.
+      await queryClient.invalidateQueries({ queryKey });
     },
   });
 
@@ -163,7 +176,7 @@ export function useClinicianQuestions(
     saveError: saveMutation.error,
     updateQuestion,
     reorderQuestions: reorderMutation.mutateAsync,
-    updating: updateMutation.isPending || reorderMutation.isPending,
+    updating: updateMutation.isPending || reorderMutation.isPending || deleteMutation.isPending,
     updateError: updateMutation.error,
     deleteQuestion: deleteMutation.mutateAsync,
     deleting: deleteMutation.isPending,
