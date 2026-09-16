@@ -3,10 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   deleteClinicianQuestion,
   listClinicianQuestions,
+  reorderClinicianQuestions,
   saveClinicianQuestion,
   updateClinicianQuestion,
   type ClinicianQuestionStatus,
   type ClinicianQuestion,
+  type ClinicianQuestionList,
 } from "../services/api";
 
 export function useClinicianQuestions(
@@ -22,6 +24,19 @@ export function useClinicianQuestions(
     enabled: Boolean(workspaceId),
     refetchOnWindowFocus: false,
   });
+
+  const replaceQuestionCache = (updated: ClinicianQuestion | ClinicianQuestion[]) => {
+    const updates = new Map(
+      (Array.isArray(updated) ? updated : [updated]).map((item) => [item.id, item]),
+    );
+    queryClient.setQueryData<ClinicianQuestionList>(queryKey, (current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        items: current.items.map((item) => updates.get(item.id) ?? item),
+      };
+    });
+  };
 
   const saveMutation = useMutation({
     mutationFn: (input: { analysisRunId: string; suggestionId: string }) =>
@@ -46,7 +61,8 @@ export function useClinicianQuestions(
       const { questionId, ...body } = input;
       return updateClinicianQuestion(workspaceId as string, questionId, body);
     },
-    onSuccess: () => {
+    onSuccess: (updated) => {
+      replaceQuestionCache(updated);
       void queryClient.invalidateQueries({ queryKey });
     },
   });
@@ -55,6 +71,24 @@ export function useClinicianQuestions(
     mutationFn: (questionId: string) =>
       deleteClinicianQuestion(workspaceId as string, questionId),
     onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey });
+    },
+  });
+
+  const reorderMutation = useMutation({
+    mutationFn: (input: {
+      questionId: string;
+      targetQuestionId: string;
+      expectedVersion: number;
+      targetExpectedVersion: number;
+    }) => reorderClinicianQuestions(workspaceId as string, {
+      question_id: input.questionId,
+      target_question_id: input.targetQuestionId,
+      expected_version: input.expectedVersion,
+      target_expected_version: input.targetExpectedVersion,
+    }),
+    onSuccess: (updated) => {
+      replaceQuestionCache(updated);
       void queryClient.invalidateQueries({ queryKey });
     },
   });
@@ -92,7 +126,8 @@ export function useClinicianQuestions(
     savingSuggestionId: saveMutation.variables?.suggestionId ?? null,
     saveError: saveMutation.error,
     updateQuestion: updateMutation.mutateAsync,
-    updating: updateMutation.isPending,
+    reorderQuestions: reorderMutation.mutateAsync,
+    updating: updateMutation.isPending || reorderMutation.isPending,
     updateError: updateMutation.error,
     deleteQuestion: deleteMutation.mutateAsync,
     deleting: deleteMutation.isPending,

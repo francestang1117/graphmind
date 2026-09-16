@@ -61,6 +61,9 @@ function brief(): VisitBrief {
       id: "item-1",
       clinician_question_id: "question-1",
       document_id: "document-1",
+      document_title: "example-paper.pdf",
+      document_date: "2026-08-01",
+      parsed_source_hash: "abcdef1234567890",
       analysis_run_id: "run-1",
       position: 0,
       question: "Which people were included in this study?",
@@ -78,8 +81,9 @@ function brief(): VisitBrief {
   };
 }
 
-function configure(items: ClinicianQuestion[] = [question()]) {
+function configure(items: ClinicianQuestion[] = [question()], updating = false) {
   const updateQuestion = vi.fn().mockResolvedValue(items[0]);
+  const reorderQuestions = vi.fn().mockResolvedValue(items);
   const deleteQuestion = vi.fn().mockResolvedValue(undefined);
   const createBrief = vi.fn().mockResolvedValue(brief());
   questionHooks.useClinicianQuestions.mockReturnValue({
@@ -89,6 +93,8 @@ function configure(items: ClinicianQuestion[] = [question()]) {
     error: null,
     refetch: vi.fn(),
     updateQuestion,
+    reorderQuestions,
+    updating,
     deleteQuestion,
     savedSuggestionIds: new Set(["suggestion-1"]),
     staleSuggestionIds: new Set(),
@@ -107,7 +113,7 @@ function configure(items: ClinicianQuestion[] = [question()]) {
     deleteBrief: vi.fn(),
     deleting: false,
   });
-  return { updateQuestion, createBrief };
+  return { updateQuestion, reorderQuestions, createBrief };
 }
 
 describe("VisitPreparationPanel", () => {
@@ -147,6 +153,40 @@ describe("VisitPreparationPanel", () => {
     expect(screen.getByText("Source needs refresh")).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: /Select question/ })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Create visit brief" })).toBeDisabled();
+  });
+
+  it("uses one atomic request to move questions across documents", async () => {
+    const user = userEvent.setup();
+    const first = question({ position: 0 });
+    const second = question({
+      id: "question-2",
+      document_id: "document-2",
+      document_title: "second-paper.pdf",
+      suggestion_id: "suggestion-2",
+      position: 1,
+    });
+    const { updateQuestion, reorderQuestions } = configure([first, second]);
+    render(<VisitPreparationPanel workspaceId="workspace-1" />);
+
+    await user.click(screen.getAllByRole("button", { name: "Move question down" })[0]);
+
+    expect(reorderQuestions).toHaveBeenCalledWith({
+      questionId: "question-1",
+      targetQuestionId: "question-2",
+      expectedVersion: 1,
+      targetExpectedVersion: 1,
+    });
+    expect(updateQuestion).not.toHaveBeenCalled();
+  });
+
+  it("disables card edits while a save is in flight", () => {
+    configure([question()], true);
+    render(<VisitPreparationPanel workspaceId="workspace-1" />);
+
+    expect(screen.getByLabelText("Status")).toBeDisabled();
+    expect(screen.getByLabelText("Priority")).toBeDisabled();
+    expect(screen.getByLabelText("Private note")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete saved question" })).toBeDisabled();
   });
 
   it("creates and shows a snapshot containing only the selected question", async () => {

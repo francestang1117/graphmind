@@ -134,6 +134,9 @@ class VisitPreparationService:
     def update_question(self, question_id: str, **kwargs: Any) -> dict[str, Any]:
         return self.repository.update_question(question_id, **kwargs)
 
+    def reorder_questions(self, **kwargs: Any) -> list[dict[str, Any]]:
+        return self.repository.reorder_questions(**kwargs)
+
     def delete_question(self, question_id: str, **kwargs: Any) -> bool:
         return self.repository.delete_question(question_id, **kwargs)
 

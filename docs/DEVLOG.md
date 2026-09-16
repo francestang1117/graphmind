@@ -1858,3 +1858,14 @@ stale and unvalidated sources, selection limits, dismissed questions, and
 immutable snapshots. These cases are engineering regression checks, not
 clinically expert-validated quality judgments; expert review remains a future
 dataset task.
+
+Follow-up hardening keeps each brief item self-describing by snapshotting the
+document title, document date, and parsed source hash. Printable briefs render
+evidence as always-visible articles and label each page/section with its source
+document. Question positions are allocated per workspace and status group, and
+reordering now uses one version-checked transaction that locks the group in a
+stable order. The frontend disables card edits while a mutation is pending and
+writes successful versions into the query cache immediately, preventing normal
+status and note edits from reusing an old optimistic-lock version. Source
+status also becomes unavailable when any live evidence row is missing, and
+dismissed-question brief errors are reported as validation errors.

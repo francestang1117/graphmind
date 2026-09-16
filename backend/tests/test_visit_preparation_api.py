@@ -114,6 +114,45 @@ def test_repeated_save_api_call_is_idempotent(monkeypatch):
     assert json.loads(response.body)["source_refreshed"] is True
 
 
+def test_reorder_api_passes_both_versions_to_the_atomic_service(monkeypatch):
+    _patch_scope(monkeypatch)
+    captured = {}
+
+    def reorder_questions(**kwargs):
+        captured.update(kwargs)
+        return [_item()]
+
+    monkeypatch.setattr(
+        visit_preparation.visit_preparation_service,
+        "reorder_questions",
+        reorder_questions,
+    )
+    body = visit_preparation.ClinicianQuestionReorderRequest(
+        question_id="question-row-1",
+        target_question_id="question-row-2",
+        expected_version=3,
+        target_expected_version=4,
+    )
+
+    response = asyncio.run(
+        visit_preparation.reorder_clinician_questions(
+            "workspace-1",
+            body,
+            user=SimpleNamespace(id="user-1"),
+        )
+    )
+
+    assert len(response) == 1
+    assert captured == {
+        "question_id": "question-row-1",
+        "target_question_id": "question-row-2",
+        "user_id": "user-1",
+        "workspace_id": "workspace-1",
+        "expected_version": 3,
+        "target_expected_version": 4,
+    }
+
+
 def test_client_cannot_submit_question_text_or_evidence():
     with pytest.raises(ValidationError):
         visit_preparation.ClinicianQuestionCreateRequest(
@@ -151,6 +190,31 @@ def test_update_maps_version_conflict_to_stable_409_error(monkeypatch):
 
     assert exc.value.status_code == 409
     assert exc.value.code == "clinician_question_version_conflict"
+
+
+def test_dismissed_question_maps_to_unprocessable_entity(monkeypatch):
+    _patch_scope(monkeypatch)
+
+    def create_brief(**_kwargs):
+        raise VisitPreparationError(
+            "Dismissed questions cannot be added to a visit brief.",
+            code="visit_brief_question_dismissed",
+        )
+
+    monkeypatch.setattr(visit_preparation.visit_preparation_service, "create_visit_brief", create_brief)
+    body = visit_preparation.VisitBriefCreateRequest(question_ids=["question-row-1"])
+
+    with pytest.raises(AppError) as exc:
+        asyncio.run(
+            visit_preparation.create_visit_brief(
+                "workspace-1",
+                body,
+                user=SimpleNamespace(id="user-1"),
+            )
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.code == "visit_brief_question_dismissed"
 
 
 def test_visit_brief_request_rejects_empty_and_oversized_selections():

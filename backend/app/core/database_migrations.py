@@ -265,6 +265,31 @@ def _ensure_medical_tables(connection) -> None:
             f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"
         )
 
+    _normalize_clinician_question_positions(connection)
+
+
+def _normalize_clinician_question_positions(connection) -> None:
+    """Repair legacy per-document positions into workspace status groups."""
+    if not _has_table(connection, "clinician_questions"):
+        return
+
+    rows = connection.execute(
+        text(
+            "SELECT id, user_id, workspace_id, status "
+            "FROM clinician_questions "
+            "ORDER BY user_id, workspace_id, status, position, created_at, id"
+        )
+    ).all()
+    next_position: dict[tuple[str, str, str], int] = {}
+    for row in rows:
+        group = (str(row.user_id), str(row.workspace_id), str(row.status))
+        position = next_position.get(group, 0)
+        connection.execute(
+            text("UPDATE clinician_questions SET position = :position WHERE id = :id"),
+            {"id": row.id, "position": position},
+        )
+        next_position[group] = position + 1
+
 def _ensure_literature_match_tables(connection, timestamp_type: str | None = None) -> None:
     """Create the local finding-to-article match tables for older databases."""
     if not _has_table(connection, "documents"):
@@ -619,6 +644,9 @@ def _ensure_visit_preparation_tables(connection) -> None:
                 visit_brief_id VARCHAR(64) NOT NULL,
                 clinician_question_id VARCHAR(64) NOT NULL,
                 document_id VARCHAR(255) NOT NULL,
+                document_title_snapshot VARCHAR(255) NOT NULL DEFAULT '',
+                document_date_snapshot VARCHAR(32) NOT NULL DEFAULT '',
+                parsed_source_hash_snapshot VARCHAR(64) NOT NULL DEFAULT '',
                 analysis_run_id VARCHAR(64) NOT NULL,
                 position INTEGER NOT NULL,
                 question_snapshot TEXT NOT NULL,
@@ -639,6 +667,38 @@ def _ensure_visit_preparation_tables(connection) -> None:
                     REFERENCES medical_analysis_runs(id) ON DELETE CASCADE
             )
             """
+        )
+
+    # Existing PR13 databases need the same immutable source fields. Defaults
+    # keep old rows readable when their original document has been deleted.
+    for column, definition in (
+        ("document_title_snapshot", "VARCHAR(255) NOT NULL DEFAULT ''"),
+        ("document_date_snapshot", "VARCHAR(32) NOT NULL DEFAULT ''"),
+        ("parsed_source_hash_snapshot", "VARCHAR(64) NOT NULL DEFAULT ''"),
+    ):
+        if not _has_column(connection, "visit_brief_items", column):
+            connection.exec_driver_sql(
+                f"ALTER TABLE visit_brief_items ADD COLUMN {column} {definition}"
+            )
+
+    # Backfill titles and source versions while the live document is still
+    # available; rows for already-deleted documents remain explicitly blank.
+    for column, document_expression in (
+        (
+            "document_title_snapshot",
+            "COALESCE(NULLIF(d.original_filename, ''), d.filename, '')",
+        ),
+        ("document_date_snapshot", "COALESCE(d.document_date, '')"),
+        ("parsed_source_hash_snapshot", "COALESCE(d.parsed_source_hash, '')"),
+    ):
+        connection.execute(
+            text(
+                f"UPDATE visit_brief_items SET {column} = "
+                f"(SELECT {document_expression} FROM documents AS d "
+                f"WHERE d.id = visit_brief_items.document_id) "
+                f"WHERE {column} = '' AND EXISTS "
+                f"(SELECT 1 FROM documents AS d WHERE d.id = visit_brief_items.document_id)"
+            )
         )
 
     indexes = (

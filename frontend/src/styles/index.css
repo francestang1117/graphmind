@@ -4392,6 +4392,16 @@ button {
   list-style: none;
 }
 
+.visit-evidence-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  color: #bfdbfe;
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .visit-evidence-item summary::-webkit-details-marker { display: none; }
 
 .visit-evidence-item blockquote {
@@ -4554,6 +4564,14 @@ button {
   font-size: 10px;
 }
 
+.visit-brief-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+
 .visit-brief-note strong { color: var(--text); }
 
 .visit-saved-briefs {
@@ -4682,6 +4700,7 @@ button {
   .visit-brief-disclaimer,
   .visit-eyebrow,
   .visit-evidence-item summary,
+  .visit-evidence-summary,
   .visit-evidence-item blockquote {
     color: #111;
   }
@@ -4699,5 +4718,10 @@ button {
   .visit-evidence-item {
     border-color: #bbb;
     background: #fafafa;
+  }
+
+  .visit-evidence-item-printable {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }

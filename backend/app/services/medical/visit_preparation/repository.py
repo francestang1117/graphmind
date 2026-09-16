@@ -140,7 +140,7 @@ class VisitPreparationRepository:
                     select(func.max(ClinicianQuestionRecord.position)).where(
                         ClinicianQuestionRecord.user_id == user_id,
                         ClinicianQuestionRecord.workspace_id == workspace_id,
-                        ClinicianQuestionRecord.document_id == document.id,
+                        ClinicianQuestionRecord.status == "saved",
                     )
                 )
                 row = ClinicianQuestionRecord(
@@ -266,6 +266,25 @@ class VisitPreparationRepository:
                         )
                     if row.status != status:
                         row.status = status
+                        if position is None:
+                            # Status groups are ordered at workspace scope, so
+                            # moving a question appends it to the new group.
+                            max_position = db.scalar(
+                                select(func.max(ClinicianQuestionRecord.position)).where(
+                                    ClinicianQuestionRecord.user_id == user_id,
+                                    ClinicianQuestionRecord.workspace_id == workspace_id,
+                                    ClinicianQuestionRecord.status == status,
+                                    ClinicianQuestionRecord.id != row.id,
+                                    ClinicianQuestionRecord.document_id.in_(
+                                        select(DocumentRecord.id).where(
+                                            DocumentRecord.user_id == user_id,
+                                            DocumentRecord.workspace_id == workspace_id,
+                                            DocumentRecord.deleted_at.is_(None),
+                                        )
+                                    ),
+                                )
+                            )
+                            row.position = int(max_position if max_position is not None else -1) + 1
                         changed = True
                 if priority is not None and row.priority != priority:
                     row.priority = priority
@@ -289,6 +308,92 @@ class VisitPreparationRepository:
             log.warning("Could not update clinician question %s: %s", question_id, exc)
             raise VisitPreparationError(
                 "Could not update the clinician question.",
+                code="visit_preparation_storage_failed",
+            ) from exc
+
+    def reorder_questions(
+        self,
+        question_id: str,
+        target_question_id: str,
+        *,
+        user_id: str,
+        workspace_id: str,
+        expected_version: int,
+        target_expected_version: int,
+    ) -> list[dict[str, Any]]:
+        """Move two questions in one workspace-scoped transaction."""
+        self._require_available()
+        if question_id == target_question_id:
+            raise VisitPreparationError(
+                "A question cannot be reordered against itself.",
+                code="clinician_question_reorder_invalid",
+            )
+
+        try:
+            with self.session_factory() as db:
+                source = db.scalars(
+                    select(ClinicianQuestionRecord).where(
+                        ClinicianQuestionRecord.id == question_id,
+                        ClinicianQuestionRecord.user_id == user_id,
+                        ClinicianQuestionRecord.workspace_id == workspace_id,
+                    )
+                ).first()
+                if not source or not self._live_document(db, source.document_id, user_id, workspace_id):
+                    raise VisitPreparationError(
+                        "The clinician question was not found.",
+                        code="clinician_question_not_found",
+                    )
+
+                # Lock the complete status group in a deterministic order.
+                # Both reorder directions therefore acquire the same locks.
+                live_document_ids = select(DocumentRecord.id).where(
+                    DocumentRecord.user_id == user_id,
+                    DocumentRecord.workspace_id == workspace_id,
+                    DocumentRecord.deleted_at.is_(None),
+                )
+                rows = db.scalars(
+                    select(ClinicianQuestionRecord)
+                    .where(
+                        ClinicianQuestionRecord.user_id == user_id,
+                        ClinicianQuestionRecord.workspace_id == workspace_id,
+                        ClinicianQuestionRecord.status == source.status,
+                        ClinicianQuestionRecord.document_id.in_(live_document_ids),
+                    )
+                    .order_by(ClinicianQuestionRecord.position, ClinicianQuestionRecord.id)
+                    .with_for_update()
+                ).all()
+                by_id = {row.id: row for row in rows}
+                target = by_id.get(target_question_id)
+                source = by_id.get(question_id)
+                if not source or not target:
+                    raise VisitPreparationError(
+                        "Questions must belong to the same status group.",
+                        code="clinician_question_reorder_invalid",
+                    )
+                if source.version != expected_version or target.version != target_expected_version:
+                    raise VisitPreparationError(
+                        "One or more questions were changed elsewhere. Reload the list and try again.",
+                        code="clinician_question_version_conflict",
+                    )
+
+                source_index = rows.index(source)
+                target_index = rows.index(target)
+                rows[source_index], rows[target_index] = rows[target_index], rows[source_index]
+                now = _utc_now()
+                for position, row in enumerate(rows):
+                    if row.position == position:
+                        continue
+                    row.position = position
+                    row.version = max(1, row.version or 1) + 1
+                    row.updated_at = now
+                db.commit()
+                return [_question_dict(db, source), _question_dict(db, target)]
+        except VisitPreparationError:
+            raise
+        except SQLAlchemyError as exc:
+            log.warning("Could not reorder clinician questions %s and %s: %s", question_id, target_question_id, exc)
+            raise VisitPreparationError(
+                "Could not reorder the clinician questions.",
                 code="visit_preparation_storage_failed",
             ) from exc
 
@@ -388,6 +493,12 @@ class VisitPreparationRepository:
                 db.add(brief)
                 db.flush()
                 for position, row in enumerate(ordered_rows):
+                    document = _document_for_question(db, row)
+                    if not document:
+                        raise VisitPreparationError(
+                            "A selected question no longer has a source document.",
+                            code="visit_brief_source_outdated",
+                        )
                     evidence = _snapshot_evidence(db, row)
                     if len(evidence) != len(_loads_list(row.evidence_ids_json)):
                         raise VisitPreparationError(
@@ -400,6 +511,9 @@ class VisitPreparationRepository:
                             visit_brief_id=brief.id,
                             clinician_question_id=row.id,
                             document_id=row.document_id,
+                            document_title_snapshot=_document_title(document),
+                            document_date_snapshot=str(document.document_date or ""),
+                            parsed_source_hash_snapshot=str(document.parsed_source_hash or ""),
                             analysis_run_id=row.analysis_run_id,
                             position=position,
                             question_snapshot=row.question,
@@ -665,6 +779,9 @@ def _brief_dict(db, row: VisitBriefRecord | None) -> dict[str, Any] | None:
                 "id": item.id,
                 "clinician_question_id": item.clinician_question_id,
                 "document_id": item.document_id,
+                "document_title": item.document_title_snapshot or "Unavailable document",
+                "document_date": item.document_date_snapshot,
+                "parsed_source_hash": item.parsed_source_hash_snapshot,
                 "analysis_run_id": item.analysis_run_id,
                 "position": item.position,
                 "question": item.question_snapshot,
@@ -710,7 +827,39 @@ def _source_status(db, row: ClinicianQuestionRecord) -> str:
         or analysis.parsed_source_hash != document.parsed_source_hash
     ):
         return "outdated"
+    evidence_ids = [
+        str(evidence_id)
+        for evidence_id in _loads_list(row.evidence_ids_json)
+        if str(evidence_id)
+    ]
+    if not evidence_ids or len(set(evidence_ids)) != len(evidence_ids):
+        return "unavailable"
+    evidence_count = db.scalar(
+        select(func.count(MedicalAnalysisEvidenceRecord.id)).where(
+            MedicalAnalysisEvidenceRecord.run_id == analysis.id,
+            MedicalAnalysisEvidenceRecord.evidence_id.in_(evidence_ids),
+        )
+    )
+    if int(evidence_count or 0) != len(evidence_ids):
+        return "unavailable"
     return "current"
+
+
+def _document_for_question(db, row: ClinicianQuestionRecord) -> DocumentRecord | None:
+    return db.scalars(
+        select(DocumentRecord).where(
+            DocumentRecord.id == row.document_id,
+            DocumentRecord.user_id == row.user_id,
+            DocumentRecord.workspace_id == row.workspace_id,
+            DocumentRecord.deleted_at.is_(None),
+        )
+    ).first()
+
+
+def _document_title(document: DocumentRecord | None) -> str:
+    if not document:
+        return "Unavailable document"
+    return (document.original_filename or document.filename or "Untitled document")[:255]
 
 
 def _snapshot_evidence(db, row: ClinicianQuestionRecord) -> list[dict[str, Any]]:

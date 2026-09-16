@@ -80,8 +80,8 @@ export default function VisitPreparationPanel({ workspaceId }: Props) {
   };
 
   const moveQuestion = async (item: ClinicianQuestion, direction: -1 | 1) => {
-    // Positions are swapped within the same status group; each PATCH carries
-    // the rendered version so another tab cannot be silently overwritten.
+    // The server locks and reorders the whole workspace/status group in one
+    // transaction, so a failed version check cannot leave a half-swap.
     const ordered = questions.items
       .filter((candidate) => candidate.status === item.status)
       .sort((left, right) => left.position - right.position);
@@ -90,15 +90,11 @@ export default function VisitPreparationPanel({ workspaceId }: Props) {
     if (!target) return;
     setActionError("");
     try {
-      await questions.updateQuestion({
+      await questions.reorderQuestions({
         questionId: item.id,
-        position: target.position,
-        expected_version: item.version,
-      });
-      await questions.updateQuestion({
-        questionId: target.id,
-        position: item.position,
-        expected_version: target.version,
+        targetQuestionId: target.id,
+        expectedVersion: item.version,
+        targetExpectedVersion: target.version,
       });
     } catch (error) {
       setActionError(errorMessage(error, "Could not reorder this question."));
@@ -237,6 +233,7 @@ export default function VisitPreparationPanel({ workspaceId }: Props) {
                             question={item}
                             selected={selectedIds.has(item.id)}
                             selectable={item.status !== "dismissed" && item.source_status === "current"}
+                            updating={questions.updating}
                             canMoveUp={groupIndex > 0}
                             canMoveDown={groupIndex < orderedGroup.length - 1}
                             onSelect={(selected) => toggleSelected(item, selected)}

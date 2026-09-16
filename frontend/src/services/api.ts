@@ -291,6 +291,9 @@ export interface VisitBriefItem {
   id: string;
   clinician_question_id: string;
   document_id: string;
+  document_title: string;
+  document_date: string;
+  parsed_source_hash: string;
   analysis_run_id: string;
   position: number;
   question: string;
@@ -856,6 +859,22 @@ export const updateClinicianQuestion = (
   http
     .patch<ClinicianQuestion>(
       `/workspaces/${encodeURIComponent(workspaceId)}/clinician-questions/${encodeURIComponent(questionId)}`,
+      body,
+    )
+    .then((r) => r.data);
+
+export const reorderClinicianQuestions = (
+  workspaceId: string,
+  body: {
+    question_id: string;
+    target_question_id: string;
+    expected_version: number;
+    target_expected_version: number;
+  },
+): Promise<ClinicianQuestion[]> =>
+  http
+    .patch<ClinicianQuestion[]>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/clinician-questions/reorder`,
       body,
     )
     .then((r) => r.data);

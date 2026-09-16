@@ -16,6 +16,9 @@ const brief: VisitBrief = {
       id: "item-1",
       clinician_question_id: "question-1",
       document_id: "document-1",
+      document_title: "example-paper.pdf",
+      document_date: "2026-08-01",
+      parsed_source_hash: "abcdef1234567890",
       analysis_run_id: "run-1",
       position: 0,
       question: "What did the study report?",
@@ -42,8 +45,39 @@ describe("VisitBriefPreview", () => {
     render(<VisitBriefPreview brief={brief} onPrint={onPrint} onDelete={onDelete} deleting={false} />);
 
     expect(screen.getByText("What did the study report?")).toBeInTheDocument();
+    expect(screen.getByText("Source: example-paper.pdf")).toBeInTheDocument();
+    expect(screen.getByText("The reported outcome changed.")).toBeInTheDocument();
+    expect(document.querySelectorAll("details")).toHaveLength(0);
+    expect(screen.getByText(/Snapshot created/)).toBeInTheDocument();
     expect(screen.getByText("Original evidence")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Print / Save PDF" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete visit brief" })).toBeInTheDocument();
+  });
+
+  it("keeps same-page evidence attributable to each document in the printable view", () => {
+    const secondItem = {
+      ...brief.items[0],
+      id: "item-2",
+      clinician_question_id: "question-2",
+      document_id: "document-2",
+      document_title: "second-paper.pdf",
+      evidence: [{
+        ...brief.items[0].evidence[0],
+        evidence_id: "EVIDENCE_002",
+        quote: "The second paper reported a different outcome.",
+      }],
+    };
+    render(
+      <VisitBriefPreview
+        brief={{ ...brief, items: [brief.items[0], secondItem] }}
+        onPrint={vi.fn()}
+        onDelete={vi.fn()}
+        deleting={false}
+      />,
+    );
+
+    expect(screen.getByText("example-paper.pdf · Page 4 · Results")).toBeInTheDocument();
+    expect(screen.getByText("second-paper.pdf · Page 4 · Results")).toBeInTheDocument();
+    expect(screen.getByText("The second paper reported a different outcome.")).toBeInTheDocument();
   });
 });

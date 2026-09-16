@@ -526,6 +526,17 @@ class VisitBriefItemRecord(Base):
         ForeignKey("documents.id", ondelete="CASCADE"),
         index=True,
     )
+    # Keep source identity inside the immutable brief so a printed copy is
+    # still attributable after the live document is renamed or re-parsed.
+    document_title_snapshot: Mapped[str] = mapped_column(
+        String(255), nullable=False, default=""
+    )
+    document_date_snapshot: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=""
+    )
+    parsed_source_hash_snapshot: Mapped[str] = mapped_column(
+        String(64), nullable=False, default=""
+    )
     analysis_run_id: Mapped[str] = mapped_column(
         String(64),
         ForeignKey("medical_analysis_runs.id", ondelete="CASCADE"),

@@ -77,6 +77,9 @@ class VisitBriefItemView(_StrictModel):
     id: str
     clinician_question_id: str
     document_id: str
+    document_title: str
+    document_date: str = ""
+    parsed_source_hash: str = ""
     analysis_run_id: str
     position: int = Field(ge=0)
     question: str

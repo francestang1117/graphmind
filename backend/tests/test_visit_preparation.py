@@ -194,6 +194,84 @@ def _service(session_factory: sessionmaker) -> VisitPreparationService:
     )
 
 
+def _add_second_document(session_factory: sessionmaker) -> None:
+    """Create a second valid source so ordering tests span documents."""
+    now = datetime.now(timezone.utc)
+    with session_factory() as db:
+        db.add(
+            DocumentRecord(
+                id="document-2",
+                user_id="user-1",
+                workspace_id="workspace-1",
+                filename="second-paper.pdf",
+                stored_filename="second-paper.pdf",
+                original_filename="second-paper.pdf",
+                file_extension=".pdf",
+                file_type=".pdf",
+                mime_type="application/pdf",
+                file_hash="g" * 64,
+                parsed_source_hash="q" * 64,
+                file_path="/tmp/second-paper.pdf",
+                file_size=100,
+                status="indexed",
+                created_at=now,
+                modified_at=now,
+            )
+        )
+        db.add(
+            MedicalAnalysisRunRecord(
+                id="analysis-2",
+                user_id="user-1",
+                workspace_id="workspace-1",
+                document_id="document-2",
+                requested_by="user-1",
+                status="succeeded",
+                source_hash="g" * 64,
+                parsed_source_hash="q" * 64,
+                analysis_key="single_document_insight:second-paper",
+                provider="extractive",
+                model_name="extractive-v1",
+                prompt_version="medical-insights-v3",
+                schema_version="medical-insights-v3",
+                error_code="",
+                error_message="",
+                is_current=True,
+                created_at=now,
+                completed_at=now,
+                updated_at=now,
+            )
+        )
+        db.commit()
+        db.add(
+            MedicalAnalysisResultRecord(
+                run_id="analysis-2",
+                report_json=json.dumps(_report_payload(), ensure_ascii=False),
+                citation_coverage=1.0,
+                validation_status="validated",
+                warnings_json="[]",
+                created_at=now,
+            )
+        )
+        db.add(
+            MedicalAnalysisEvidenceRecord(
+                id="evidence-row-2",
+                evidence_id="EVIDENCE_001",
+                run_id="analysis-2",
+                finding_id="finding_001",
+                chunk_id="chunk-2",
+                section_id="section-2",
+                section_type="methods",
+                section_title="Methods",
+                page_start=4,
+                page_end=4,
+                quoted_text="The second study included adults with the condition.",
+                character_start=200,
+                character_end=253,
+            )
+        )
+        db.commit()
+
+
 def test_save_question_is_server_bound_and_idempotent():
     engine, sessions = _session_factory()
     try:
@@ -350,6 +428,68 @@ def test_visit_brief_copies_current_evidence_and_only_requested_notes():
         assert brief["items"][0]["evidence"][0]["page_start"] == 2
         assert brief["items"][0]["evidence"][0]["section_type"] == "methods"
         assert brief["items"][0]["evidence"][0]["character_start"] == 100
+        assert brief["items"][0]["document_title"] == "paper.pdf"
+        assert brief["items"][0]["parsed_source_hash"] == "p" * 64
+    finally:
+        engine.dispose()
+
+
+def test_question_positions_span_documents_and_reorder_is_atomic():
+    engine, sessions = _session_factory()
+    try:
+        _seed(sessions)
+        _add_second_document(sessions)
+        service = _service(sessions)
+        first, _, _ = service.save_question(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            analysis_run_id="analysis-1",
+            suggestion_id="question_001",
+        )
+        second, _, _ = service.save_question(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            analysis_run_id="analysis-2",
+            suggestion_id="question_001",
+        )
+
+        assert first["position"] == 0
+        assert second["position"] == 1
+        reordered = service.reorder_questions(
+            question_id=second["id"],
+            target_question_id=first["id"],
+            user_id="user-1",
+            workspace_id="workspace-1",
+            expected_version=second["version"],
+            target_expected_version=first["version"],
+        )
+        assert {item["id"] for item in reordered} == {first["id"], second["id"]}
+        with sessions() as db:
+            positions = dict(
+                db.execute(
+                    select(ClinicianQuestionRecord.id, ClinicianQuestionRecord.position)
+                ).all()
+            )
+        assert positions[second["id"]] == 0
+        assert positions[first["id"]] == 1
+
+        with pytest.raises(VisitPreparationError) as exc:
+            service.reorder_questions(
+                question_id=second["id"],
+                target_question_id=first["id"],
+                user_id="user-1",
+                workspace_id="workspace-1",
+                expected_version=second["version"],
+                target_expected_version=first["version"],
+            )
+        assert exc.value.code == "clinician_question_version_conflict"
+        with sessions() as db:
+            positions_after_conflict = dict(
+                db.execute(
+                    select(ClinicianQuestionRecord.id, ClinicianQuestionRecord.position)
+                ).all()
+            )
+        assert positions_after_conflict == positions
     finally:
         engine.dispose()
 
@@ -429,6 +569,35 @@ def test_invalid_analysis_result_is_not_a_current_source():
         with sessions() as db:
             db.get(MedicalAnalysisResultRecord, "analysis-1").validation_status = "rejected"
             db.commit()
+        listed = service.list_questions(user_id="user-1", workspace_id="workspace-1")
+        assert listed["items"][0]["source_status"] == "unavailable"
+        with pytest.raises(VisitPreparationError) as exc:
+            service.create_visit_brief(
+                user_id="user-1",
+                workspace_id="workspace-1",
+                question_ids=[question["id"]],
+                include_user_notes=False,
+            )
+        assert exc.value.code == "visit_brief_source_outdated"
+    finally:
+        engine.dispose()
+
+
+def test_missing_live_evidence_makes_source_unavailable():
+    engine, sessions = _session_factory()
+    try:
+        _seed(sessions)
+        service = _service(sessions)
+        question, _, _ = service.save_question(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            analysis_run_id="analysis-1",
+            suggestion_id="question_001",
+        )
+        with sessions() as db:
+            db.query(MedicalAnalysisEvidenceRecord).delete()
+            db.commit()
+
         listed = service.list_questions(user_id="user-1", workspace_id="workspace-1")
         assert listed["items"][0]["source_status"] == "unavailable"
         with pytest.raises(VisitPreparationError) as exc:

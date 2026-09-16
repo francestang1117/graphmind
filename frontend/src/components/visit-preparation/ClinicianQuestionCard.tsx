@@ -25,6 +25,7 @@ interface Props {
   onDelete: () => void | Promise<void>;
   onMoveUp: () => void | Promise<void>;
   onMoveDown: () => void | Promise<void>;
+  updating: boolean;
 }
 
 const SOURCE_LABELS: Record<ClinicianQuestionSourceStatus, string> = {
@@ -55,19 +56,23 @@ export default function ClinicianQuestionCard({
   onDelete,
   onMoveUp,
   onMoveDown,
+  updating,
 }: Props) {
   const [note, setNote] = useState(question.user_note);
 
   const sourceIsCurrent = question.source_status === "current";
 
   return (
-    <article className={`visit-question-card ${sourceIsCurrent ? "" : "is-stale"}`}>
+    <article
+      className={`visit-question-card ${sourceIsCurrent ? "" : "is-stale"}`}
+      aria-busy={updating}
+    >
       <div className="visit-question-card-header">
         <label className="visit-question-select">
           <input
             type="checkbox"
             checked={selected}
-            disabled={!selectable}
+            disabled={!selectable || updating}
             onChange={(event) => onSelect(event.target.checked)}
             aria-label={`Select question: ${question.question}`}
           />
@@ -79,7 +84,7 @@ export default function ClinicianQuestionCard({
             className="visit-icon-button"
             type="button"
             onClick={() => void onMoveUp()}
-            disabled={!canMoveUp}
+            disabled={!canMoveUp || updating}
             aria-label="Move question up"
             title="Move question up"
           >
@@ -89,7 +94,7 @@ export default function ClinicianQuestionCard({
             className="visit-icon-button"
             type="button"
             onClick={() => void onMoveDown()}
-            disabled={!canMoveDown}
+            disabled={!canMoveDown || updating}
             aria-label="Move question down"
             title="Move question down"
           >
@@ -99,6 +104,7 @@ export default function ClinicianQuestionCard({
             className="visit-icon-button danger"
             type="button"
             onClick={() => void onDelete()}
+            disabled={updating}
             aria-label="Delete saved question"
             title="Delete saved question"
           >
@@ -124,6 +130,7 @@ export default function ClinicianQuestionCard({
           <span>Status</span>
           <select
             value={question.status}
+            disabled={updating}
             onChange={(event) => onUpdate({ status: event.target.value as ClinicianQuestionStatus })}
           >
             {Object.entries(STATUS_LABELS).map(([value, label]) => (
@@ -135,6 +142,7 @@ export default function ClinicianQuestionCard({
           <span>Priority</span>
           <select
             value={question.priority}
+            disabled={updating}
             onChange={(event) => onUpdate({ priority: Number(event.target.value) as 1 | 2 | 3 })}
           >
             <option value="1">High</option>
@@ -150,14 +158,15 @@ export default function ClinicianQuestionCard({
           value={note}
           maxLength={2000}
           placeholder="Add a note for your visit"
+          disabled={updating}
           onChange={(event) => setNote(event.target.value)}
           onBlur={() => {
-            if (note !== question.user_note) onUpdate({ userNote: note });
+            if (!updating && note !== question.user_note) onUpdate({ userNote: note });
           }}
         />
       </label>
 
-      <EvidenceAppendix evidence={question.evidence} />
+      <EvidenceAppendix evidence={question.evidence} documentTitle={question.document_title} />
     </article>
   );
 }

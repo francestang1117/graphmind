@@ -51,6 +51,13 @@ class ClinicianQuestionUpdateRequest(_StrictRequest):
         return self
 
 
+class ClinicianQuestionReorderRequest(_StrictRequest):
+    question_id: str = Field(min_length=1, max_length=64)
+    target_question_id: str = Field(min_length=1, max_length=64)
+    expected_version: int = Field(ge=1)
+    target_expected_version: int = Field(ge=1)
+
+
 class VisitBriefCreateRequest(_StrictRequest):
     question_ids: list[str] = Field(min_length=1, max_length=10)
     include_user_notes: bool = False
@@ -111,6 +118,31 @@ async def list_clinician_questions(
     except VisitPreparationError as exc:
         raise _api_error(exc) from exc
     return ClinicianQuestionListView.model_validate(payload)
+
+
+@router.patch(
+    "/workspaces/{workspace_id}/clinician-questions/reorder",
+    response_model=list[ClinicianQuestionView],
+)
+async def reorder_clinician_questions(
+    workspace_id: str,
+    body: ClinicianQuestionReorderRequest,
+    user: UserRecord = Depends(current_user_or_dev),
+) -> list[ClinicianQuestionView]:
+    scope = _scope(user, workspace_id)
+    _require_storage()
+    try:
+        items = visit_preparation_service.reorder_questions(
+            question_id=body.question_id,
+            target_question_id=body.target_question_id,
+            user_id=_user_id(user),
+            workspace_id=scope,
+            expected_version=body.expected_version,
+            target_expected_version=body.target_expected_version,
+        )
+    except VisitPreparationError as exc:
+        raise _api_error(exc) from exc
+    return [ClinicianQuestionView.model_validate(item) for item in items]
 
 
 @router.patch(
@@ -282,7 +314,12 @@ def _api_error(exc: VisitPreparationError) -> AppError:
         code_status = status.HTTP_404_NOT_FOUND
     elif exc.code.endswith("conflict") or "outdated" in exc.code or "unavailable" in exc.code:
         code_status = status.HTTP_409_CONFLICT
-    elif exc.code.startswith("visit_brief_invalid") or "invalid_status" in exc.code:
+    elif (
+        exc.code.startswith("visit_brief_invalid")
+        or exc.code.endswith("dismissed")
+        or exc.code.endswith("reorder_invalid")
+        or "invalid_status" in exc.code
+    ):
         code_status = status.HTTP_422_UNPROCESSABLE_ENTITY
     else:
         code_status = status.HTTP_503_SERVICE_UNAVAILABLE

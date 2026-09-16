@@ -1,4 +1,4 @@
-import { CalendarDays, Printer, Trash2 } from "lucide-react";
+import { CalendarDays, FileText, Printer, Trash2 } from "lucide-react";
 import type { VisitBrief } from "../../services/api";
 import EvidenceAppendix from "./EvidenceAppendix";
 
@@ -24,7 +24,7 @@ export default function VisitBriefPreview({ brief, onPrint, onDelete, deleting }
           <h2>Visit preparation / 就诊准备</h2>
           <p className="visit-brief-meta">
             <CalendarDays size={14} />
-            Created {formatDate(brief.generated_at)} · Data through {formatDate(brief.data_cutoff_at)}
+            Created {formatDate(brief.generated_at)} · Snapshot created {formatDate(brief.data_cutoff_at)}
           </p>
         </div>
         <div className="visit-brief-actions">
@@ -53,10 +53,22 @@ export default function VisitBriefPreview({ brief, onPrint, onDelete, deleting }
             <div>
               <h3>{item.question}</h3>
               <p>{item.rationale}</p>
+              <p className="visit-brief-source">
+                <FileText size={13} />
+                <span>Source: {item.document_title}</span>
+                {item.document_date && <span>· Document date: {item.document_date}</span>}
+                {item.parsed_source_hash && (
+                  <span>· Source version: {item.parsed_source_hash.slice(0, 12)}</span>
+                )}
+              </p>
               {item.user_note && (
                 <p className="visit-brief-note"><strong>My note:</strong> {item.user_note}</p>
               )}
-              <EvidenceAppendix evidence={item.evidence} />
+              <EvidenceAppendix
+                evidence={item.evidence}
+                documentTitle={item.document_title}
+                printable
+              />
             </div>
           </article>
         ))}
