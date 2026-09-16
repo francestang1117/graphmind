@@ -306,6 +306,10 @@ class VisitPreparationRepository:
                         row.user_note = cleaned_note
                         changed = True
                 if previous_status != row.status:
+                    # This repository disables autoflush. Flush the new
+                    # status before compacting, or the query can still see
+                    # the row in its old group and reset another position.
+                    db.flush()
                     for group_status in sorted({previous_status, row.status}):
                         _compact_question_group(
                             db,
