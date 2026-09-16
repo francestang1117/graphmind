@@ -1821,3 +1821,40 @@ as a separate five-minute job, publishes the Markdown summary, and uploads the
 JSON/Markdown reports as an artifact. This baseline is an engineering
 regression guard, not a clinical validation set or a claim about external-model
 quality; public-paper and provider evaluation remain separate follow-up work.
+
+## 2026-09 - V2 PR13: Clinician Question List and Visit Preparation
+
+PR13 turns evidence-backed question suggestions into a workspace-scoped user
+workflow. A user can save a server-generated question from a validated medical
+analysis, organize it as saved, asked, answered, or dismissed, assign a
+priority, and keep a private note. Saving accepts only the analysis run and
+suggestion identifiers; the server re-resolves the question, source object,
+evidence IDs, document scope, and current parsed snapshot before persistence.
+
+Clinician questions are refreshed idempotently by `(document, category, topic)`
+and preserve user-owned status, priority, position, and notes when the same
+topic is regenerated. Optimistic versions protect edits from overwriting a
+newer change. Questions whose analysis or parsed source is outdated,
+unavailable, unvalidated, or deleted are excluded from new visit briefs and
+are shown with an explicit source status.
+
+Visit briefs are immutable, workspace-scoped snapshots containing one to ten
+current questions. They copy the question text, rationale, evidence passages,
+page/section locations, and optionally the user's private notes at creation
+time. Later question edits or document re-analysis do not change an existing
+brief. The API applies user and workspace checks to every read and write, and
+document deletion removes questions, briefs, items, and their dependent
+records.
+
+The frontend adds a Visit Preparation page with a research-project selector,
+question status groups, priority and private-note controls, source evidence,
+selection limits, and a printable/PDF-friendly brief preview. The medical
+insight panel can save a question using only the server-controlled suggestion
+identity, while cached saved state is scoped to the current document.
+
+The offline evaluation baseline now includes a `visit_preparation` suite with
+synthetic bilingual cases covering server binding, refresh preservation,
+stale and unvalidated sources, selection limits, dismissed questions, and
+immutable snapshots. These cases are engineering regression checks, not
+clinically expert-validated quality judgments; expert review remains a future
+dataset task.

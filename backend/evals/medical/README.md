@@ -7,7 +7,7 @@ network dependencies.
 
 ## Scope
 
-The current package covers four production boundaries:
+The current package covers five production boundaries:
 
 - `terminology`: local disease normalization, ambiguity, privacy, and
   fail-closed external-query behavior
@@ -17,11 +17,16 @@ The current package covers four production boundaries:
   retraction exclusion, and study-type classification
 - `clinician_questions`: server-owned question templates, source binding,
   evidence limits, and safe omission of unsupported suggestions
+- `visit_preparation`: workspace-scoped question saving, source freshness,
+  status/priority management, and immutable visit-brief snapshots
 
 The package contains synthetic non-identifying text only. It is not a clinical
 benchmark, diagnostic evaluation, evidence-quality assessment, or substitute
 for clinician review. The observed ranking metrics are engineering signals and
-have no medical interpretation.
+have no medical interpretation. The original 35 cases and the
+visit-preparation cases are engineering regression baselines, not
+clinician-validated medical quality benchmarks; expert-reviewed cases should
+be added incrementally.
 
 ## Package Contract
 
@@ -85,3 +90,8 @@ gates. The hard gates intentionally cover safety and provenance boundaries.
 Precision, recall, MRR, abstention, and expected-behavior rates remain
 observations until they have an explicit review-approved threshold and a
 documented rationale.
+
+The visit-preparation adapter exercises server-owned question binding,
+idempotent refresh behavior, stale-source refusal, selection limits, dismissed
+question handling, and immutable snapshot semantics without calling external
+services.

@@ -100,4 +100,10 @@ def quality_metrics(results: Iterable[EvaluationResult]) -> dict[str, float]:
                 len(expected_question_rows),
             )
 
+    visit_preparation = [row for row in rows if row.suite == "visit_preparation"]
+    if visit_preparation:
+        metrics["visit_preparation_expected_behavior_rate"] = accuracy(
+            not row.observed_mismatches for row in visit_preparation
+        )
+
     return {key: value for key, value in sorted(metrics.items())}

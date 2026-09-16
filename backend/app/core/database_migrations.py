@@ -33,6 +33,8 @@ _WORKSPACE_TABLES = (
     "processing_jobs",
     "medical_document_profiles",
     "document_sections",
+    "clinician_questions",
+    "visit_briefs",
     "literature_search_runs",
     "literature_match_runs",
 )
@@ -49,6 +51,7 @@ def upgrade_persistence_schema(engine) -> None:
         _ensure_medical_document_columns(connection)
         _ensure_medical_tables(connection)
         _ensure_medical_ai_tables(connection)
+        _ensure_visit_preparation_tables(connection)
         _ensure_literature_tables(connection)
         _ensure_workspace_columns(connection)
         changed = _move_legacy_document_ids(connection)
@@ -78,6 +81,7 @@ def _upgrade_sqlite(engine) -> None:
                 _ensure_medical_document_columns(connection)
                 _ensure_medical_tables(connection)
                 _ensure_medical_ai_tables(connection)
+                _ensure_visit_preparation_tables(connection)
                 _ensure_literature_tables(connection)
                 _ensure_workspace_columns(connection)
                 changed = _move_legacy_document_ids(connection)
@@ -537,6 +541,120 @@ def _ensure_medical_ai_tables(connection) -> None:
         ("ix_medical_analysis_evidence_chunk_id", "medical_analysis_evidence", "chunk_id"),
         ("ix_medical_analysis_evidence_section_id", "medical_analysis_evidence", "section_id"),
         ("ix_medical_analysis_evidence_section_type", "medical_analysis_evidence", "section_type"),
+    )
+    for name, table, column in indexes:
+        connection.exec_driver_sql(
+            f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"
+        )
+
+def _ensure_visit_preparation_tables(connection) -> None:
+    """Create saved clinician questions and visit-brief snapshots."""
+    if not _has_table(connection, "documents"):
+        return
+
+    timestamp_type = (
+        "DATETIME"
+        if connection.dialect.name == "sqlite"
+        else "TIMESTAMP WITH TIME ZONE"
+    )
+
+    if not _has_table(connection, "clinician_questions"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE clinician_questions (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                analysis_run_id VARCHAR(64) NOT NULL,
+                suggestion_id VARCHAR(100) NOT NULL,
+                question TEXT NOT NULL,
+                rationale TEXT NOT NULL,
+                category VARCHAR(64) NOT NULL,
+                topic VARCHAR(64) NOT NULL,
+                source_kind VARCHAR(64) NOT NULL,
+                source_id VARCHAR(200) NOT NULL,
+                evidence_ids_json TEXT NOT NULL,
+                language VARCHAR(16) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                priority INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                user_note TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                created_at {timestamp_type} NOT NULL,
+                updated_at {timestamp_type} NOT NULL,
+                CONSTRAINT uq_clinician_questions_scope_document_topic
+                    UNIQUE (user_id, workspace_id, document_id, category, topic),
+                CONSTRAINT fk_clinician_questions_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+                CONSTRAINT fk_clinician_questions_analysis
+                    FOREIGN KEY (analysis_run_id)
+                    REFERENCES medical_analysis_runs(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+    if not _has_table(connection, "visit_briefs"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE visit_briefs (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                language VARCHAR(16) NOT NULL,
+                generated_at {timestamp_type} NOT NULL,
+                data_cutoff_at {timestamp_type} NOT NULL,
+                disclaimer TEXT NOT NULL,
+                created_at {timestamp_type} NOT NULL
+            )
+            """
+        )
+
+    if not _has_table(connection, "visit_brief_items"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE visit_brief_items (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                visit_brief_id VARCHAR(64) NOT NULL,
+                clinician_question_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                analysis_run_id VARCHAR(64) NOT NULL,
+                position INTEGER NOT NULL,
+                question_snapshot TEXT NOT NULL,
+                rationale_snapshot TEXT NOT NULL,
+                user_note_snapshot TEXT NOT NULL,
+                evidence_snapshot_json TEXT NOT NULL,
+                CONSTRAINT uq_visit_brief_items_brief_position
+                    UNIQUE (visit_brief_id, position),
+                CONSTRAINT fk_visit_brief_items_brief
+                    FOREIGN KEY (visit_brief_id) REFERENCES visit_briefs(id) ON DELETE CASCADE,
+                CONSTRAINT fk_visit_brief_items_question
+                    FOREIGN KEY (clinician_question_id)
+                    REFERENCES clinician_questions(id) ON DELETE CASCADE,
+                CONSTRAINT fk_visit_brief_items_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+                CONSTRAINT fk_visit_brief_items_analysis
+                    FOREIGN KEY (analysis_run_id)
+                    REFERENCES medical_analysis_runs(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+    indexes = (
+        ("ix_clinician_questions_user_id", "clinician_questions", "user_id"),
+        ("ix_clinician_questions_workspace_id", "clinician_questions", "workspace_id"),
+        ("ix_clinician_questions_document_id", "clinician_questions", "document_id"),
+        ("ix_clinician_questions_analysis_run_id", "clinician_questions", "analysis_run_id"),
+        ("ix_clinician_questions_status", "clinician_questions", "status"),
+        ("ix_clinician_questions_topic", "clinician_questions", "topic"),
+        ("ix_visit_briefs_user_id", "visit_briefs", "user_id"),
+        ("ix_visit_briefs_workspace_id", "visit_briefs", "workspace_id"),
+        ("ix_visit_briefs_status", "visit_briefs", "status"),
+        ("ix_visit_brief_items_brief_id", "visit_brief_items", "visit_brief_id"),
+        ("ix_visit_brief_items_question_id", "visit_brief_items", "clinician_question_id"),
+        ("ix_visit_brief_items_document_id", "visit_brief_items", "document_id"),
+        ("ix_visit_brief_items_analysis_run_id", "visit_brief_items", "analysis_run_id"),
     )
     for name, table, column in indexes:
         connection.exec_driver_sql(

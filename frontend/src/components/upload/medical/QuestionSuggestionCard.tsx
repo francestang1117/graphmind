@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Copy, FileText } from "lucide-react";
+import { Bookmark, Check, Copy, FileText, Loader2 } from "lucide-react";
 import type {
   MedicalInsightEvidence,
   MedicalQuestionSuggestion,
@@ -17,6 +17,10 @@ interface Props {
   suggestion: MedicalQuestionSuggestion;
   evidenceById: Map<string, MedicalInsightEvidence>;
   onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
+  onSave?: () => void;
+  saved?: boolean;
+  stale?: boolean;
+  saving?: boolean;
 }
 
 function locationLabel(evidence: MedicalInsightEvidence) {
@@ -33,6 +37,10 @@ export default function QuestionSuggestionCard({
   suggestion,
   evidenceById,
   onSelectEvidence,
+  onSave,
+  saved = false,
+  stale = false,
+  saving = false,
 }: Props) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
@@ -82,6 +90,19 @@ export default function QuestionSuggestionCard({
           {copied ? <Check size={14} /> : <Copy size={14} />}
           <span>{copied ? "Copied" : "Copy"}</span>
         </button>
+        {onSave && (
+          <button
+            className="insight-question-save"
+            type="button"
+            onClick={onSave}
+            disabled={saved || saving}
+            title={saved ? "Question saved" : stale ? "Refresh saved source" : "Save for visit preparation"}
+            aria-label={saved ? "Question saved" : stale ? "Refresh saved source" : "Save question for visit preparation"}
+          >
+            {saving ? <Loader2 className="spin" size={14} /> : saved ? <Check size={14} /> : <Bookmark size={14} />}
+            <span>{saved ? "Saved" : stale ? "Refresh" : "Save"}</span>
+          </button>
+        )}
       </div>
       <p className="insight-question-text">{suggestion.question}</p>
       <p className="insight-question-rationale">{suggestion.rationale}</p>

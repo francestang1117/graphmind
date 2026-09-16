@@ -203,6 +203,9 @@ class DocumentService:
                 evidence_matching_repository,
             )
             from app.services.medical.literature.repository import literature_repository
+            from app.services.medical.visit_preparation.repository import (
+                visit_preparation_repository,
+            )
 
             self._cancel_document_jobs(document_id, user_id, workspace_id)
             if workspace_id is not None:
@@ -227,6 +230,11 @@ class DocumentService:
                     user_id=user_id,
                     workspace_id=workspace_id,
                 )
+                visit_preparation_repository.delete_for_document(
+                    document_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
                 literature_repository.delete_for_document(
                     document_id,
                     user_id=user_id,
@@ -238,6 +246,7 @@ class DocumentService:
                 medical_repository.delete_for_document(document_id, user_id=user_id)
                 medical_analysis_repository.delete_for_document(document_id, user_id=user_id)
                 evidence_matching_repository.delete_for_document(document_id, user_id=user_id)
+                visit_preparation_repository.delete_for_document(document_id, user_id=user_id)
                 literature_repository.delete_for_document(document_id, user_id=user_id)
         return deleted
 

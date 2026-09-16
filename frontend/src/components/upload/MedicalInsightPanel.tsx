@@ -16,6 +16,7 @@ import {
 } from "../../services/api";
 import LiteratureEvidencePanel from "./literature/LiteratureEvidencePanel";
 import QuestionSuggestionList from "./medical/QuestionSuggestionList";
+import { useClinicianQuestions } from "../../hooks/useClinicianQuestions";
 
 function consentStorageKey(
   config: MedicalInsightConfig,
@@ -179,11 +180,19 @@ function ReportView({
   run,
   evidenceById,
   onSelectEvidence,
+  onSaveSuggestion,
+  savedSuggestionIds,
+  staleSuggestionIds,
+  savingSuggestionId,
 }: {
   report: MedicalInsightReport;
   run: MedicalInsightRun;
   evidenceById: Map<string, MedicalInsightEvidence>;
   onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
+  onSaveSuggestion?: (suggestion: NonNullable<MedicalInsightReport["question_suggestions"]>[number]) => void;
+  savedSuggestionIds?: ReadonlySet<string>;
+  staleSuggestionIds?: ReadonlySet<string>;
+  savingSuggestionId?: string | null;
 }) {
   return (
     <div className="insight-report">
@@ -287,6 +296,10 @@ function ReportView({
         report={report}
         evidenceById={evidenceById}
         onSelectEvidence={onSelectEvidence}
+        onSaveSuggestion={onSaveSuggestion}
+        savedSuggestionIds={savedSuggestionIds}
+        staleSuggestionIds={staleSuggestionIds}
+        savingSuggestionId={savingSuggestionId}
       />
 
       {run.warnings && run.warnings.length > 0 && (
@@ -328,6 +341,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
   const [externalConsent, setExternalConsent] = useState(false);
   const [showExternalConfirmation, setShowExternalConfirmation] = useState(false);
   const [pendingReanalysis, setPendingReanalysis] = useState(false);
+  const clinicianQuestions = useClinicianQuestions(workspaceId, documentId);
 
   useEffect(() => {
     let active = true;
@@ -633,7 +647,22 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
             run={run}
             evidenceById={evidenceById}
             onSelectEvidence={setSelectedEvidence}
+            onSaveSuggestion={(suggestion) => {
+              void clinicianQuestions.saveQuestion({
+                analysisRunId: run.run_id,
+                suggestionId: suggestion.id,
+              });
+            }}
+            savedSuggestionIds={clinicianQuestions.savedSuggestionIds}
+            staleSuggestionIds={clinicianQuestions.staleSuggestionIds}
+            savingSuggestionId={clinicianQuestions.savingSuggestionId}
           />
+          {clinicianQuestions.saveError && (
+            <div className="parsed-state error">
+              <AlertCircle size={17} />
+              <span>Could not save this question. Refresh the analysis and try again.</span>
+            </div>
+          )}
           {selectedEvidence && (
             <aside className="insight-evidence-detail">
               <div>

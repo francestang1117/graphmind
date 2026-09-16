@@ -91,6 +91,7 @@ def evaluate_case(case: EvaluationCase, dataset_root: Path) -> dict[str, Any]:
         "insight_safety": evaluate_insight_safety,
         "literature_matching": evaluate_literature_matching,
         "clinician_questions": evaluate_clinician_questions,
+        "visit_preparation": evaluate_visit_preparation,
     }[case.suite]
     return adapter(case, dataset_root)
 
@@ -391,6 +392,252 @@ def evaluate_clinician_questions(case: EvaluationCase, _dataset_root: Path) -> d
             *safety.errors,
         ])),
     }
+
+
+def evaluate_visit_preparation(case: EvaluationCase, _dataset_root: Path) -> dict[str, Any]:
+    """Exercise the offline, server-owned visit-preparation state machine.
+
+    The repository/API integration tests cover SQL transactions and HTTP
+    permissions. These cases keep the evaluation suite filesystem-only while
+    replaying the same invariants: a report suggestion is normalized on the
+    server, source versions must be current, user state survives a refresh,
+    and a brief stores a separate evidence snapshot.
+    """
+    payload = case.input
+    try:
+        report = MedicalInsightReport.model_validate(payload.get("report", {}))
+        context = _build_context(payload)
+    except (ValidationError, EvaluationAdapterError) as exc:
+        return {
+            "report_valid": False,
+            "normalization_valid": False,
+            "save_status": "rejected",
+            "question_count": 0,
+            "brief_status": "not_created",
+            "error_code": "visit_preparation_input_invalid",
+            "errors": [str(exc)],
+        }
+
+    try:
+        normalized = normalize_question_suggestions(
+            report.question_suggestions,
+            report.language,
+            report=report,
+            context=context,
+        )
+    except QuestionTemplateError as exc:
+        return {
+            "report_valid": True,
+            "normalization_valid": False,
+            "save_status": "rejected",
+            "question_count": 0,
+            "brief_status": "not_created",
+            "error_code": "visit_preparation_source_invalid",
+            "errors": list(exc.errors),
+        }
+
+    document = payload.get("document", {})
+    if not isinstance(document, dict):
+        raise EvaluationAdapterError("visit preparation document must be an object")
+    document_hash = str(document.get("parsed_source_hash") or "")
+    analysis_hash = str(document.get("analysis_parsed_source_hash") or document_hash)
+    analysis_validated = document.get("validation_status") == "validated"
+    analysis_current = bool(document.get("is_current", True))
+    rows: dict[str, dict[str, Any]] = {}
+    normalized_by_id = {item.id: item for item in normalized}
+    topic_keys: dict[tuple[str, str], str] = {}
+    positions = 0
+    last_save_status = "not_attempted"
+    last_error = ""
+    client_payload_ignored = False
+    snapshots: list[dict[str, Any]] = []
+
+    seed_questions = payload.get("seed_questions", [])
+    if not isinstance(seed_questions, list):
+        raise EvaluationAdapterError("visit preparation seed_questions must be a list")
+    for seed in seed_questions:
+        if not isinstance(seed, dict) or not seed.get("id"):
+            raise EvaluationAdapterError("visit preparation seed question is invalid")
+        row = {
+            "id": str(seed["id"]),
+            "status": str(seed.get("status") or "saved"),
+            "priority": int(seed.get("priority") or 2),
+            "position": positions,
+            "user_note": str(seed.get("user_note") or ""),
+            "version": 1,
+            "question": str(seed.get("question") or ""),
+            "rationale": str(seed.get("rationale") or ""),
+            "category": str(seed.get("category") or "seed"),
+            "topic": str(seed.get("topic") or seed["id"]),
+            "source_kind": str(seed.get("source_kind") or "seed"),
+            "source_id": str(seed.get("source_id") or seed["id"]),
+            "evidence_ids": [str(value) for value in seed.get("evidence_ids", [])],
+            "parsed_source_hash": str(seed.get("parsed_source_hash") or analysis_hash),
+        }
+        rows[row["id"]] = row
+        positions += 1
+
+    operations = payload.get("operations", [])
+    if not isinstance(operations, list):
+        raise EvaluationAdapterError("visit preparation operations must be a list")
+
+    for operation in operations:
+        if not isinstance(operation, dict):
+            raise EvaluationAdapterError("visit preparation operation must be an object")
+        action = str(operation.get("action") or "")
+        if action == "save":
+            suggestion_id = str(operation.get("suggestion_id") or "")
+            suggestion = normalized_by_id.get(suggestion_id)
+            if suggestion is None:
+                last_save_status = "rejected"
+                last_error = "clinician_question_not_found"
+                continue
+            client_payload = operation.get("client_payload")
+            if isinstance(client_payload, dict) and any(
+                key in client_payload
+                for key in ("question", "rationale", "evidence_ids", "source_id")
+            ):
+                client_payload_ignored = True
+            if not analysis_validated:
+                last_save_status = "rejected"
+                last_error = "clinician_question_analysis_unavailable"
+                continue
+            if not analysis_current or analysis_hash != document_hash:
+                last_save_status = "rejected"
+                last_error = "clinician_question_source_outdated"
+                continue
+
+            topic_key = (suggestion.category, suggestion.topic or "")
+            existing_id = topic_keys.get(topic_key)
+            if existing_id:
+                row = rows[existing_id]
+                row.update(_visit_question_source(suggestion, analysis_hash))
+                last_save_status = "refreshed"
+            else:
+                row = {
+                    "id": suggestion.id,
+                    "status": "saved",
+                    "priority": 2,
+                    "position": positions,
+                    "user_note": "",
+                    "version": 1,
+                    **_visit_question_source(suggestion, analysis_hash),
+                }
+                positions += 1
+                rows[row["id"]] = row
+                topic_keys[topic_key] = row["id"]
+                last_save_status = "created"
+            continue
+
+        if action == "update":
+            question_id = str(operation.get("question_id") or "")
+            row = rows.get(question_id)
+            if row is None:
+                last_error = "clinician_question_not_found"
+                continue
+            if operation.get("status") is not None:
+                row["status"] = str(operation["status"])
+            if operation.get("priority") is not None:
+                row["priority"] = int(operation["priority"])
+            if operation.get("user_note") is not None:
+                row["user_note"] = str(operation["user_note"])
+            row["version"] += 1
+            continue
+
+        if action == "reparse":
+            document_hash = str(operation.get("parsed_source_hash") or "")
+            analysis_current = False
+            continue
+
+        if action == "create_brief":
+            question_ids = operation.get("question_ids", [])
+            if not isinstance(question_ids, list):
+                raise EvaluationAdapterError("visit brief question_ids must be a list")
+            if not 1 <= len(question_ids) <= 10 or len(set(question_ids)) != len(question_ids):
+                last_error = "visit_brief_invalid_selection"
+                continue
+            selected = [rows.get(str(question_id)) for question_id in question_ids]
+            if any(row is None for row in selected):
+                last_error = "visit_brief_question_not_found"
+                continue
+            if any(row["status"] == "dismissed" for row in selected if row):
+                last_error = "visit_brief_question_dismissed"
+                continue
+            if any(
+                _visit_source_status(row, document_hash, analysis_validated, analysis_current)
+                != "current"
+                for row in selected
+                if row
+            ):
+                last_error = "visit_brief_source_outdated"
+                continue
+            include_notes = bool(operation.get("include_user_notes", False))
+            snapshots = [
+                {
+                    "question_id": row["id"],
+                    "question": row["question"],
+                    "user_note": row["user_note"] if include_notes else "",
+                    "evidence_ids": list(row["evidence_ids"]),
+                }
+                for row in selected
+                if row
+            ]
+            last_error = ""
+            continue
+
+        raise EvaluationAdapterError(f"unknown visit preparation action {action!r}")
+
+    current_notes = [rows[item["question_id"]]["user_note"] for item in snapshots]
+    return {
+        "report_valid": True,
+        "normalization_valid": True,
+        "save_status": last_save_status,
+        "question_count": len(rows),
+        "question_statuses": [row["status"] for row in sorted(rows.values(), key=lambda item: item["position"])],
+        "question_priorities": [row["priority"] for row in sorted(rows.values(), key=lambda item: item["position"])],
+        "question_notes": [row["user_note"] for row in sorted(rows.values(), key=lambda item: item["position"])],
+        "source_statuses": [
+            _visit_source_status(row, document_hash, analysis_validated, analysis_current)
+            for row in sorted(rows.values(), key=lambda item: item["position"])
+        ],
+        "safe_questions": [row["question"] for row in sorted(rows.values(), key=lambda item: item["position"])],
+        "client_payload_ignored": client_payload_ignored,
+        "brief_status": "created" if snapshots else ("rejected" if last_error.startswith("visit_brief_") else "not_created"),
+        "brief_item_count": len(snapshots),
+        "brief_question_ids": [item["question_id"] for item in snapshots],
+        "brief_evidence_ids": [item["evidence_ids"] for item in snapshots],
+        "brief_user_notes": [item["user_note"] for item in snapshots],
+        "snapshot_immutable": bool(snapshots) and snapshots[0]["user_note"] != (current_notes[0] if current_notes else ""),
+        "error_code": last_error,
+        "errors": [last_error] if last_error else [],
+    }
+
+
+def _visit_question_source(item: Any, parsed_source_hash: str) -> dict[str, Any]:
+    """Copy only normalized server-owned question data into the replay state."""
+    return {
+        "question": item.question,
+        "rationale": item.rationale,
+        "category": item.category,
+        "topic": item.topic,
+        "source_kind": item.source_kind,
+        "source_id": item.source_id,
+        "evidence_ids": list(item.evidence_ids),
+        "parsed_source_hash": parsed_source_hash,
+    }
+
+
+def _visit_source_status(
+    row: dict[str, Any],
+    document_hash: str,
+    analysis_validated: bool,
+    analysis_current: bool,
+) -> str:
+    if not analysis_validated:
+        return "unavailable"
+    if not analysis_current or row.get("parsed_source_hash") != document_hash:
+        return "outdated"
+    return "current"
 
 
 def _build_context(payload: Mapping[str, Any]) -> Any:

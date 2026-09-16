@@ -193,6 +193,9 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         "medical_document_profiles",
         "document_sections",
         "medical_analysis_runs",
+        "clinician_questions",
+        "visit_briefs",
+        "visit_brief_items",
         "literature_articles",
         "literature_search_runs",
         "literature_search_results",
@@ -205,6 +208,24 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         item["name"] for item in inspector.get_columns("medical_analysis_runs")
     }
     assert "external_processing_confirmed_at" in run_columns
+    question_columns = {
+        item["name"] for item in inspector.get_columns("clinician_questions")
+    }
+    assert {
+        "analysis_run_id",
+        "suggestion_id",
+        "evidence_ids_json",
+        "user_note",
+        "version",
+    }.issubset(question_columns)
+    brief_item_columns = {
+        item["name"] for item in inspector.get_columns("visit_brief_items")
+    }
+    assert {
+        "question_snapshot",
+        "evidence_snapshot_json",
+        "user_note_snapshot",
+    }.issubset(brief_item_columns)
     literature_run_columns = {
         item["name"] for item in inspector.get_columns("literature_search_runs")
     }

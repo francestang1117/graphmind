@@ -1,0 +1,40 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_visit_selection_limit_001",
+  "suite": "visit_preparation",
+  "language": "zh",
+  "tags": ["visit_preparation", "bounds"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "title": "合成问题清单",
+    "document_kind": "research_paper",
+    "language": "zh",
+    "chunks": [{"id": "chunk-1", "text": "研究纳入成年参与者。", "section_type": "population"}],
+    "document": {"parsed_source_hash": "hash-v1", "analysis_parsed_source_hash": "hash-v1", "validation_status": "validated", "is_current": true},
+    "report": {
+      "document_kind": "research_paper",
+      "language": "zh",
+      "overview": {"title": "合成问题清单", "summary": "研究描述了参与者。", "evidence_ids": ["EVIDENCE_001"]},
+      "study_methods": {"population": {"value": "研究纳入成年参与者。", "support_status": "supported", "evidence_ids": ["EVIDENCE_001"]}},
+      "question_suggestions": [{"id": "question_seed", "question": "问题？", "rationale": "理由。", "category": "applicability", "topic": "study_population", "source_kind": "study_methods", "source_id": "population", "evidence_ids": []}]
+    },
+    "seed_questions": [
+      {"id": "q01", "question": "问题 1？", "evidence_ids": ["EVIDENCE_001"]},
+      {"id": "q02", "question": "问题 2？", "evidence_ids": ["EVIDENCE_001"]},
+      {"id": "q03", "question": "问题 3？", "evidence_ids": ["EVIDENCE_001"]},
+      {"id": "q04", "question": "问题 4？", "evidence_ids": ["EVIDENCE_001"]},
+      {"id": "q05", "question": "问题 5？", "evidence_ids": ["EVIDENCE_001"]},
+      {"id": "q06", "question": "问题 6？", "evidence_ids": ["EVIDENCE_001"]},
+      {"id": "q07", "question": "问题 7？", "evidence_ids": ["EVIDENCE_001"]},
+      {"id": "q08", "question": "问题 8？", "evidence_ids": ["EVIDENCE_001"]},
+      {"id": "q09", "question": "问题 9？", "evidence_ids": ["EVIDENCE_001"]},
+      {"id": "q10", "question": "问题 10？", "evidence_ids": ["EVIDENCE_001"]},
+      {"id": "q11", "question": "问题 11？", "evidence_ids": ["EVIDENCE_001"]}
+    ],
+    "operations": [{"action": "create_brief", "question_ids": ["q01", "q02", "q03", "q04", "q05", "q06", "q07", "q08", "q09", "q10", "q11"]}]
+  },
+  "expected": {"report_valid": true, "normalization_valid": true, "question_count": 11, "brief_status": "rejected", "brief_item_count": 0, "error_code": "visit_brief_invalid_selection"},
+  "gate_fields": ["report_valid", "normalization_valid", "question_count", "brief_status", "brief_item_count", "error_code"],
+  "rationale": "A visit preparation snapshot must reject selections larger than the ten-question limit.",
+  "last_reviewed": "2026-09-16"
+}

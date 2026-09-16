@@ -1,0 +1,27 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_visit_unvalidated_source_001",
+  "suite": "visit_preparation",
+  "language": "en",
+  "tags": ["visit_preparation", "safety", "abstention"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "title": "Synthetic rejected analysis",
+    "document_kind": "research_paper",
+    "language": "en",
+    "chunks": [{"id": "chunk-1", "text": "The study included adults.", "section_type": "population"}],
+    "document": {"parsed_source_hash": "hash-v1", "analysis_parsed_source_hash": "hash-v1", "validation_status": "rejected", "is_current": true},
+    "report": {
+      "document_kind": "research_paper",
+      "language": "en",
+      "overview": {"title": "Synthetic rejected analysis", "summary": "The analysis was not validated.", "evidence_ids": ["EVIDENCE_001"]},
+      "study_methods": {"population": {"value": "The study included adults.", "support_status": "supported", "evidence_ids": ["EVIDENCE_001"]}},
+      "question_suggestions": [{"id": "question_001", "question": "Provider question?", "rationale": "Provider rationale.", "category": "applicability", "topic": "study_population", "source_kind": "study_methods", "source_id": "population", "evidence_ids": []}]
+    },
+    "operations": [{"action": "save", "suggestion_id": "question_001"}]
+  },
+  "expected": {"report_valid": true, "normalization_valid": true, "save_status": "rejected", "question_count": 0, "error_code": "clinician_question_analysis_unavailable"},
+  "gate_fields": ["report_valid", "normalization_valid", "save_status", "question_count", "error_code"],
+  "rationale": "Only validated medical analysis output can seed a user question list.",
+  "last_reviewed": "2026-09-16"
+}

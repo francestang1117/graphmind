@@ -68,6 +68,7 @@ def init_db() -> None:
     from app.models.persistence import (  # noqa: F401
         DocumentSectionRecord,
         DocumentRecord,
+        ClinicianQuestionRecord,
         GraphEdgeRecord,
         GraphNodeRecord,
         MedicalAnalysisEvidenceRecord,
@@ -84,6 +85,8 @@ def init_db() -> None:
         ParsedEntityRecord,
         ProcessingJobRecord,
         UserRecord,
+        VisitBriefItemRecord,
+        VisitBriefRecord,
         WorkspaceRecord,
     )
 

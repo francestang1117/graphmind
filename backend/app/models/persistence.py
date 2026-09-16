@@ -436,6 +436,108 @@ class MedicalAnalysisEvidenceRecord(Base):
     character_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
+class ClinicianQuestionRecord(Base):
+    """A server-generated question saved for discussion with a clinician."""
+
+    __tablename__ = "clinician_questions"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "document_id",
+            "category",
+            "topic",
+            name="uq_clinician_questions_scope_document_topic",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    document_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    analysis_run_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("medical_analysis_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    suggestion_id: Mapped[str] = mapped_column(String(100), index=True)
+    question: Mapped[str] = mapped_column(Text)
+    rationale: Mapped[str] = mapped_column(Text, default="")
+    category: Mapped[str] = mapped_column(String(64), index=True)
+    topic: Mapped[str] = mapped_column(String(64), index=True)
+    source_kind: Mapped[str] = mapped_column(String(64), default="")
+    source_id: Mapped[str] = mapped_column(String(200), default="")
+    evidence_ids_json: Mapped[str] = mapped_column(Text, default="[]")
+    language: Mapped[str] = mapped_column(String(16), default="en")
+    status: Mapped[str] = mapped_column(String(32), default="saved", index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=2, index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    user_note: Mapped[str] = mapped_column(Text, default="")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class VisitBriefRecord(Base):
+    """An immutable, user-created snapshot for one future clinical visit."""
+
+    __tablename__ = "visit_briefs"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="active", index=True)
+    language: Mapped[str] = mapped_column(String(16), default="en")
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    data_cutoff_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    disclaimer: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class VisitBriefItemRecord(Base):
+    """A copied question and evidence set inside a visit brief snapshot."""
+
+    __tablename__ = "visit_brief_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "visit_brief_id",
+            "position",
+            name="uq_visit_brief_items_brief_position",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    visit_brief_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("visit_briefs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    clinician_question_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("clinician_questions.id", ondelete="CASCADE"),
+        index=True,
+    )
+    document_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    analysis_run_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("medical_analysis_runs.id", ondelete="CASCADE"),
+        index=True,
+    )
+    position: Mapped[int] = mapped_column(Integer)
+    question_snapshot: Mapped[str] = mapped_column(Text)
+    rationale_snapshot: Mapped[str] = mapped_column(Text, default="")
+    user_note_snapshot: Mapped[str] = mapped_column(Text, default="")
+    evidence_snapshot_json: Mapped[str] = mapped_column(Text, default="[]")
+
+
 class LiteratureSearchRunRecord(Base):
     """One privacy-bounded literature search requested for a document."""
 
