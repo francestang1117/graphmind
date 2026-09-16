@@ -681,16 +681,45 @@ def _ensure_visit_preparation_tables(connection) -> None:
                 f"ALTER TABLE visit_brief_items ADD COLUMN {column} {definition}"
             )
 
-    # Backfill titles and source versions while the live document is still
-    # available; rows for already-deleted documents remain explicitly blank.
-    for column, document_expression in (
-        (
-            "document_title_snapshot",
-            "COALESCE(NULLIF(d.original_filename, ''), d.filename, '')",
-        ),
-        ("document_date_snapshot", "COALESCE(d.document_date, '')"),
-        ("parsed_source_hash_snapshot", "COALESCE(d.parsed_source_hash, '')"),
-    ):
+    # Backfill only from columns that exist in the old database. Some legacy
+    # PostgreSQL fixtures contain just document ids and ownership fields.
+    document_columns = {
+        column
+        for column in (
+            "original_filename",
+            "filename",
+            "document_date",
+            "parsed_source_hash",
+        )
+        if _has_column(connection, "documents", column)
+    }
+    document_expressions: list[tuple[str, str]] = []
+    if "original_filename" in document_columns:
+        filename_fallback = (
+            "d.filename" if "filename" in document_columns else "''"
+        )
+        document_expressions.append(
+            (
+                "document_title_snapshot",
+                "COALESCE(NULLIF(d.original_filename, ''), "
+                f"{filename_fallback}, '')",
+            )
+        )
+    elif "filename" in document_columns:
+        document_expressions.append(
+            ("document_title_snapshot", "COALESCE(d.filename, '')")
+        )
+    if "document_date" in document_columns:
+        document_expressions.append(
+            ("document_date_snapshot", "COALESCE(d.document_date, '')")
+        )
+    if "parsed_source_hash" in document_columns:
+        document_expressions.append(
+            ("parsed_source_hash_snapshot", "COALESCE(d.parsed_source_hash, '')")
+        )
+
+    # Rows for already-deleted documents remain explicitly blank.
+    for column, document_expression in document_expressions:
         connection.execute(
             text(
                 f"UPDATE visit_brief_items SET {column} = "

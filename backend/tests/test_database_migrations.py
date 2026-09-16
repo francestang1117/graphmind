@@ -673,6 +673,63 @@ def test_visit_brief_upgrade_backfills_immutable_source_fields():
     engine.dispose()
 
 
+def test_visit_brief_upgrade_handles_minimal_legacy_documents_table():
+    """Old PostgreSQL-style document tables may lack optional metadata columns."""
+    engine = create_engine("sqlite:///:memory:", future=True)
+    with engine.begin() as db:
+        db.exec_driver_sql(
+            """
+            CREATE TABLE documents (
+                id VARCHAR(255) PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                file_hash VARCHAR(64) NOT NULL
+            )
+            """
+        )
+        db.exec_driver_sql(
+            "CREATE TABLE medical_analysis_runs (id VARCHAR(64) PRIMARY KEY)"
+        )
+        db.exec_driver_sql(
+            """
+            CREATE TABLE visit_brief_items (
+                id VARCHAR(64) PRIMARY KEY,
+                visit_brief_id VARCHAR(64) NOT NULL,
+                clinician_question_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                analysis_run_id VARCHAR(64) NOT NULL,
+                position INTEGER NOT NULL,
+                question_snapshot TEXT NOT NULL,
+                rationale_snapshot TEXT NOT NULL,
+                user_note_snapshot TEXT NOT NULL,
+                evidence_snapshot_json TEXT NOT NULL
+            )
+            """
+        )
+        db.exec_driver_sql(
+            "INSERT INTO documents VALUES ('doc-1', 'user-1', 'hash-1')"
+        )
+        db.exec_driver_sql(
+            """
+            INSERT INTO visit_brief_items VALUES (
+                'item-1', 'brief-1', 'question-1', 'doc-1', 'analysis-1', 0,
+                'Question', 'Reason', '', '[]'
+            )
+            """
+        )
+
+    with engine.begin() as db:
+        _ensure_visit_preparation_tables(db)
+
+    with engine.connect() as db:
+        assert db.execute(
+            text(
+                "SELECT document_title_snapshot, document_date_snapshot, "
+                "parsed_source_hash_snapshot FROM visit_brief_items"
+            )
+        ).one() == ("", "", "")
+    engine.dispose()
+
+
 def test_existing_literature_runs_table_gets_ontology_provenance_columns():
     """PR #7 tables receive the PR #8 fields without dropping search runs."""
     engine = create_engine("sqlite:///:memory:", future=True)
