@@ -37,7 +37,6 @@ class ClinicianQuestionCreateRequest(_StrictRequest):
 class ClinicianQuestionUpdateRequest(_StrictRequest):
     status: QuestionStatus | None = None
     priority: int | None = Field(default=None, ge=1, le=3)
-    position: int | None = Field(default=None, ge=0, le=9999)
     user_note: str | None = Field(default=None, max_length=2000)
     expected_version: int = Field(ge=1)
 
@@ -45,7 +44,7 @@ class ClinicianQuestionUpdateRequest(_StrictRequest):
     def require_a_change(self) -> "ClinicianQuestionUpdateRequest":
         if all(
             value is None
-            for value in (self.status, self.priority, self.position, self.user_note)
+            for value in (self.status, self.priority, self.user_note)
         ):
             raise ValueError("at least one question field must be provided")
         return self
@@ -164,7 +163,6 @@ async def update_clinician_question(
             workspace_id=scope,
             status=body.status,
             priority=body.priority,
-            position=body.position,
             user_note=body.user_note,
             expected_version=body.expected_version,
         )

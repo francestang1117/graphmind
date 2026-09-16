@@ -10,7 +10,6 @@ import EvidenceAppendix from "./EvidenceAppendix";
 interface UpdateChange {
   status?: ClinicianQuestionStatus;
   priority?: 1 | 2 | 3;
-  position?: number;
   userNote?: string;
 }
 

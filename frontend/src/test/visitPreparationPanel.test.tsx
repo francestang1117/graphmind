@@ -123,7 +123,7 @@ describe("VisitPreparationPanel", () => {
 
   afterEach(() => cleanup());
 
-  it("updates status and private notes with the current optimistic-lock version", async () => {
+  it("submits status and private-note edits through the question update hook", async () => {
     const user = userEvent.setup();
     const { updateQuestion } = configure();
     render(<VisitPreparationPanel workspaceId="workspace-1" />);
@@ -137,12 +137,10 @@ describe("VisitPreparationPanel", () => {
     expect(updateQuestion).toHaveBeenCalledWith(expect.objectContaining({
       questionId: "question-1",
       status: "asked",
-      expected_version: 1,
     }));
     expect(updateQuestion).toHaveBeenCalledWith(expect.objectContaining({
       questionId: "question-1",
       user_note: "Bring this up with the specialist",
-      expected_version: 1,
     }));
   });
 

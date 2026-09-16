@@ -22,6 +22,7 @@ from app.models.persistence import (
     MedicalAnalysisRunRecord,
     VisitBriefItemRecord,
     VisitBriefRecord,
+    WorkspaceRecord,
 )
 from app.services.medical.visit_preparation.exceptions import VisitPreparationError
 
@@ -68,6 +69,11 @@ class VisitPreparationRepository:
 
         try:
             with self.session_factory() as db:
+                if not self._locked_workspace(db, user_id, workspace_id):
+                    raise VisitPreparationError(
+                        "The research project was not found.",
+                        code="clinician_question_scope_mismatch",
+                    )
                 # Serialize source refreshes with document parsing/deletion so
                 # a question can never be saved against a mixed source version.
                 document = self._locked_document(
@@ -232,13 +238,17 @@ class VisitPreparationRepository:
         workspace_id: str,
         status: str | None,
         priority: int | None,
-        position: int | None,
         user_note: str | None,
         expected_version: int,
     ) -> dict[str, Any]:
         self._require_available()
         try:
             with self.session_factory() as db:
+                if not self._locked_workspace(db, user_id, workspace_id):
+                    raise VisitPreparationError(
+                        "The research project was not found.",
+                        code="clinician_question_scope_mismatch",
+                    )
                 row = db.scalars(
                     select(ClinicianQuestionRecord).where(
                         ClinicianQuestionRecord.id == question_id,
@@ -258,6 +268,7 @@ class VisitPreparationRepository:
                     )
 
                 changed = False
+                previous_status = row.status
                 if status is not None:
                     if status not in QUESTION_STATUSES:
                         raise VisitPreparationError(
@@ -266,37 +277,42 @@ class VisitPreparationRepository:
                         )
                     if row.status != status:
                         row.status = status
-                        if position is None:
-                            # Status groups are ordered at workspace scope, so
-                            # moving a question appends it to the new group.
-                            max_position = db.scalar(
-                                select(func.max(ClinicianQuestionRecord.position)).where(
-                                    ClinicianQuestionRecord.user_id == user_id,
-                                    ClinicianQuestionRecord.workspace_id == workspace_id,
-                                    ClinicianQuestionRecord.status == status,
-                                    ClinicianQuestionRecord.id != row.id,
-                                    ClinicianQuestionRecord.document_id.in_(
-                                        select(DocumentRecord.id).where(
-                                            DocumentRecord.user_id == user_id,
-                                            DocumentRecord.workspace_id == workspace_id,
-                                            DocumentRecord.deleted_at.is_(None),
-                                        )
-                                    ),
-                                )
+                        # Status groups are ordered at workspace scope. The
+                        # workspace lock makes this max-plus-one allocation
+                        # safe when different documents move at once.
+                        max_position = db.scalar(
+                            select(func.max(ClinicianQuestionRecord.position)).where(
+                                ClinicianQuestionRecord.user_id == user_id,
+                                ClinicianQuestionRecord.workspace_id == workspace_id,
+                                ClinicianQuestionRecord.status == status,
+                                ClinicianQuestionRecord.id != row.id,
+                                ClinicianQuestionRecord.document_id.in_(
+                                    select(DocumentRecord.id).where(
+                                        DocumentRecord.user_id == user_id,
+                                        DocumentRecord.workspace_id == workspace_id,
+                                        DocumentRecord.deleted_at.is_(None),
+                                    )
+                                ),
                             )
-                            row.position = int(max_position if max_position is not None else -1) + 1
+                        )
+                        row.position = int(max_position if max_position is not None else -1) + 1
                         changed = True
                 if priority is not None and row.priority != priority:
                     row.priority = priority
-                    changed = True
-                if position is not None and row.position != position:
-                    row.position = position
                     changed = True
                 if user_note is not None:
                     cleaned_note = clean_user_note(user_note)
                     if row.user_note != cleaned_note:
                         row.user_note = cleaned_note
                         changed = True
+                if previous_status != row.status:
+                    for group_status in sorted({previous_status, row.status}):
+                        _compact_question_group(
+                            db,
+                            user_id=user_id,
+                            workspace_id=workspace_id,
+                            status=group_status,
+                        )
                 if changed:
                     row.version += 1
                     row.updated_at = _utc_now()
@@ -331,6 +347,11 @@ class VisitPreparationRepository:
 
         try:
             with self.session_factory() as db:
+                if not self._locked_workspace(db, user_id, workspace_id):
+                    raise VisitPreparationError(
+                        "The research project was not found.",
+                        code="clinician_question_scope_mismatch",
+                    )
                 source = db.scalars(
                     select(ClinicianQuestionRecord).where(
                         ClinicianQuestionRecord.id == question_id,
@@ -401,6 +422,11 @@ class VisitPreparationRepository:
         self._require_available()
         try:
             with self.session_factory() as db:
+                if not self._locked_workspace(db, user_id, workspace_id):
+                    raise VisitPreparationError(
+                        "The research project was not found.",
+                        code="clinician_question_scope_mismatch",
+                    )
                 row = db.scalars(
                     select(ClinicianQuestionRecord).where(
                         ClinicianQuestionRecord.id == question_id,
@@ -410,8 +436,15 @@ class VisitPreparationRepository:
                 ).first()
                 if not row:
                     return False
+                previous_status = row.status
                 db.delete(row)
                 db.flush()
+                _compact_question_group(
+                    db,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    status=previous_status,
+                )
                 self._delete_empty_briefs(db, user_id=user_id, workspace_id=workspace_id)
                 db.commit()
                 return True
@@ -609,6 +642,15 @@ class VisitPreparationRepository:
                 scope = workspace_id or (
                     document.workspace_id if document and document.workspace_id else default_workspace_id(user_id)
                 )
+                if not self._locked_workspace(db, user_id, scope):
+                    return
+                affected_statuses = db.scalars(
+                    select(ClinicianQuestionRecord.status).where(
+                        ClinicianQuestionRecord.document_id == document_id,
+                        ClinicianQuestionRecord.user_id == user_id,
+                        ClinicianQuestionRecord.workspace_id == scope,
+                    )
+                ).all()
                 db.execute(
                     delete(VisitBriefItemRecord).where(
                         VisitBriefItemRecord.document_id == document_id,
@@ -627,6 +669,14 @@ class VisitPreparationRepository:
                         ClinicianQuestionRecord.workspace_id == scope,
                     )
                 )
+                db.flush()
+                for affected_status in sorted(set(affected_statuses)):
+                    _compact_question_group(
+                        db,
+                        user_id=user_id,
+                        workspace_id=scope,
+                        status=affected_status,
+                    )
                 self._delete_empty_briefs(db, user_id=user_id, workspace_id=scope)
                 db.commit()
         except SQLAlchemyError as exc:
@@ -664,6 +714,16 @@ class VisitPreparationRepository:
                 DocumentRecord.user_id == user_id,
                 DocumentRecord.workspace_id == workspace_id,
                 DocumentRecord.deleted_at.is_(None),
+            )
+            .with_for_update()
+        ).first()
+
+    def _locked_workspace(self, db, user_id: str, workspace_id: str):
+        return db.scalars(
+            select(WorkspaceRecord)
+            .where(
+                WorkspaceRecord.id == workspace_id,
+                WorkspaceRecord.user_id == user_id,
             )
             .with_for_update()
         ).first()
@@ -717,6 +777,43 @@ def _refresh_question_row(row: ClinicianQuestionRecord, source: dict[str, Any], 
     if changed:
         row.updated_at = now
     return changed
+
+
+def _compact_question_group(
+    db,
+    *,
+    user_id: str,
+    workspace_id: str,
+    status: str,
+) -> None:
+    """Keep one workspace/status group ordered after a position mutation."""
+    live_document_ids = select(DocumentRecord.id).where(
+        DocumentRecord.user_id == user_id,
+        DocumentRecord.workspace_id == workspace_id,
+        DocumentRecord.deleted_at.is_(None),
+    )
+    rows = db.scalars(
+        select(ClinicianQuestionRecord)
+        .where(
+            ClinicianQuestionRecord.user_id == user_id,
+            ClinicianQuestionRecord.workspace_id == workspace_id,
+            ClinicianQuestionRecord.status == status,
+            ClinicianQuestionRecord.document_id.in_(live_document_ids),
+        )
+        .order_by(
+            ClinicianQuestionRecord.position,
+            ClinicianQuestionRecord.created_at,
+            ClinicianQuestionRecord.id,
+        )
+        .with_for_update()
+    ).all()
+    now = _utc_now()
+    for position, row in enumerate(rows):
+        if row.position == position:
+            continue
+        row.position = position
+        row.version = max(1, row.version or 1) + 1
+        row.updated_at = now
 
 
 def _question_dict(db, row: ClinicianQuestionRecord) -> dict[str, Any]:

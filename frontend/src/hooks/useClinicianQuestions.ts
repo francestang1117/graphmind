@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   deleteClinicianQuestion,
@@ -17,6 +17,8 @@ export function useClinicianQuestions(
 ) {
   const queryClient = useQueryClient();
   const queryKey = ["clinician-questions", workspaceId ?? "none"];
+  const updateQueues = useRef(new Map<string, Promise<ClinicianQuestion>>());
+  const latestVersions = useRef(new Map<string, number>());
 
   const query = useQuery({
     queryKey,
@@ -54,7 +56,6 @@ export function useClinicianQuestions(
       questionId: string;
       status?: ClinicianQuestionStatus;
       priority?: 1 | 2 | 3;
-      position?: number;
       user_note?: string;
       expected_version: number;
     }) => {
@@ -66,6 +67,41 @@ export function useClinicianQuestions(
       void queryClient.invalidateQueries({ queryKey });
     },
   });
+
+  type QuestionUpdateInput = {
+    questionId: string;
+    status?: ClinicianQuestionStatus;
+    priority?: 1 | 2 | 3;
+    user_note?: string;
+    expected_version: number;
+  };
+
+  const updateQuestion = (input: QuestionUpdateInput) => {
+    const previous = updateQueues.current.get(input.questionId);
+    const run: Promise<ClinicianQuestion> = (previous ?? Promise.resolve()).then(async () => {
+      // A queued edit must use the version returned by the preceding edit,
+      // even when both UI events captured the same rendered question object.
+      const expectedVersion = latestVersions.current.get(input.questionId)
+        ?? input.expected_version;
+      const updated = await updateMutation.mutateAsync({
+        ...input,
+        expected_version: expectedVersion,
+      });
+      latestVersions.current.set(input.questionId, updated.version);
+      return updated;
+    });
+
+    const cleanup = () => {
+      if (updateQueues.current.get(input.questionId) === run) {
+        updateQueues.current.delete(input.questionId);
+      }
+    };
+    // The caller awaits `run`; this side chain only cleans up queue state and
+    // handles both outcomes so a failed update is not left unhandled.
+    void run.then(cleanup, cleanup);
+    updateQueues.current.set(input.questionId, run);
+    return run;
+  };
 
   const deleteMutation = useMutation({
     mutationFn: (questionId: string) =>
@@ -125,7 +161,7 @@ export function useClinicianQuestions(
     saving: saveMutation.isPending,
     savingSuggestionId: saveMutation.variables?.suggestionId ?? null,
     saveError: saveMutation.error,
-    updateQuestion: updateMutation.mutateAsync,
+    updateQuestion,
     reorderQuestions: reorderMutation.mutateAsync,
     updating: updateMutation.isPending || reorderMutation.isPending,
     updateError: updateMutation.error,

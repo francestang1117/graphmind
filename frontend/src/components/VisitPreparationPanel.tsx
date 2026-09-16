@@ -60,7 +60,6 @@ export default function VisitPreparationPanel({ workspaceId }: Props) {
     change: {
       status?: ClinicianQuestionStatus;
       priority?: 1 | 2 | 3;
-      position?: number;
       userNote?: string;
     },
   ) => {
@@ -71,7 +70,6 @@ export default function VisitPreparationPanel({ workspaceId }: Props) {
         expected_version: item.version,
         status: change.status,
         priority: change.priority,
-        position: change.position,
         user_note: change.userNote,
       });
     } catch (error) {

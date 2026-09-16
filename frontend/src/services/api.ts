@@ -851,7 +851,6 @@ export const updateClinicianQuestion = (
   body: {
     status?: ClinicianQuestionStatus;
     priority?: 1 | 2 | 3;
-    position?: number;
     user_note?: string;
     expected_version: number;
   },

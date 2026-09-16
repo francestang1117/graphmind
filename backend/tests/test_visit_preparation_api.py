@@ -163,6 +163,15 @@ def test_client_cannot_submit_question_text_or_evidence():
         )
 
 
+def test_client_cannot_submit_position_through_update_api():
+    with pytest.raises(ValidationError):
+        visit_preparation.ClinicianQuestionUpdateRequest(
+            priority=1,
+            position=3,
+            expected_version=1,
+        )
+
+
 def test_update_maps_version_conflict_to_stable_409_error(monkeypatch):
     _patch_scope(monkeypatch)
 

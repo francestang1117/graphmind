@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import json
+import os
+import threading
 
 import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from app.core.database import Base
 from app.models.persistence import (
@@ -324,7 +327,6 @@ def test_refreshing_question_reports_changed_source_and_preserves_user_state():
             workspace_id="workspace-1",
             status="asked",
             priority=None,
-            position=None,
             user_note="Ask at the next visit",
             expected_version=1,
         )
@@ -370,12 +372,12 @@ def test_question_updates_use_optimistic_version_and_notes_are_plain_text():
             workspace_id="workspace-1",
             status="asked",
             priority=1,
-            position=3,
             user_note="<b>Ask about follow-up</b>",
             expected_version=1,
         )
         assert updated["version"] == 2
         assert updated["status"] == "asked"
+        assert updated["position"] == 0
         assert updated["user_note"] == "Ask about follow-up"
 
         with pytest.raises(VisitPreparationError) as exc:
@@ -385,7 +387,6 @@ def test_question_updates_use_optimistic_version_and_notes_are_plain_text():
                 workspace_id="workspace-1",
                 status="answered",
                 priority=None,
-                position=None,
                 user_note=None,
                 expected_version=1,
             )
@@ -411,7 +412,6 @@ def test_visit_brief_copies_current_evidence_and_only_requested_notes():
             workspace_id="workspace-1",
             status=None,
             priority=None,
-            position=None,
             user_note="Remember to ask about eligibility.",
             expected_version=1,
         )
@@ -492,6 +492,115 @@ def test_question_positions_span_documents_and_reorder_is_atomic():
         assert positions_after_conflict == positions
     finally:
         engine.dispose()
+
+
+@pytest.mark.parametrize("operation", ["create", "status"])
+def test_postgres_question_position_writes_are_workspace_serialized(operation):
+    """Concurrent position allocation stays unique and contiguous in PostgreSQL."""
+    url = (
+        os.getenv("GRAPHMIND_TEST_POSTGRES_URL")
+        or os.getenv("TEST_POSTGRES_URL")
+        or os.getenv("POSTGRES_TEST_DATABASE_URL")
+    )
+    if not url or not url.startswith("postgresql"):
+        pytest.skip("set GRAPHMIND_TEST_POSTGRES_URL to test PostgreSQL question locks")
+
+    schema = f"visit_question_locks_{uuid.uuid4().hex[:12]}"
+    admin = create_engine(url, future=True)
+    with admin.begin() as db:
+        db.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
+    engine = create_engine(
+        url,
+        future=True,
+        poolclass=NullPool,
+        connect_args={
+            "options": f"-csearch_path={schema} -clock_timeout=5000 -cstatement_timeout=10000"
+        },
+    )
+    sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
+    repository = VisitPreparationRepository(sessions, enabled=lambda: True)
+    service = VisitPreparationService(
+        repository=repository,
+        analysis_repository=AnalysisRepository(sessions, enabled=lambda: True),
+    )
+    first_locked = threading.Event()
+    second_attempting = threading.Event()
+    operation_state = threading.local()
+    original_lock = repository._locked_workspace
+
+    def coordinated_lock(db, user_id, workspace_id):
+        name = getattr(operation_state, "name", "")
+        if name == "second":
+            second_attempting.set()
+        workspace = original_lock(db, user_id, workspace_id)
+        if name == "first":
+            first_locked.set()
+            assert second_attempting.wait(10), "second transaction never reached the workspace lock"
+        return workspace
+
+    repository._locked_workspace = coordinated_lock
+    try:
+        Base.metadata.create_all(engine)
+        _seed(sessions)
+        _add_second_document(sessions)
+        if operation == "status":
+            first, _, _ = service.save_question(
+                user_id="user-1",
+                workspace_id="workspace-1",
+                analysis_run_id="analysis-1",
+                suggestion_id="question_001",
+            )
+            second, _, _ = service.save_question(
+                user_id="user-1",
+                workspace_id="workspace-1",
+                analysis_run_id="analysis-2",
+                suggestion_id="question_001",
+            )
+
+        def execute(name):
+            operation_state.name = name
+            if operation == "create":
+                return service.save_question(
+                    user_id="user-1",
+                    workspace_id="workspace-1",
+                    analysis_run_id=("analysis-1" if name == "first" else "analysis-2"),
+                    suggestion_id="question_001",
+                )
+            return service.update_question(
+                first["id"] if name == "first" else second["id"],
+                user_id="user-1",
+                workspace_id="workspace-1",
+                status="asked",
+                priority=None,
+                user_note=None,
+                expected_version=1,
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            first_future = workers.submit(execute, "first")
+            assert first_locked.wait(10), "first transaction never acquired the workspace lock"
+            second_future = workers.submit(execute, "second")
+            first_future.result(timeout=20)
+            second_future.result(timeout=20)
+
+        expected_status = "saved" if operation == "create" else "asked"
+        with sessions() as db:
+            rows = db.scalars(
+                select(ClinicianQuestionRecord)
+                .where(
+                    ClinicianQuestionRecord.user_id == "user-1",
+                    ClinicianQuestionRecord.workspace_id == "workspace-1",
+                    ClinicianQuestionRecord.status == expected_status,
+                )
+                .order_by(ClinicianQuestionRecord.position)
+            ).all()
+            assert len(rows) == 2
+            assert [row.position for row in rows] == [0, 1]
+    finally:
+        engine.dispose()
+        with admin.begin() as db:
+            db.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        admin.dispose()
 
 
 def test_outdated_question_cannot_be_added_to_a_brief():
