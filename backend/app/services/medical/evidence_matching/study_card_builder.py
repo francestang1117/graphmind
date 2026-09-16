@@ -134,7 +134,15 @@ def _normalized_types(values: Iterable[str]) -> list[str]:
 
 
 def _contains_any(values: Iterable[str], *needles: str) -> bool:
-    return any(needle in value for value in values for needle in needles)
+    return any(
+        re.search(
+            rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])",
+            value,
+        )
+        is not None
+        for value in values
+        for needle in needles
+    )
 
 
 _PHASE_PATTERN = re.compile(r"\bphase\s+(?P<phase>iv|iii|ii|i|4|3|2|1)\b")

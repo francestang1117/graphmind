@@ -1,0 +1,25 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_questions_population_001",
+  "suite": "clinician_questions",
+  "language": "en",
+  "tags": ["questions", "binding", "smoke"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "title": "Synthetic population study",
+    "document_kind": "research_paper",
+    "language": "en",
+    "chunks": [{"id": "chunk-1", "text": "Adults with Fabry disease were included.", "section_type": "population"}],
+    "report": {
+      "document_kind": "research_paper",
+      "language": "en",
+      "overview": {"title": "Synthetic population study", "summary": "The study reports a defined population.", "evidence_ids": ["EVIDENCE_001"]},
+      "study_methods": {"population": {"value": "Adults with Fabry disease were included.", "support_status": "supported", "evidence_ids": ["EVIDENCE_001"]}},
+      "question_suggestions": [{"id": "question_001", "question": "Would this medicine suit me?", "rationale": "Provider text is replaced.", "category": "applicability", "topic": "study_population", "source_kind": "study_methods", "source_id": "population", "evidence_ids": []}]
+    }
+  },
+  "expected": {"report_valid": true, "normalization_valid": true, "all_bound": true, "question_count": 1, "normalized_topics": ["study_population"], "source_ids": ["population"], "evidence_ids": [["EVIDENCE_001"]], "questions_valid": true, "citation_valid": true, "support_valid": true, "safety_valid": true},
+  "gate_fields": ["report_valid", "normalization_valid", "all_bound", "question_count", "normalized_topics", "source_ids", "evidence_ids", "questions_valid", "citation_valid", "support_valid", "safety_valid"],
+  "rationale": "The server must turn a structured population source into a safe, cited question.",
+  "last_reviewed": "2026-09-15"
+}

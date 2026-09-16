@@ -1,0 +1,24 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_questions_missing_source_001",
+  "suite": "clinician_questions",
+  "language": "zh",
+  "tags": ["questions", "abstention"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "title": "合成局限性缺失研究",
+    "document_kind": "research_paper",
+    "language": "zh",
+    "chunks": [{"id": "chunk-1", "text": "研究结果已报告，但没有单独的局限性对象。", "section_type": "results"}],
+    "report": {
+      "document_kind": "research_paper",
+      "language": "zh",
+      "overview": {"title": "合成局限性缺失研究", "summary": "研究结果已报告。", "evidence_ids": ["EVIDENCE_001"]},
+      "question_suggestions": [{"id": "question_001", "question": "请解释局限性。", "rationale": "需要来源。", "category": "study_limitation", "topic": "study_limitation", "source_kind": "limitations", "source_id": "missing_limitation", "evidence_ids": []}]
+    }
+  },
+  "expected": {"report_valid": true, "normalization_valid": false, "all_bound": false, "question_count": 0},
+  "gate_fields": ["report_valid", "normalization_valid", "all_bound", "question_count"],
+  "rationale": "A question without a report limitation source must be dropped rather than attached to a results passage.",
+  "last_reviewed": "2026-09-15"
+}

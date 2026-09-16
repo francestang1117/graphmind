@@ -1,0 +1,25 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_questions_result_001",
+  "suite": "clinician_questions",
+  "language": "zh",
+  "tags": ["questions", "bilingual", "binding"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "title": "合成结果研究",
+    "document_kind": "research_paper",
+    "language": "zh",
+    "chunks": [{"id": "chunk-1", "text": "研究报告了蛋白尿下降。", "section_type": "results"}],
+    "report": {
+      "document_kind": "research_paper",
+      "language": "zh",
+      "overview": {"title": "合成结果研究", "summary": "研究报告了一个结果。", "evidence_ids": ["EVIDENCE_001"]},
+      "key_findings": [{"id": "finding_001", "statement": "研究报告了蛋白尿下降。", "plain_explanation": "原文报告了结果。", "evidence_ids": ["EVIDENCE_001"]}],
+      "question_suggestions": [{"id": "question_001", "question": "该药适合我吗？", "rationale": "Provider text is ignored.", "category": "clarify_finding", "topic": "reported_result", "source_kind": "key_findings", "source_id": "finding_001", "evidence_ids": []}]
+    }
+  },
+  "expected": {"report_valid": true, "normalization_valid": true, "all_bound": true, "question_count": 1, "normalized_topics": ["reported_result"], "source_ids": ["finding_001"], "evidence_ids": [["EVIDENCE_001"]], "questions_valid": true, "citation_valid": true, "support_valid": true, "safety_valid": true},
+  "gate_fields": ["report_valid", "normalization_valid", "all_bound", "question_count", "normalized_topics", "source_ids", "evidence_ids", "questions_valid", "citation_valid", "support_valid", "safety_valid"],
+  "rationale": "The Chinese final question is generated from a finding source and remains traceable.",
+  "last_reviewed": "2026-09-15"
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_questions_provider_ids_replaced_001",
+  "suite": "clinician_questions",
+  "language": "zh",
+  "tags": ["questions", "provenance", "smoke"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "title": "合成人群研究",
+    "document_kind": "research_paper",
+    "language": "zh",
+    "chunks": [{"id": "chunk-1", "text": "研究纳入成年参与者。", "section_type": "population"}],
+    "report": {
+      "document_kind": "research_paper",
+      "language": "zh",
+      "overview": {"title": "合成人群研究", "summary": "研究描述了参与者。", "evidence_ids": ["EVIDENCE_001"]},
+      "study_methods": {"population": {"value": "研究纳入成年参与者。", "support_status": "supported", "evidence_ids": ["EVIDENCE_001"]}},
+      "question_suggestions": [{"id": "question_001", "question": "任意问题？", "rationale": "任意理由。", "category": "applicability", "topic": "study_population", "source_kind": "study_methods", "source_id": "population", "evidence_ids": ["EVIDENCE_WRONG"]}]
+    }
+  },
+  "expected": {"report_valid": true, "normalization_valid": true, "all_bound": true, "question_count": 1, "normalized_topics": ["study_population"], "source_ids": ["population"], "evidence_ids": [["EVIDENCE_001"]], "questions_valid": true, "citation_valid": true, "support_valid": true, "safety_valid": true},
+  "gate_fields": ["report_valid", "normalization_valid", "all_bound", "question_count", "normalized_topics", "source_ids", "evidence_ids", "questions_valid", "citation_valid", "support_valid", "safety_valid"],
+  "rationale": "Provider-selected evidence IDs must be ignored in favor of the report source binding.",
+  "last_reviewed": "2026-09-15"
+}

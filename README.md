@@ -17,6 +17,9 @@ official metadata and abstracts, and keeps results inside the document's
 workspace. It can now locally match evidence-backed findings to those stored
 articles and render conservative study cards. Multi-paper comparison remains a
 planned upgrade. It does not provide a diagnosis or treatment recommendation.
+The repository also ships a versioned, offline medical evaluation baseline for
+terminology, insight safety, literature matching, and clinician-question
+evidence binding. It never contacts external services during evaluation.
 
 ## What Works Today
 
@@ -67,6 +70,8 @@ planned upgrade. It does not provide a diagnosis or treatment recommendation.
 - Versioned local disease ontology with exact alias matching, privacy-bounded
   Chinese disease handling, explicit confirmation for ambiguous aliases, and
   auditable MeSH/curated source checksums
+- Versioned offline medical evaluation baseline with bilingual synthetic cases,
+  deterministic hard gates, and Precision@3/Recall@5/MRR observations
 - Backend tests covering the current core modules and medical workflows
 
 ## Project Status
@@ -86,6 +91,7 @@ planned upgrade. It does not provide a diagnosis or treatment recommendation.
 | V2 literature search | PR8 implementation | Versioned local disease matching, confirmed PubMed terms, official metadata/abstracts, scoped runs, and cache |
 | V2 evidence matching | PR9 implementation | Local finding-to-PubMed candidates, explainable scoring, abstract quotes, and study cards |
 | V2 clinician questions | PR11 implementation | Source-backed questions for professional discussion with structured safety and citation validation |
+| V2 medical evaluation | PR12 implementation | Versioned bilingual offline regression cases and deterministic safety/privacy gates |
 | Observability | Working MVP | Prometheus metrics and optional Sentry |
 | File storage backend | Working MVP | Local by default; optional S3/MinIO keeps a local parser cache |
 | Authentication | Working MVP | Email/password, optional GitHub OAuth, user-scoped workspaces |

@@ -1790,3 +1790,34 @@ Python `compileall`, and `git diff --check` also pass. The PR has no database
 migration; reports remain JSON-backed. External model quality and semantic
 question-to-evidence evaluation remain follow-up work before enabling that
 provider for general users.
+
+## 2026-09 - V2 PR12: Medical Evaluation Baseline and Regression Gates
+
+PR12 adds a versioned, filesystem-only medical evaluation package at
+`backend/evals/medical/v1`. The initial dataset contains 33 synthetic bilingual
+cases across four suites: terminology privacy, insight safety, literature
+matching, and evidence-backed clinician questions. Cases declare their review
+status, rationale, fixtures, expected behavior, and hard-gated fields. The
+loader rejects unsupported schemas, duplicate IDs, path traversal, missing
+fixtures, malformed cases, and personal identifiers before execution.
+
+The evaluation adapters exercise the existing production boundaries directly:
+local disease query construction and shared confirmation, a full
+MedicalInsightAnalyzer run with a recording provider, deterministic
+finding-to-literature matching, and server-owned question template binding.
+The runner emits stable JSON and Markdown reports, separates hard regression
+gates from non-blocking Precision@3, Recall@5, MRR, abstention, and binding
+observations, and provides smoke/full CLI modes with explicit exit codes. The
+recording providers never contact PubMed, OpenAI, or another remote service.
+
+The baseline also exposed and fixed a study-card classification boundary where
+the phrase `clinical study` could match the substring inside `preclinical
+study`. Publication-type matching now respects token boundaries, keeping
+preclinical evidence distinct from clinical studies.
+
+Focused PR12 tests pass (`26 passed`) and the full offline evaluation passes
+(`35/35` cases and `247/247` hard checks). GitHub Actions runs the evaluation
+as a separate five-minute job, publishes the Markdown summary, and uploads the
+JSON/Markdown reports as an artifact. This baseline is an engineering
+regression guard, not a clinical validation set or a claim about external-model
+quality; public-paper and provider evaluation remain separate follow-up work.

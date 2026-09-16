@@ -1,0 +1,24 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_terminology_fabry_stale_confirmation_001",
+  "suite": "terminology",
+  "language": "zh",
+  "tags": ["terminology", "confirmation", "fingerprint"],
+  "review_status": "engineering_reviewed",
+  "input": {"query": "关于法布雷病的研究", "external_search_confirmed": true, "query_fingerprint": "0000000000000000000000000000000000000000000000000000000000000000"},
+  "expected": {
+    "resolution_status": "ready",
+    "external_query_allowed": false,
+    "external_query_count": 0,
+    "repository_create_count": 0,
+    "queue_count": 0,
+    "provider_search_count": 0,
+    "normalized_terms": ["Fabry disease"],
+    "concept_ids": ["mesh:D000795"],
+    "error_code": "external_search_query_changed",
+    "raw_fragments_in_query": []
+  },
+  "gate_fields": ["resolution_status", "external_query_allowed", "external_query_count", "repository_create_count", "queue_count", "provider_search_count", "normalized_terms", "concept_ids", "error_code", "raw_fragments_in_query"],
+  "rationale": "A confirmation for an older query fingerprint must not release the newly built query.",
+  "last_reviewed": "2026-09-16"
+}

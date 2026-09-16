@@ -1,0 +1,29 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_terminology_privacy_001",
+  "suite": "terminology",
+  "language": "zh",
+  "tags": ["terminology", "privacy", "pii", "smoke"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "query": "患者张三患有戈谢病，有什么新研究？",
+    "external_search_confirmed": true,
+    "query_fingerprint": "8dc6b9ae23a33c8e72a61666f5de59cca63d649b44b79d8ce05b6e5a12bce099",
+    "leak_checks": ["患者", "张三"]
+  },
+  "expected": {
+    "resolution_status": "ready",
+    "external_query_allowed": true,
+    "external_query_count": 1,
+    "repository_create_count": 1,
+    "queue_count": 1,
+    "provider_search_count": 1,
+    "normalized_terms": ["Gaucher disease"],
+    "concept_ids": ["mesh:D005776"],
+    "error_code": null,
+    "raw_fragments_in_query": []
+  },
+  "gate_fields": ["resolution_status", "external_query_allowed", "external_query_count", "repository_create_count", "queue_count", "provider_search_count", "normalized_terms", "concept_ids", "error_code", "raw_fragments_in_query"],
+  "rationale": "Only the locally recognized disease concept may be released; the synthetic name and patient marker must stay local.",
+  "last_reviewed": "2026-09-15"
+}

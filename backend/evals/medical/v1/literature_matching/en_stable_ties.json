@@ -1,0 +1,34 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_literature_stable_ties_001",
+  "suite": "literature_matching",
+  "language": "en",
+  "tags": ["matching", "determinism"],
+  "review_status": "engineering_reviewed",
+  "fixtures": ["fixtures/pubmed/stable_ties.json"],
+  "input": {
+    "finding": {
+      "finding_id": "finding-tie",
+      "finding_type": "key_finding",
+      "statement": "Fabry disease biomarker results were reported.",
+      "plain_explanation": "The finding contains only the controlled condition.",
+      "evidence_ids": ["EVIDENCE_001"],
+      "normalized_text": "fabry disease biomarker results were reported",
+      "controlled_terms": ["Fabry disease"],
+      "condition_terms": ["Fabry disease"],
+      "biomedical_terms": [],
+      "keywords": [],
+      "phrases": [],
+      "condition_status": "matched"
+    }
+  },
+  "expected": {
+    "match_status": "condition_only",
+    "candidate_ids": ["article-3001", "article-3002"],
+    "relevant_article_ids": ["article-3001"],
+    "expected_abstention": false
+  },
+  "gate_fields": ["match_status", "candidate_ids"],
+  "rationale": "Equal scores must use a stable article identifier tie-breaker independent of fixture order.",
+  "last_reviewed": "2026-09-15"
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_questions_evidence_cap_001",
+  "suite": "clinician_questions",
+  "language": "en",
+  "tags": ["questions", "bounds"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "title": "Synthetic broad population study",
+    "document_kind": "research_paper",
+    "language": "en",
+    "chunks": [
+      {"id": "chunk-1", "text": "Population evidence one.", "section_type": "population"},
+      {"id": "chunk-2", "text": "Population evidence two.", "section_type": "population"},
+      {"id": "chunk-3", "text": "Population evidence three.", "section_type": "population"},
+      {"id": "chunk-4", "text": "Population evidence four.", "section_type": "population"},
+      {"id": "chunk-5", "text": "Population evidence five.", "section_type": "population"},
+      {"id": "chunk-6", "text": "Population evidence six.", "section_type": "population"},
+      {"id": "chunk-7", "text": "Population evidence seven.", "section_type": "population"}
+    ],
+    "report": {
+      "document_kind": "research_paper",
+      "language": "en",
+      "overview": {"title": "Synthetic broad population study", "summary": "The study describes a population.", "evidence_ids": ["EVIDENCE_001"]},
+      "study_methods": {"population": {"value": "The study describes a population.", "support_status": "supported", "evidence_ids": ["EVIDENCE_001", "EVIDENCE_002", "EVIDENCE_003", "EVIDENCE_004", "EVIDENCE_005", "EVIDENCE_006", "EVIDENCE_007"]}},
+      "question_suggestions": [{"id": "question_001", "question": "Provider question?", "rationale": "Provider rationale.", "category": "applicability", "topic": "study_population", "source_kind": "study_methods", "source_id": "population", "evidence_ids": []}]
+    }
+  },
+  "expected": {"report_valid": true, "normalization_valid": true, "all_bound": true, "question_count": 1, "normalized_topics": ["study_population"], "source_ids": ["population"], "evidence_ids": [["EVIDENCE_001", "EVIDENCE_002", "EVIDENCE_003", "EVIDENCE_004", "EVIDENCE_005"]], "questions_valid": true, "citation_valid": true, "support_valid": true, "safety_valid": true},
+  "gate_fields": ["report_valid", "normalization_valid", "all_bound", "question_count", "normalized_topics", "source_ids", "evidence_ids", "questions_valid", "citation_valid", "support_valid", "safety_valid"],
+  "rationale": "A report source may contain many citations, but one clinician question remains bounded to five.",
+  "last_reviewed": "2026-09-15"
+}

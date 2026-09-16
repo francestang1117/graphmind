@@ -1,0 +1,34 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_literature_no_candidates_001",
+  "suite": "literature_matching",
+  "language": "zh",
+  "tags": ["matching", "abstention"],
+  "review_status": "engineering_reviewed",
+  "fixtures": ["fixtures/pubmed/fabry_only.json"],
+  "input": {
+    "finding": {
+      "finding_id": "finding-melanoma",
+      "finding_type": "key_finding",
+      "statement": "黑色素瘤免疫治疗结果被报告。",
+      "plain_explanation": "候选文章中没有这个疾病。",
+      "evidence_ids": ["EVIDENCE_001"],
+      "normalized_text": "黑色素瘤免疫治疗结果被报告",
+      "controlled_terms": ["Melanoma"],
+      "condition_terms": ["Melanoma"],
+      "biomedical_terms": [],
+      "keywords": ["immunotherapy"],
+      "phrases": ["melanoma immunotherapy"],
+      "condition_status": "matched"
+    }
+  },
+  "expected": {
+    "match_status": "no_candidates",
+    "candidate_ids": [],
+    "relevant_article_ids": [],
+    "expected_abstention": true
+  },
+  "gate_fields": ["match_status", "candidate_ids"],
+  "rationale": "A candidate set without the finding condition must produce no match rather than a keyword-only false positive.",
+  "last_reviewed": "2026-09-15"
+}

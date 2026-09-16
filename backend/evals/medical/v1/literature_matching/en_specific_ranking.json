@@ -1,0 +1,34 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_literature_specific_ranking_001",
+  "suite": "literature_matching",
+  "language": "en",
+  "tags": ["matching", "ranking", "smoke"],
+  "review_status": "engineering_reviewed",
+  "fixtures": ["fixtures/pubmed/fabry.json"],
+  "input": {
+    "finding": {
+      "finding_id": "finding-specific",
+      "finding_type": "key_finding",
+      "statement": "Fabry disease treatment reduced proteinuria after migalastat.",
+      "plain_explanation": "The reported finding concerns treatment and proteinuria.",
+      "evidence_ids": ["EVIDENCE_001"],
+      "normalized_text": "fabry disease treatment reduced proteinuria after migalastat",
+      "controlled_terms": ["Fabry disease"],
+      "condition_terms": ["Fabry disease"],
+      "biomedical_terms": ["migalastat"],
+      "keywords": ["proteinuria"],
+      "phrases": ["reduced proteinuria"],
+      "condition_status": "matched"
+    }
+  },
+  "expected": {
+    "match_status": "matched",
+    "candidate_ids": ["article-1001", "article-1002"],
+    "relevant_article_ids": ["article-1001"],
+    "expected_abstention": false
+  },
+  "gate_fields": ["match_status", "candidate_ids"],
+  "rationale": "A finding-specific article should rank before a condition-only article, while a retracted article is excluded.",
+  "last_reviewed": "2026-09-15"
+}
