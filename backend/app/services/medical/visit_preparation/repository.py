@@ -268,7 +268,6 @@ class VisitPreparationRepository:
                     )
 
                 changed = False
-                previous_status = row.status
                 if status is not None:
                     if status not in QUESTION_STATUSES:
                         raise VisitPreparationError(
@@ -305,18 +304,6 @@ class VisitPreparationRepository:
                     if row.user_note != cleaned_note:
                         row.user_note = cleaned_note
                         changed = True
-                if previous_status != row.status:
-                    # This repository disables autoflush. Flush the new
-                    # status before compacting, or the query can still see
-                    # the row in its old group and reset another position.
-                    db.flush()
-                    for group_status in sorted({previous_status, row.status}):
-                        _compact_question_group(
-                            db,
-                            user_id=user_id,
-                            workspace_id=workspace_id,
-                            status=group_status,
-                        )
                 if changed:
                     row.version += 1
                     row.updated_at = _utc_now()
