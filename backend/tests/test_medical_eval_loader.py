@@ -102,6 +102,28 @@ def test_loader_rejects_personal_identifiers_in_fixture_text(tmp_path: Path) -> 
         load_dataset(root)
 
 
+def test_loader_rejects_structured_phone_in_fixture(tmp_path: Path) -> None:
+    root = _copy_dataset(tmp_path)
+    fixture_path = root / "fixtures" / "pubmed" / "fabry.json"
+    fixture = _read_json(fixture_path)
+    fixture[0]["phone"] = "13800138000"
+    _write_json(fixture_path, fixture)
+
+    with pytest.raises(EvaluationDatasetError, match="fixture contains a disallowed personal identifier"):
+        load_dataset(root)
+
+
+def test_loader_rejects_structured_patient_id_in_fixture(tmp_path: Path) -> None:
+    root = _copy_dataset(tmp_path)
+    fixture_path = root / "fixtures" / "pubmed" / "fabry.json"
+    fixture = _read_json(fixture_path)
+    fixture[0]["patient_id"] = "ABC123"
+    _write_json(fixture_path, fixture)
+
+    with pytest.raises(EvaluationDatasetError, match="fixture contains a disallowed personal identifier"):
+        load_dataset(root)
+
+
 def test_loader_allows_iso_publication_date(tmp_path: Path) -> None:
     root = _copy_dataset(tmp_path)
     case_path = root / "terminology" / "en_fabry.json"

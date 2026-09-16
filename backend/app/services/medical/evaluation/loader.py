@@ -116,8 +116,12 @@ def load_dataset(
                 raise EvaluationDatasetError(
                     f"case {case.case_id} references an unreadable fixture"
                 ) from exc
+            try:
+                fixture_value = json.loads(fixture_text)
+            except json.JSONDecodeError:
+                fixture_value = fixture_text
             fixture_pii_path = _find_sensitive_text(
-                fixture_text,
+                fixture_value,
                 f"fixture:{fixture}",
             )
             if fixture_pii_path:
