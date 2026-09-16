@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import json
 import os
 import threading
+import uuid
 
 import pytest
 from sqlalchemy import create_engine, func, select
