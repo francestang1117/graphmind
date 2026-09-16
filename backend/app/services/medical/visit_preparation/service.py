@@ -56,6 +56,8 @@ class VisitPreparationService:
                 code="clinician_question_source_outdated",
             )
 
+        # The client submits identifiers only; all display text and evidence
+        # come from the already validated, server-owned analysis report.
         try:
             report = MedicalInsightReport.model_validate(run.get("report"))
         except Exception as exc:

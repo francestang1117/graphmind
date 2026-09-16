@@ -68,6 +68,8 @@ class VisitPreparationRepository:
 
         try:
             with self.session_factory() as db:
+                # Serialize source refreshes with document parsing/deletion so
+                # a question can never be saved against a mixed source version.
                 document = self._locked_document(
                     db,
                     str(source.get("document_id") or ""),
@@ -124,6 +126,8 @@ class VisitPreparationRepository:
                 ).first()
 
                 now = _utc_now()
+                # The topic key makes repeated saves idempotent while the
+                # refresh flag tells the API whether the source actually moved.
                 if row:
                     changed = _refresh_question_row(row, source, now)
                     if changed:
@@ -365,6 +369,8 @@ class VisitPreparationRepository:
                             code="visit_brief_source_outdated",
                         )
 
+                # Copy the question and its evidence in one transaction; the
+                # brief must remain stable even when the live question changes.
                 now = _utc_now()
                 languages = {str(row.language or "en") for row in ordered_rows}
                 language = next(iter(languages)) if len(languages) == 1 else "mixed"
@@ -672,6 +678,8 @@ def _brief_dict(db, row: VisitBriefRecord | None) -> dict[str, Any] | None:
 
 
 def _source_status(db, row: ClinicianQuestionRecord) -> str:
+    # Do not persist this status: it is derived from the live document and
+    # analysis so reparsing or deletion is reflected without a background job.
     document = db.scalars(
         select(DocumentRecord).where(
             DocumentRecord.id == row.document_id,

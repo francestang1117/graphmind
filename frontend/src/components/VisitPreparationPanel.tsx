@@ -80,6 +80,8 @@ export default function VisitPreparationPanel({ workspaceId }: Props) {
   };
 
   const moveQuestion = async (item: ClinicianQuestion, direction: -1 | 1) => {
+    // Positions are swapped within the same status group; each PATCH carries
+    // the rendered version so another tab cannot be silently overwritten.
     const ordered = questions.items
       .filter((candidate) => candidate.status === item.status)
       .sort((left, right) => left.position - right.position);
