@@ -15,7 +15,6 @@ from app.core.errors import (
 )
 from app.services.document_repository import DocumentRepository, document_repository
 from app.services.file_storage import DuplicateFileError, FileStorage, FileStorageError, file_storage
-from app.services.medical.visit_preparation.exceptions import VisitPreparationError
 from app.services.virus_scanner import VirusScanner, virus_scanner
 from app.utils.file_validator import FileValidator
 
@@ -197,86 +196,103 @@ class DocumentService:
                     self.repository.mark_deleted(filename, user_id, workspace_id)
                 else:
                     self.repository.mark_deleted(filename, user_id)
-            from app.services.parsed_artifact_repository import parsed_artifact_repository
-            from app.services.graph_repository import graph_repository
-            from app.services.medical.repository import medical_repository
-            from app.services.medical.ai.analysis_repository import medical_analysis_repository
-            from app.services.medical.evidence_matching.repository import (
-                evidence_matching_repository,
-            )
-            from app.services.medical.literature.repository import literature_repository
 
             self._cancel_document_jobs(document_id, user_id, workspace_id)
-            if workspace_id is not None:
-                parsed_artifact_repository.delete_for_document(
-                    document_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                )
-                graph_repository.delete_for_document(document_id, user_id, workspace_id)
-                medical_repository.delete_for_document(
-                    document_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                )
-                medical_analysis_repository.delete_for_document(
-                    document_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                )
-                evidence_matching_repository.delete_for_document(
-                    document_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                )
-                self._delete_visit_preparation_data(
-                    document_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                )
-                literature_repository.delete_for_document(
-                    document_id,
-                    user_id=user_id,
-                    workspace_id=workspace_id,
-                )
-            else:
-                parsed_artifact_repository.delete_for_document(document_id, user_id=user_id)
-                graph_repository.delete_for_document(document_id, user_id)
-                medical_repository.delete_for_document(document_id, user_id=user_id)
-                medical_analysis_repository.delete_for_document(document_id, user_id=user_id)
-                evidence_matching_repository.delete_for_document(document_id, user_id=user_id)
-                self._delete_visit_preparation_data(
-                    document_id,
-                    user_id=user_id,
-                    workspace_id=None,
-                )
-                literature_repository.delete_for_document(document_id, user_id=user_id)
+            self._cleanup_deleted_document_data(
+                document_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
         return deleted
 
-    def _delete_visit_preparation_data(
+    def cleanup_deleted_document_data(
         self,
         document_id: str,
         *,
         user_id: str,
         workspace_id: Optional[str],
     ) -> None:
-        """Surface cleanup failures and arrange an idempotent retry."""
+        """Remove all data derived from a document tombstone.
+
+        Each repository owns its transaction, so this operation is deliberately
+        idempotent and can be retried after a partial cleanup. Literature data
+        is removed before visit-preparation data because the latter may fail
+        while acquiring its workspace ordering lock.
+        """
+        from app.services.graph_repository import graph_repository
+        from app.services.medical.ai.analysis_repository import medical_analysis_repository
+        from app.services.medical.evidence_matching.repository import (
+            evidence_matching_repository,
+        )
+        from app.services.medical.literature.repository import literature_repository
+        from app.services.medical.repository import medical_repository
         from app.services.medical.visit_preparation.repository import (
             visit_preparation_repository,
         )
+        from app.services.parsed_artifact_repository import parsed_artifact_repository
 
-        try:
-            visit_preparation_repository.delete_for_document(
+        if workspace_id is not None:
+            parsed_artifact_repository.delete_for_document(
                 document_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
             )
-        except VisitPreparationError as exc:
+            graph_repository.delete_for_document(document_id, user_id, workspace_id)
+            medical_repository.delete_for_document(
+                document_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+            medical_analysis_repository.delete_for_document(
+                document_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+            evidence_matching_repository.delete_for_document(
+                document_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+            # Keep literature cleanup ahead of the failure-prone visit data.
+            literature_repository.delete_for_document(
+                document_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+        else:
+            parsed_artifact_repository.delete_for_document(document_id, user_id=user_id)
+            graph_repository.delete_for_document(document_id, user_id)
+            medical_repository.delete_for_document(document_id, user_id=user_id)
+            medical_analysis_repository.delete_for_document(document_id, user_id=user_id)
+            evidence_matching_repository.delete_for_document(document_id, user_id=user_id)
+            literature_repository.delete_for_document(document_id, user_id=user_id)
+
+        visit_preparation_repository.delete_for_document(
+            document_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        )
+
+    def _cleanup_deleted_document_data(
+        self,
+        document_id: str,
+        *,
+        user_id: str,
+        workspace_id: Optional[str],
+    ) -> None:
+        """Surface cleanup failures and arrange an idempotent full retry."""
+        try:
+            self.cleanup_deleted_document_data(
+                document_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+        except Exception as exc:
             log.error(
-                "Visit preparation cleanup is incomplete for deleted document %s",
+                "Derived-data cleanup is incomplete for deleted document %s",
                 document_id,
             )
-            self._schedule_visit_preparation_cleanup(
+            self._schedule_document_cleanup(
                 document_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
@@ -284,7 +300,7 @@ class DocumentService:
             raise DocumentCleanupError() from exc
 
     @staticmethod
-    def _schedule_visit_preparation_cleanup(
+    def _schedule_document_cleanup(
         document_id: str,
         *,
         user_id: str,
@@ -292,9 +308,9 @@ class DocumentService:
     ) -> None:
         """Queue a retry after the document tombstone has been written."""
         try:
-            from app.tasks.document_cleanup import retry_visit_preparation_cleanup
+            from app.tasks.document_cleanup import retry_document_cleanup
 
-            retry_visit_preparation_cleanup.apply_async(
+            retry_document_cleanup.apply_async(
                 kwargs={
                     "document_id": document_id,
                     "user_id": user_id,
@@ -306,7 +322,7 @@ class DocumentService:
             # The original deletion failure is still surfaced to the caller;
             # this log records that a broker outage also blocked the retry.
             log.error(
-                "Could not schedule visit preparation cleanup for document %s: %s",
+                "Could not schedule document cleanup for document %s: %s",
                 document_id,
                 exc,
             )

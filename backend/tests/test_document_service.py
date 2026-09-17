@@ -135,6 +135,7 @@ def test_delete_does_not_report_success_when_visit_cleanup_fails(monkeypatch):
         virus_scan_enabled=False,
         job_repo=EmptyJobRepository(),
     )
+    cleanup_calls = []
 
     for path in (
         "app.services.parsed_artifact_repository.parsed_artifact_repository.delete_for_document",
@@ -142,13 +143,17 @@ def test_delete_does_not_report_success_when_visit_cleanup_fails(monkeypatch):
         "app.services.medical.repository.medical_repository.delete_for_document",
         "app.services.medical.ai.analysis_repository.medical_analysis_repository.delete_for_document",
         "app.services.medical.evidence_matching.repository.evidence_matching_repository.delete_for_document",
-        "app.services.medical.literature.repository.literature_repository.delete_for_document",
     ):
         monkeypatch.setattr(path, lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "app.services.medical.literature.repository.literature_repository.delete_for_document",
+        lambda *args, **kwargs: cleanup_calls.append("literature"),
+    )
 
     def fail_cleanup(*_args, **_kwargs):
         from app.services.medical.visit_preparation.exceptions import VisitPreparationError
 
+        cleanup_calls.append("visit_preparation")
         raise VisitPreparationError(
             "simulated cleanup failure",
             code="visit_preparation_cleanup_failed",
@@ -160,7 +165,7 @@ def test_delete_does_not_report_success_when_visit_cleanup_fails(monkeypatch):
     )
     monkeypatch.setattr(
         service,
-        "_schedule_visit_preparation_cleanup",
+        "_schedule_document_cleanup",
         lambda *args, **kwargs: None,
     )
 
@@ -168,3 +173,4 @@ def test_delete_does_not_report_success_when_visit_cleanup_fails(monkeypatch):
         service.delete_document("notes.md", "u1")
 
     assert exc.value.code == "document_cleanup_incomplete"
+    assert cleanup_calls == ["literature", "visit_preparation"]
