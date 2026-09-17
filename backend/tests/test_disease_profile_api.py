@@ -10,6 +10,7 @@ import pytest
 
 from app.api.endpoints import disease_profiles
 from app.core.errors import AppError
+from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 
 
 def _link() -> dict:
@@ -86,6 +87,36 @@ def test_create_link_api_passes_scope_and_returns_idempotent_status(monkeypatch)
         "matched_alias": "法布雷病",
         "source_search_run_id": None,
     }
+
+
+def test_create_link_api_maps_second_primary_disease_to_conflict(monkeypatch):
+    _patch_scope(monkeypatch)
+
+    def create_link(**_kwargs):
+        raise DiseaseProfileError(
+            "This document already has a primary disease.",
+            code="disease_link_primary_exists",
+            status_code=409,
+        )
+
+    monkeypatch.setattr(disease_profiles.disease_profile_service, "create_link", create_link)
+    body = disease_profiles.DiseaseLinkCreateRequest(
+        concept_id="mesh:D005776",
+        matched_alias="戈谢病",
+    )
+
+    with pytest.raises(AppError) as error:
+        asyncio.run(
+            disease_profiles.create_disease_link(
+                "document-1",
+                body,
+                workspace_id="workspace-1",
+                user=SimpleNamespace(id="user-1"),
+            )
+        )
+
+    assert error.value.code == "disease_link_primary_exists"
+    assert error.value.status_code == 409
 
 
 def test_list_profiles_encodes_the_next_cursor(monkeypatch):

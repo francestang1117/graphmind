@@ -273,7 +273,7 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         item["column_names"]
         for item in inspector.get_unique_constraints("document_disease_links")
     ]
-    assert ["user_id", "workspace_id", "document_id", "concept_id"] in disease_link_unique
+    assert ["user_id", "workspace_id", "document_id"] in disease_link_unique
     assert inspector.get_foreign_keys("document_disease_links")
     chunk_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_chunks")]
     entity_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_entities")]
@@ -287,6 +287,127 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
     )
     assert inspector.get_foreign_keys("graph_edges")[0]["referred_table"] == "documents"
     assert inspector.get_foreign_keys("processing_jobs")[0]["referred_table"] == "documents"
+
+
+def test_sqlite_upgrade_collapses_legacy_multi_disease_links_to_primary():
+    """Old PR14 links must not fan one document's evidence into two profiles."""
+    engine = create_engine("sqlite:///:memory:", future=True)
+    Base.metadata.create_all(bind=engine)
+    document_id = uuid.uuid4().hex
+
+    with Session(engine) as db:
+        db.add(
+            DocumentRecord(
+                id=document_id,
+                user_id="user-1",
+                workspace_id="workspace-1",
+                filename="paper.pdf",
+                stored_filename="paper.pdf",
+                original_filename="paper.pdf",
+                file_extension=".pdf",
+                file_type=".pdf",
+                mime_type="application/pdf",
+                file_hash="paper-hash",
+                file_path="/tmp/paper.pdf",
+                file_size=100,
+                status="indexed",
+            )
+        )
+        db.commit()
+
+    with engine.connect() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
+        with connection.begin():
+            connection.exec_driver_sql("DROP TABLE document_disease_links")
+            connection.exec_driver_sql(
+                """
+                CREATE TABLE document_disease_links (
+                    id VARCHAR(320) NOT NULL PRIMARY KEY,
+                    user_id VARCHAR(64) NOT NULL,
+                    workspace_id VARCHAR(64) NOT NULL,
+                    document_id VARCHAR(255) NOT NULL,
+                    concept_id VARCHAR(160) NOT NULL,
+                    preferred_name_en VARCHAR(200) NOT NULL,
+                    preferred_name_zh VARCHAR(200) NOT NULL DEFAULT '',
+                    matched_alias VARCHAR(200) NOT NULL DEFAULT '',
+                    ontology_version VARCHAR(64) NOT NULL,
+                    link_source VARCHAR(32) NOT NULL DEFAULT 'manual_selection',
+                    source_search_run_id VARCHAR(64),
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    CONSTRAINT uq_document_disease_links_scope_document_concept
+                        UNIQUE (user_id, workspace_id, document_id, concept_id),
+                    CONSTRAINT fk_document_disease_links_document
+                        FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+                    CONSTRAINT fk_document_disease_links_search
+                        FOREIGN KEY (source_search_run_id)
+                        REFERENCES literature_search_runs(id) ON DELETE SET NULL
+                )
+                """
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO document_disease_links ("
+                    "id, user_id, workspace_id, document_id, concept_id, "
+                    "preferred_name_en, preferred_name_zh, matched_alias, "
+                    "ontology_version, link_source, created_at, updated_at"
+                    ") VALUES ("
+                    ":id, :user_id, :workspace_id, :document_id, :concept_id, "
+                    ":preferred_name_en, :preferred_name_zh, :matched_alias, "
+                    ":ontology_version, 'manual_selection', :created_at, :updated_at"
+                    ")"
+                ),
+                [
+                    {
+                        "id": "link-fabry",
+                        "user_id": "user-1",
+                        "workspace_id": "workspace-1",
+                        "document_id": document_id,
+                        "concept_id": "mesh:D000795",
+                        "preferred_name_en": "Fabry Disease",
+                        "preferred_name_zh": "法布雷病",
+                        "matched_alias": "法布雷病",
+                        "ontology_version": "test-v1",
+                        "created_at": "2026-01-01",
+                        "updated_at": "2026-01-01",
+                    },
+                    {
+                        "id": "link-gaucher",
+                        "user_id": "user-1",
+                        "workspace_id": "workspace-1",
+                        "document_id": document_id,
+                        "concept_id": "mesh:D005776",
+                        "preferred_name_en": "Gaucher Disease",
+                        "preferred_name_zh": "戈谢病",
+                        "matched_alias": "戈谢病",
+                        "ontology_version": "test-v1",
+                        "created_at": "2026-02-01",
+                        "updated_at": "2026-02-01",
+                    },
+                ],
+            )
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        connection.commit()
+
+    upgrade_persistence_schema(engine)
+
+    inspector = inspect(engine)
+    unique_columns = [
+        item["column_names"]
+        for item in inspector.get_unique_constraints("document_disease_links")
+    ]
+    assert ["user_id", "workspace_id", "document_id"] in unique_columns
+    with engine.connect() as db:
+        assert db.scalar(
+            text("SELECT COUNT(*) FROM document_disease_links WHERE document_id = :document_id"),
+            {"document_id": document_id},
+        ) == 1
+        assert db.scalar(
+            text("SELECT concept_id FROM document_disease_links WHERE document_id = :document_id"),
+            {"document_id": document_id},
+        ) == "mesh:D000795"
+    engine.dispose()
 
 
 def test_upgrade_marks_existing_deleted_documents_for_cleanup():

@@ -244,24 +244,27 @@ def test_repository_links_are_idempotent_and_scope_checked():
     assert created_again is False
     assert first["id"] == second["id"]
 
-    second_concept, second_concept_created = repository.create_link(
-        **{
-            **kwargs,
-            "concept_id": "mesh:D005776",
-            "preferred_name_en": "Gaucher Disease",
-            "preferred_name_zh": "戈谢病",
-            "matched_alias": "戈谢病",
-        }
-    )
-    assert second_concept_created is True
-    assert second_concept["concept_id"] == "mesh:D005776"
+    with pytest.raises(DiseaseProfileError) as error:
+        repository.create_link(
+            **{
+                **kwargs,
+                "concept_id": "mesh:D005776",
+                "preferred_name_en": "Gaucher Disease",
+                "preferred_name_zh": "戈谢病",
+                "matched_alias": "戈谢病",
+            }
+        )
+    assert error.value.code == "disease_link_primary_exists"
+    assert error.value.status_code == 409
 
     with pytest.raises(DiseaseProfileError) as error:
         repository.create_link(**{**kwargs, "workspace_id": f"other-{suffix}"})
     assert error.value.code == "disease_link_document_not_found"
 
     with SessionLocal() as db:
-        assert db.query(DocumentDiseaseLinkRecord).filter_by(document_id=document_id).count() == 2
+        links = db.query(DocumentDiseaseLinkRecord).filter_by(document_id=document_id).all()
+        assert len(links) == 1
+        assert links[0].concept_id == "mesh:D000795"
 
     assert repository.delete_for_document(
         document_id,

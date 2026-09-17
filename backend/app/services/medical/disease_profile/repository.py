@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
 
 
 class DiseaseProfileRepository:
-    """Keep every profile query inside one user and workspace boundary."""
+    """Keep profiles scoped and assign each document one primary disease."""
 
     def __init__(
         self,
@@ -105,6 +105,22 @@ class DiseaseProfileRepository:
                     db.commit()
                     return _link_dict(existing), False
 
+                # Derived analysis belongs to the document, not to an
+                # individual link. Rejecting a second primary concept keeps
+                # the profile read model from copying evidence across diseases.
+                primary = self._find_document_link(
+                    db,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=document.id,
+                )
+                if primary:
+                    raise DiseaseProfileError(
+                        "This document already has a primary disease. Remove the existing link before choosing another.",
+                        code="disease_link_primary_exists",
+                        status_code=409,
+                    )
+
                 if source_search_run_id:
                     search = db.scalars(
                         select(LiteratureSearchRunRecord).where(
@@ -155,6 +171,18 @@ class DiseaseProfileRepository:
                     if existing:
                         db.commit()
                         return _link_dict(existing), False
+                    primary = self._find_document_link(
+                        db,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        document_id=document.id,
+                    )
+                    if primary:
+                        raise DiseaseProfileError(
+                            "This document already has a primary disease. Remove the existing link before choosing another.",
+                            code="disease_link_primary_exists",
+                            status_code=409,
+                        )
                     raise
                 db.commit()
                 return _link_dict(row), True
@@ -266,7 +294,7 @@ class DiseaseProfileRepository:
                         DocumentRecord.deleted_at.is_(None),
                     )
                     .order_by(
-                        DocumentDiseaseLinkRecord.concept_id,
+                        DocumentDiseaseLinkRecord.document_id,
                         DocumentDiseaseLinkRecord.created_at,
                         DocumentDiseaseLinkRecord.id,
                     )
@@ -284,9 +312,13 @@ class DiseaseProfileRepository:
                     for _link, document in link_rows
                 }
                 document_ids = list(documents)
-                links_by_document: dict[str, list[dict[str, Any]]] = defaultdict(list)
+                # Keep a defensive first-link fallback for databases upgraded
+                # from the old multi-disease schema. The migration collapses
+                # duplicates, but reads must not fan out evidence if a legacy
+                # package is briefly mounted before startup migration runs.
+                links_by_document: dict[str, dict[str, Any]] = {}
                 for link, _document in link_rows:
-                    links_by_document[link.document_id].append(_link_dict(link))
+                    links_by_document.setdefault(link.document_id, _link_dict(link))
 
                 analysis_rows = db.execute(
                     select(MedicalAnalysisRunRecord, MedicalAnalysisResultRecord)
@@ -413,16 +445,18 @@ class DiseaseProfileRepository:
 
                 grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
                 for document_id, document in documents.items():
-                    for link in links_by_document[document_id]:
-                        grouped[link["concept_id"]].append(
-                            {
-                                "link": link,
-                                "document": document,
-                                "analyses": analyses_by_document.get(document_id, []),
-                                "matches": matches_by_document.get(document_id, []),
-                                "questions": questions_by_document.get(document_id, []),
-                            }
-                        )
+                    link = links_by_document.get(document_id)
+                    if not link:
+                        continue
+                    grouped[link["concept_id"]].append(
+                        {
+                            "link": link,
+                            "document": document,
+                            "analyses": analyses_by_document.get(document_id, []),
+                            "matches": matches_by_document.get(document_id, []),
+                            "questions": questions_by_document.get(document_id, []),
+                        }
+                    )
                 return dict(grouped)
         except DiseaseProfileError:
             raise
@@ -520,6 +554,27 @@ class DiseaseProfileRepository:
                 DocumentDiseaseLinkRecord.workspace_id == workspace_id,
                 DocumentDiseaseLinkRecord.document_id == document_id,
                 DocumentDiseaseLinkRecord.concept_id == concept_id,
+            )
+        ).first()
+
+    @staticmethod
+    def _find_document_link(
+        db,
+        *,
+        user_id: str,
+        workspace_id: str,
+        document_id: str,
+    ) -> DocumentDiseaseLinkRecord | None:
+        return db.scalars(
+            select(DocumentDiseaseLinkRecord)
+            .where(
+                DocumentDiseaseLinkRecord.user_id == user_id,
+                DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                DocumentDiseaseLinkRecord.document_id == document_id,
+            )
+            .order_by(
+                DocumentDiseaseLinkRecord.created_at,
+                DocumentDiseaseLinkRecord.id,
             )
         ).first()
 

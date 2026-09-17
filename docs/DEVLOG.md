@@ -1892,7 +1892,10 @@ link a classified medical document to a locally selected MeSH or Orphanet
 concept, review unassigned classified documents, and remove a link without
 changing the source document or its medical analysis. The link stores the
 concept names, matched alias, ontology version, source type, and optional
-confirmed search-run reference, with a unique scope/document/concept key.
+confirmed search-run reference. For this MVP each document has one primary
+disease link, enforced by a unique `(user_id, workspace_id, document_id)` key;
+content-level multi-disease ownership is deferred until findings and matches
+can carry their own concept IDs.
 
 Profile reads batch-load linked documents, current validated analyses, evidence,
 literature matches, and non-dismissed clinician questions before passing them
@@ -1914,7 +1917,8 @@ profile reads and writes; disease-name search remains local-only.
 
 Document cleanup now removes disease links as part of the existing idempotent
 deleted-document cleanup chain. Migration coverage includes the new table,
-foreign keys, unique constraint, workspace backfill, and orphan cleanup. The
+foreign keys, primary-link constraint, workspace backfill, legacy duplicate
+collapse, and orphan cleanup. The
 offline evaluation package is `medical-eval-v1.3.0` with 50 synthetic cases,
 including 8 disease-profile cases and 365 hard checks. The local backend suite
 is `569 passed, 5 skipped`; the frontend suite is `39 passed`, with lint and

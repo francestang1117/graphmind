@@ -329,7 +329,12 @@ class DocumentSectionRecord(Base):
 
 
 class DocumentDiseaseLinkRecord(Base):
-    """A user-confirmed link from one document to one ontology concept."""
+    """The user-confirmed primary disease for one document.
+
+    A document's analyses, literature matches, and clinician questions are
+    document-scoped today. Keeping one primary disease link prevents those
+    derived records from being copied into unrelated disease profiles.
+    """
 
     __tablename__ = "document_disease_links"
     __table_args__ = (
@@ -337,8 +342,7 @@ class DocumentDiseaseLinkRecord(Base):
             "user_id",
             "workspace_id",
             "document_id",
-            "concept_id",
-            name="uq_document_disease_links_scope_document_concept",
+            name="uq_document_disease_links_scope_document",
         ),
         Index(
             "ix_document_disease_links_scope_concept",

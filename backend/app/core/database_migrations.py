@@ -40,6 +40,14 @@ _WORKSPACE_TABLES = (
     "document_disease_links",
 )
 
+_PRIMARY_DISEASE_LINK_UNIQUE_COLUMNS = (
+    "user_id",
+    "workspace_id",
+    "document_id",
+)
+_PRIMARY_DISEASE_LINK_UNIQUE_NAME = "uq_document_disease_links_scope_document"
+_LEGACY_DISEASE_LINK_UNIQUE_NAME = "uq_document_disease_links_scope_document_concept"
+
 
 def upgrade_persistence_schema(engine) -> None:
     """Apply the workspace migration without touching application data."""
@@ -91,6 +99,7 @@ def _upgrade_sqlite(engine) -> None:
                 seeded = _seed_default_workspaces(connection)
                 backfilled = _backfill_workspace_ids(connection)
                 _clean_sqlite_orphans(connection)
+                _collapse_duplicate_disease_links(connection)
 
                 rebuilt = 0
                 rebuild_checks = (
@@ -102,6 +111,7 @@ def _upgrade_sqlite(engine) -> None:
                     ("processing_jobs", _needs_sqlite_jobs_rebuild),
                     ("medical_document_profiles", _needs_sqlite_profile_rebuild),
                     ("document_sections", _needs_sqlite_sections_rebuild),
+                    ("document_disease_links", _needs_sqlite_disease_links_rebuild),
                     ("literature_search_runs", _needs_sqlite_literature_search_rebuild),
                     ("literature_search_results", _needs_sqlite_literature_results_rebuild),
                     ("literature_match_runs", _needs_sqlite_literature_match_rebuild),
@@ -972,8 +982,8 @@ def _ensure_disease_profile_tables(connection) -> None:
                 source_search_run_id VARCHAR(64),
                 created_at {timestamp_type} NOT NULL,
                 updated_at {timestamp_type} NOT NULL,
-                CONSTRAINT uq_document_disease_links_scope_document_concept
-                    UNIQUE (user_id, workspace_id, document_id, concept_id),
+                CONSTRAINT uq_document_disease_links_scope_document
+                    UNIQUE (user_id, workspace_id, document_id),
                 CONSTRAINT fk_document_disease_links_document
                     FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
                 CONSTRAINT fk_document_disease_links_search
@@ -1289,11 +1299,86 @@ def _replace_graph_node_sources(connection, old_id: str, new_id: str) -> None:
             )
 
 
+def _collapse_duplicate_disease_links(connection) -> int:
+    """Keep the oldest link when upgrading the old multi-disease schema.
+
+    PR14 did not have content-level disease ownership, so retaining every old
+    link would make the same analysis appear in multiple profiles. The oldest
+    confirmed association becomes the primary link; discarded IDs are logged
+    for migration auditability and can be re-linked after the upgrade.
+    """
+    if not _has_table(connection, "document_disease_links"):
+        return 0
+
+    duplicate_groups = connection.execute(
+        text(
+            "SELECT user_id, workspace_id, document_id "
+            "FROM document_disease_links "
+            "GROUP BY user_id, workspace_id, document_id "
+            "HAVING COUNT(*) > 1"
+        )
+    ).all()
+    removed = 0
+    for user_id, workspace_id, document_id in duplicate_groups:
+        rows = connection.execute(
+            text(
+                "SELECT id FROM document_disease_links "
+                "WHERE user_id = :user_id "
+                "AND workspace_id = :workspace_id "
+                "AND document_id = :document_id "
+                "ORDER BY created_at ASC, id ASC"
+            ),
+            {
+                "user_id": user_id,
+                "workspace_id": workspace_id,
+                "document_id": document_id,
+            },
+        ).all()
+        duplicate_ids = [str(row[0]) for row in rows[1:] if row[0]]
+        if not duplicate_ids:
+            continue
+        connection.execute(
+            text("DELETE FROM document_disease_links WHERE id IN :ids").bindparams(
+                bindparam("ids", expanding=True)
+            ),
+            {"ids": duplicate_ids},
+        )
+        removed += len(duplicate_ids)
+        log.warning(
+            "Collapsed %d duplicate disease links for document %s; kept primary link %s",
+            len(duplicate_ids),
+            document_id,
+            rows[0][0],
+        )
+    return removed
+
+
 def _needs_sqlite_documents_rebuild(connection) -> bool:
     return _needs_sqlite_unique_rebuild(
         connection,
         "documents",
         ("user_id", "workspace_id", "file_hash"),
+    )
+
+
+def _needs_sqlite_disease_links_rebuild(connection) -> bool:
+    """Rebuild old link tables so one document has one primary concept."""
+    if not _has_table(connection, "document_disease_links"):
+        return False
+    return _needs_sqlite_unique_rebuild(
+        connection,
+        "document_disease_links",
+        _PRIMARY_DISEASE_LINK_UNIQUE_COLUMNS,
+    ) or not _has_sqlite_fk(
+        connection,
+        "document_disease_links",
+        "document_id",
+        "documents",
+    ) or not _has_sqlite_fk(
+        connection,
+        "document_disease_links",
+        "source_search_run_id",
+        "literature_search_runs",
     )
 
 
@@ -1729,6 +1814,35 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
             "page_start, page_end, char_start, char_end, text, language, confidence, "
             "metadata_json, created_at",
         ),
+        "document_disease_links": (
+            """
+            CREATE TABLE document_disease_links (
+                id VARCHAR(320) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                concept_id VARCHAR(160) NOT NULL,
+                preferred_name_en VARCHAR(200) NOT NULL,
+                preferred_name_zh VARCHAR(200) NOT NULL DEFAULT '',
+                matched_alias VARCHAR(200) NOT NULL DEFAULT '',
+                ontology_version VARCHAR(64) NOT NULL,
+                link_source VARCHAR(32) NOT NULL DEFAULT 'manual_selection',
+                source_search_run_id VARCHAR(64),
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                CONSTRAINT uq_document_disease_links_scope_document
+                    UNIQUE (user_id, workspace_id, document_id),
+                CONSTRAINT fk_document_disease_links_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+                CONSTRAINT fk_document_disease_links_search
+                    FOREIGN KEY (source_search_run_id)
+                    REFERENCES literature_search_runs(id) ON DELETE SET NULL
+            )
+            """,
+            "id, user_id, workspace_id, document_id, concept_id, preferred_name_en, "
+            "preferred_name_zh, matched_alias, ontology_version, link_source, "
+            "source_search_run_id, created_at, updated_at",
+        ),
         "literature_articles": (
             """
             CREATE TABLE literature_articles (
@@ -1972,6 +2086,19 @@ def _sqlite_indexes(table: str) -> tuple[tuple[str, str], ...]:
             ("ix_document_sections_document_id", "document_id"),
             ("ix_document_sections_section_type", "section_type"),
         ),
+        "document_disease_links": common
+        + (
+            (
+                "ix_document_disease_links_scope_concept",
+                "user_id, workspace_id, concept_id",
+            ),
+            ("ix_document_disease_links_document_id", "document_id"),
+            ("ix_document_disease_links_concept_id", "concept_id"),
+            (
+                "ix_document_disease_links_source_search_run_id",
+                "source_search_run_id",
+            ),
+        ),
         "literature_articles": (
             ("ix_literature_articles_source", "source"),
             ("ix_literature_articles_external_id", "external_id"),
@@ -2019,6 +2146,7 @@ def _ensure_server_constraints(connection) -> None:
     """Finish the PostgreSQL upgrade after columns and data are ready."""
     _ensure_processing_job_document_nullable(connection)
     _clean_orphan_document_references(connection)
+    _collapse_duplicate_disease_links(connection)
 
     _ensure_unique_constraint(
         connection,
@@ -2079,9 +2207,9 @@ def _ensure_server_constraints(connection) -> None:
     _ensure_unique_constraint(
         connection,
         "document_disease_links",
-        "uq_document_disease_links_scope_document_concept",
-        ("user_id", "workspace_id", "document_id", "concept_id"),
-        old_names=(),
+        _PRIMARY_DISEASE_LINK_UNIQUE_NAME,
+        _PRIMARY_DISEASE_LINK_UNIQUE_COLUMNS,
+        old_names=(_LEGACY_DISEASE_LINK_UNIQUE_NAME,),
     )
     _ensure_document_fk(
         connection,

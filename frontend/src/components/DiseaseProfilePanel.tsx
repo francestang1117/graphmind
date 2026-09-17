@@ -44,7 +44,12 @@ const SECTION_ORDER: SectionName[] = [
 function errorMessage(error: unknown, fallback: string) {
   if (axios.isAxiosError(error)) {
     if (error.response?.status === 404) return "This source is no longer in the selected research project.";
-    if (error.response?.status === 409) return "This profile changed elsewhere. Refresh and try again.";
+    if (error.response?.status === 409) {
+      if (error.response.data?.code === "disease_link_primary_exists") {
+        return "Each document has one primary disease. Remove its current link before assigning another.";
+      }
+      return "This profile changed elsewhere. Refresh and try again.";
+    }
     if (error.response?.status === 503) return "Disease profile storage is temporarily unavailable.";
   }
   return fallback;
@@ -189,6 +194,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
             <DiseaseProfileStats stats={selectedProfile.stats} />
             <section className="disease-profile-documents">
               <div className="disease-profile-subheading"><div><span className="disease-profile-eyebrow">Linked sources</span><h2>{selectedProfile.documents.length} documents in this profile</h2></div></div>
+              <p className="disease-profile-document-policy">Each document has one primary disease. Remove the current link to return it to Needs review before assigning another disease.</p>
               <div className="disease-profile-document-list">
                 {selectedProfile.documents.map((document) => (
                   <div className="disease-profile-document-row" key={document.document_id}>
