@@ -37,6 +37,7 @@ _WORKSPACE_TABLES = (
     "visit_briefs",
     "literature_search_runs",
     "literature_match_runs",
+    "document_disease_links",
 )
 
 
@@ -53,6 +54,7 @@ def upgrade_persistence_schema(engine) -> None:
         _ensure_medical_ai_tables(connection)
         _ensure_visit_preparation_tables(connection)
         _ensure_literature_tables(connection)
+        _ensure_disease_profile_tables(connection)
         _ensure_workspace_columns(connection)
         changed = _move_legacy_document_ids(connection)
         seeded = _seed_default_workspaces(connection)
@@ -83,6 +85,7 @@ def _upgrade_sqlite(engine) -> None:
                 _ensure_medical_ai_tables(connection)
                 _ensure_visit_preparation_tables(connection)
                 _ensure_literature_tables(connection)
+                _ensure_disease_profile_tables(connection)
                 _ensure_workspace_columns(connection)
                 changed = _move_legacy_document_ids(connection)
                 seeded = _seed_default_workspaces(connection)
@@ -940,6 +943,76 @@ def _ensure_literature_tables(connection) -> None:
     _ensure_literature_match_tables(connection, timestamp_type)
 
 
+def _ensure_disease_profile_tables(connection) -> None:
+    """Create document-to-ontology links for older installations."""
+    if not _has_table(connection, "documents") or not _has_table(
+        connection, "literature_search_runs"
+    ):
+        return
+
+    timestamp_type = (
+        "DATETIME"
+        if connection.dialect.name == "sqlite"
+        else "TIMESTAMP WITH TIME ZONE"
+    )
+    if not _has_table(connection, "document_disease_links"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE document_disease_links (
+                id VARCHAR(320) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                concept_id VARCHAR(160) NOT NULL,
+                preferred_name_en VARCHAR(200) NOT NULL,
+                preferred_name_zh VARCHAR(200) NOT NULL DEFAULT '',
+                matched_alias VARCHAR(200) NOT NULL DEFAULT '',
+                ontology_version VARCHAR(64) NOT NULL,
+                link_source VARCHAR(32) NOT NULL DEFAULT 'manual_selection',
+                source_search_run_id VARCHAR(64),
+                created_at {timestamp_type} NOT NULL,
+                updated_at {timestamp_type} NOT NULL,
+                CONSTRAINT uq_document_disease_links_scope_document_concept
+                    UNIQUE (user_id, workspace_id, document_id, concept_id),
+                CONSTRAINT fk_document_disease_links_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+                CONSTRAINT fk_document_disease_links_search
+                    FOREIGN KEY (source_search_run_id)
+                    REFERENCES literature_search_runs(id) ON DELETE SET NULL
+            )
+            """
+        )
+
+    indexes = (
+        (
+            "ix_document_disease_links_scope_concept",
+            "document_disease_links",
+            "user_id, workspace_id, concept_id",
+        ),
+        ("ix_document_disease_links_user_id", "document_disease_links", "user_id"),
+        (
+            "ix_document_disease_links_workspace_id",
+            "document_disease_links",
+            "workspace_id",
+        ),
+        (
+            "ix_document_disease_links_document_id",
+            "document_disease_links",
+            "document_id",
+        ),
+        ("ix_document_disease_links_concept_id", "document_disease_links", "concept_id"),
+        (
+            "ix_document_disease_links_source_search_run_id",
+            "document_disease_links",
+            "source_search_run_id",
+        ),
+    )
+    for name, table, columns in indexes:
+        connection.exec_driver_sql(
+            f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({columns})"
+        )
+
+
 def _ensure_workspace_columns(connection) -> None:
     """Add the nullable column first; existing rows are filled below."""
     for table in _WORKSPACE_TABLES:
@@ -1038,6 +1111,7 @@ def _backfill_workspace_ids(connection) -> int:
         ("medical_document_profiles", "document_id"),
         ("document_sections", "document_id"),
         ("literature_match_runs", "document_id"),
+        ("document_disease_links", "document_id"),
     ):
         if not _has_table(connection, table) or not _has_column(
             connection, table, document_column
@@ -1096,6 +1170,7 @@ def _clean_sqlite_orphans(connection) -> None:
         ("document_sections", "document_id"),
         ("literature_search_runs", "document_id"),
         ("literature_match_runs", "document_id"),
+        ("document_disease_links", "document_id"),
     ):
         if not _has_table(connection, table) or not _has_column(connection, table, column):
             continue
@@ -1162,6 +1237,7 @@ def _move_legacy_document_ids(connection) -> int:
         ("document_sections", "document_id"),
         ("literature_search_runs", "document_id"),
         ("literature_match_runs", "document_id"),
+        ("document_disease_links", "document_id"),
     )
     for old_id, new_id in replacements.items():
         for table, column in references:
@@ -2000,6 +2076,13 @@ def _ensure_server_constraints(connection) -> None:
         ("user_id", "workspace_id", "document_id", "ordinal"),
         old_names=(),
     )
+    _ensure_unique_constraint(
+        connection,
+        "document_disease_links",
+        "uq_document_disease_links_scope_document_concept",
+        ("user_id", "workspace_id", "document_id", "concept_id"),
+        old_names=(),
+    )
     _ensure_document_fk(
         connection,
         "literature_search_runs",
@@ -2045,6 +2128,19 @@ def _ensure_server_constraints(connection) -> None:
         connection,
         "document_sections",
         "fk_document_sections_document",
+    )
+    _ensure_document_fk(
+        connection,
+        "document_disease_links",
+        "fk_document_disease_links_document",
+    )
+    _ensure_foreign_key(
+        connection,
+        "document_disease_links",
+        "fk_document_disease_links_search",
+        "source_search_run_id",
+        "literature_search_runs",
+        ondelete="SET NULL",
     )
     _ensure_document_fk(
         connection,
@@ -2119,6 +2215,7 @@ def _clean_orphan_document_references(connection) -> None:
         ("document_sections", "document_id", "delete"),
         ("literature_search_runs", "document_id", "delete"),
         ("literature_match_runs", "document_id", "delete"),
+        ("document_disease_links", "document_id", "delete"),
     )
     for table, column, action in references:
         if not _has_table(connection, table) or not _has_column(connection, table, column):

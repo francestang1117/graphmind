@@ -66,6 +66,7 @@ def init_db() -> None:
     # Import models here so Base.metadata knows about them without creating an
     # import cycle during module import.
     from app.models.persistence import (  # noqa: F401
+        DocumentDiseaseLinkRecord,
         DocumentSectionRecord,
         DocumentRecord,
         ClinicianQuestionRecord,

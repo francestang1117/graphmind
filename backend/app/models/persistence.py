@@ -5,7 +5,17 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -316,6 +326,50 @@ class DocumentSectionRecord(Base):
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     metadata_json: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DocumentDiseaseLinkRecord(Base):
+    """A user-confirmed link from one document to one ontology concept."""
+
+    __tablename__ = "document_disease_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "workspace_id",
+            "document_id",
+            "concept_id",
+            name="uq_document_disease_links_scope_document_concept",
+        ),
+        Index(
+            "ix_document_disease_links_scope_concept",
+            "user_id",
+            "workspace_id",
+            "concept_id",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(320), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), index=True)
+    document_id: Mapped[str] = mapped_column(
+        String(255),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        index=True,
+    )
+    concept_id: Mapped[str] = mapped_column(String(160), index=True)
+    preferred_name_en: Mapped[str] = mapped_column(String(200))
+    preferred_name_zh: Mapped[str] = mapped_column(String(200), default="")
+    matched_alias: Mapped[str] = mapped_column(String(200), default="")
+    ontology_version: Mapped[str] = mapped_column(String(64))
+    link_source: Mapped[str] = mapped_column(String(32), default="manual_selection")
+    source_search_run_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("literature_search_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class ProcessingJobRecord(Base):
