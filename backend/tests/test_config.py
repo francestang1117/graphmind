@@ -79,9 +79,38 @@ def test_safe_production_config_passes():
         ENVIRONMENT="production",
         AUTH_REQUIRED=True,
         SECRET_KEY="x" * 64,
+        CELERY_ENABLED=True,
+        CELERY_BROKER_URL="redis://localhost:6379/1",
     )
 
     validate_runtime_config(config)
+
+
+def test_production_requires_durable_document_cleanup_worker():
+    config = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        AUTH_REQUIRED=True,
+        SECRET_KEY="x" * 64,
+        CELERY_ENABLED=False,
+    )
+
+    with pytest.raises(RuntimeError, match="CELERY_ENABLED"):
+        validate_runtime_config(config)
+
+
+def test_production_rejects_memory_broker_for_document_cleanup():
+    config = Settings(
+        _env_file=None,
+        ENVIRONMENT="production",
+        AUTH_REQUIRED=True,
+        SECRET_KEY="x" * 64,
+        CELERY_ENABLED=True,
+        CELERY_BROKER_URL="memory://",
+    )
+
+    with pytest.raises(RuntimeError, match="CELERY_BROKER_URL"):
+        validate_runtime_config(config)
 
 
 def test_production_literature_search_cannot_disable_rate_limiting():

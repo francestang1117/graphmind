@@ -1,6 +1,7 @@
 """Upload workflow shared by the document API routes."""
 
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.core.config import settings
@@ -282,7 +283,7 @@ class DocumentService:
     ) -> None:
         """Surface cleanup failures and arrange an idempotent full retry."""
         try:
-            self.cleanup_deleted_document_data(
+            self.run_deleted_document_cleanup(
                 document_id,
                 user_id=user_id,
                 workspace_id=workspace_id,
@@ -299,6 +300,95 @@ class DocumentService:
             )
             raise DocumentCleanupError() from exc
 
+    def run_deleted_document_cleanup(
+        self,
+        document_id: str,
+        *,
+        user_id: str,
+        workspace_id: Optional[str],
+    ) -> bool:
+        """Claim, clean, and persist the outcome for one deleted document."""
+        tracked = self._cleanup_tracking_available()
+        if tracked and not self.repository.claim_cleanup(  # type: ignore[union-attr]
+            document_id,
+            user_id,
+            workspace_id,
+        ):
+            # Another worker may already own the lease, or a prior attempt may
+            # have completed. Either case is safe for an idempotent retry.
+            return False
+
+        try:
+            self.cleanup_deleted_document_data(
+                document_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+            )
+            if tracked:
+                self.repository.mark_cleanup_completed(  # type: ignore[union-attr]
+                    document_id,
+                    user_id,
+                    workspace_id,
+                )
+        except Exception as exc:
+            self._record_cleanup_failure(
+                document_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                error=exc,
+                tracked=tracked,
+            )
+            raise
+        return True
+
+    def _cleanup_tracking_available(self) -> bool:
+        return bool(
+            self._db_available()
+            and all(
+                hasattr(self.repository, method)
+                for method in (
+                    "claim_cleanup",
+                    "mark_cleanup_completed",
+                    "mark_cleanup_failed",
+                )
+            )
+        )
+
+    def _record_cleanup_failure(
+        self,
+        document_id: str,
+        *,
+        user_id: str,
+        workspace_id: Optional[str],
+        error: Exception,
+        tracked: bool,
+    ) -> None:
+        if not tracked:
+            return
+
+        error_code = str(getattr(error, "code", "") or type(error).__name__)
+        retry_delay = max(
+            1,
+            int(getattr(settings, "CELERY_DOCUMENT_CLEANUP_RETRY_DELAY_SECONDS", 60)),
+        )
+        try:
+            self.repository.mark_cleanup_failed(  # type: ignore[union-attr]
+                document_id,
+                user_id,
+                workspace_id,
+                next_retry_at=datetime.now(timezone.utc)
+                + timedelta(seconds=retry_delay),
+                error_code=error_code,
+            )
+        except Exception as state_error:
+            # The running lease remains bounded, so the periodic sweep can
+            # reclaim the row even when recording the failure also fails.
+            log.error(
+                "Could not persist cleanup failure for document %s: %s",
+                document_id,
+                state_error,
+            )
+
     @staticmethod
     def _schedule_document_cleanup(
         document_id: str,
@@ -307,6 +397,15 @@ class DocumentService:
         workspace_id: Optional[str],
     ) -> None:
         """Queue a retry after the document tombstone has been written."""
+        if not settings.CELERY_ENABLED or not settings.CELERY_DOCUMENT_CLEANUP_ENABLED:
+            # Development can run without a worker. The pending/failed row is
+            # still durable and can be picked up when a worker is enabled.
+            log.warning(
+                "Document cleanup remains pending because the cleanup worker is disabled: %s",
+                document_id,
+            )
+            return
+
         try:
             from app.tasks.document_cleanup import retry_document_cleanup
 
@@ -316,7 +415,16 @@ class DocumentService:
                     "user_id": user_id,
                     "workspace_id": workspace_id,
                 },
-                countdown=5,
+                countdown=max(
+                    1,
+                    int(
+                        getattr(
+                            settings,
+                            "CELERY_DOCUMENT_CLEANUP_RETRY_DELAY_SECONDS",
+                            60,
+                        )
+                    ),
+                ),
             )
         except Exception as exc:
             # The original deletion failure is still surfaced to the caller;

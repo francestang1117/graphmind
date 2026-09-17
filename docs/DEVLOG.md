@@ -1869,3 +1869,18 @@ writes successful versions into the query cache immediately, preventing normal
 status and note edits from reusing an old optimistic-lock version. Source
 status also becomes unavailable when any live evidence row is missing, and
 dismissed-question brief errors are reported as validation errors.
+
+Document deletion now records a durable cleanup tombstone before removing
+derived data. The document row tracks pending, running, failed, and completed
+cleanup states, bounded attempts, a retry lease, and a stable last-error code.
+Cleanup workers claim due tombstones before running the idempotent full cleanup
+chain; a periodic Celery compensation task can republish rows when a broker or
+worker is temporarily unavailable. Production startup rejects disabled Celery
+cleanup and in-memory brokers, while local development keeps the synchronous
+path and leaves failed cleanup visible as a durable pending record.
+
+Migration tests cover existing deleted rows, repository tests cover lease and
+backoff behavior, and task/service tests cover broker publish failure and
+worker retry. The local backend suite is now `561 passed, 5 skipped`; the
+PostgreSQL-specific checks remain conditional when no test database URL is
+configured.

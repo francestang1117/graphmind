@@ -191,6 +191,8 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         assert db.scalar(text("SELECT workspace_id FROM graph_edges")) == default_workspace_id("user-1")
         assert db.scalar(text("SELECT workspace_id FROM processing_jobs WHERE job_id = 'old-job'")) == default_workspace_id("user-1")
         assert db.scalar(text("SELECT id FROM workspaces WHERE user_id = 'user-1'")) == default_workspace_id("user-1")
+        assert db.scalar(text("SELECT cleanup_status FROM documents")) == "not_required"
+        assert db.scalar(text("SELECT cleanup_attempts FROM documents")) == 0
 
     inspector = inspect(engine)
     assert {
@@ -267,6 +269,24 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
     )
     assert inspector.get_foreign_keys("graph_edges")[0]["referred_table"] == "documents"
     assert inspector.get_foreign_keys("processing_jobs")[0]["referred_table"] == "documents"
+
+
+def test_upgrade_marks_existing_deleted_documents_for_cleanup():
+    engine = _legacy_engine()
+    with engine.begin() as db:
+        db.execute(
+            text("UPDATE documents SET deleted_at = '2026-05-03' WHERE user_id = 'user-1'")
+        )
+
+    upgrade_persistence_schema(engine)
+    upgrade_persistence_schema(engine)
+
+    with engine.connect() as db:
+        assert db.scalar(text("SELECT cleanup_status FROM documents")) == "pending"
+        assert db.scalar(text("SELECT cleanup_attempts FROM documents")) == 0
+        assert db.scalar(text("SELECT cleanup_next_retry_at FROM documents")) is None
+
+    engine.dispose()
 
 
 def test_backfill_keeps_children_in_the_document_workspace_after_repeat():

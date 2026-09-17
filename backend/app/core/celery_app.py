@@ -139,5 +139,12 @@ else:
                 "schedule": settings.CELERY_JOB_CLEANUP_INTERVAL_SECONDS,
             }
         })
+    if settings.CELERY_ENABLED and settings.CELERY_DOCUMENT_CLEANUP_ENABLED:
+        beat_schedule.update({
+            "retry-pending-document-cleanups": {
+                "task": "app.tasks.document_cleanup.retry_pending_document_cleanups",
+                "schedule": settings.CELERY_DOCUMENT_CLEANUP_INTERVAL_SECONDS,
+            }
+        })
     if beat_schedule:
         celery_app.conf.beat_schedule = beat_schedule

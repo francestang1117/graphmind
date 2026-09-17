@@ -162,6 +162,11 @@ def _ensure_medical_document_columns(connection) -> None:
     if not _has_table(connection, "documents"):
         return
 
+    timestamp_type = (
+        "DATETIME"
+        if connection.dialect.name == "sqlite"
+        else "TIMESTAMP WITH TIME ZONE"
+    )
     columns = (
         ("document_kind", "VARCHAR(64)"),
         ("source_kind", "VARCHAR(64)"),
@@ -169,12 +174,28 @@ def _ensure_medical_document_columns(connection) -> None:
         ("document_date", "VARCHAR(32)"),
         ("parser_version", "VARCHAR(64)"),
         ("parsed_source_hash", "VARCHAR(64)"),
+        ("cleanup_status", "VARCHAR(32) NOT NULL DEFAULT 'not_required'"),
+        ("cleanup_attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("cleanup_next_retry_at", timestamp_type),
+        ("cleanup_last_error", "TEXT"),
     )
     for column, column_type in columns:
         if _has_column(connection, "documents", column):
             continue
         connection.exec_driver_sql(
             f"ALTER TABLE documents ADD COLUMN {column} {column_type}"
+        )
+
+    # Rows deleted before this migration still need a durable cleanup job.
+    # Minimal legacy schemas may not have deleted_at yet, so defer this update
+    # until that column is available.
+    if _has_column(connection, "documents", "deleted_at"):
+        connection.execute(
+            text(
+                "UPDATE documents SET cleanup_status = 'pending' "
+                "WHERE deleted_at IS NOT NULL "
+                "AND (cleanup_status IS NULL OR cleanup_status = 'not_required')"
+            )
         )
 
     connection.exec_driver_sql(
@@ -184,6 +205,10 @@ def _ensure_medical_document_columns(connection) -> None:
     connection.exec_driver_sql(
         "CREATE INDEX IF NOT EXISTS ix_documents_parsed_source_hash "
         "ON documents (parsed_source_hash)"
+    )
+    connection.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_documents_cleanup_status "
+        "ON documents (cleanup_status)"
     )
 
 
@@ -1441,6 +1466,10 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
                 document_date VARCHAR(32),
                 parser_version VARCHAR(64),
                 parsed_source_hash VARCHAR(64),
+                cleanup_status VARCHAR(32) NOT NULL DEFAULT 'not_required',
+                cleanup_attempts INTEGER NOT NULL DEFAULT 0,
+                cleanup_next_retry_at DATETIME,
+                cleanup_last_error TEXT,
                 created_at DATETIME NOT NULL,
                 modified_at DATETIME NOT NULL,
                 deleted_at DATETIME,
@@ -1451,7 +1480,8 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
             "id, user_id, workspace_id, filename, stored_filename, original_filename, "
             "file_extension, file_type, mime_type, file_hash, file_path, file_size, "
             "status, document_kind, source_kind, language, document_date, parser_version, "
-            "parsed_source_hash, "
+            "parsed_source_hash, cleanup_status, cleanup_attempts, "
+            "cleanup_next_retry_at, cleanup_last_error, "
             "created_at, modified_at, deleted_at",
         ),
         "parsed_chunks": (
@@ -1827,6 +1857,7 @@ def _sqlite_indexes(table: str) -> tuple[tuple[str, str], ...]:
             ("ix_documents_file_extension", "file_extension"),
             ("ix_documents_document_kind", "document_kind"),
             ("ix_documents_parsed_source_hash", "parsed_source_hash"),
+            ("ix_documents_cleanup_status", "cleanup_status"),
             ("ix_documents_deleted_at", "deleted_at"),
         ),
         "parsed_chunks": common + (("ix_parsed_chunks_document_id", "document_id"),),

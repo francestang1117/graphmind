@@ -215,7 +215,13 @@ def mark_document_deleted(
             )
         ).first()
         if record:
-            record.deleted_at = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
+            record.deleted_at = now
+            record.cleanup_status = "pending"
+            record.cleanup_attempts = 0
+            record.cleanup_next_retry_at = None
+            record.cleanup_last_error = None
+            record.modified_at = now
             db.commit()
 
 
@@ -241,6 +247,10 @@ def _document_values(metadata: dict[str, Any]) -> dict[str, Any]:
         "language": metadata.get("language"),
         "document_date": metadata.get("document_date"),
         "parser_version": metadata.get("parser_version"),
+        "cleanup_status": "not_required",
+        "cleanup_attempts": 0,
+        "cleanup_next_retry_at": None,
+        "cleanup_last_error": None,
         "created_at": _parse_dt(metadata.get("created_at")),
         "modified_at": _parse_dt(metadata.get("modified_at")),
         "deleted_at": None,

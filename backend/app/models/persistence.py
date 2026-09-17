@@ -97,6 +97,16 @@ class DocumentRecord(Base):
     parsed_source_hash: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
+    # A tombstone is durable before derived-data cleanup starts. The cleanup
+    # worker can therefore recover even when the broker is unavailable.
+    cleanup_status: Mapped[str] = mapped_column(
+        String(32), default="not_required", nullable=False, index=True
+    )
+    cleanup_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cleanup_next_retry_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cleanup_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     modified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

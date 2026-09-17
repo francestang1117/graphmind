@@ -6,7 +6,9 @@ import logging
 from typing import Any
 
 from app.core.celery_app import celery_app
+from app.core.config import settings
 from app.services.document_service import document_service
+from app.services.document_repository import document_repository
 
 log = logging.getLogger(__name__)
 
@@ -20,7 +22,7 @@ def _run_document_cleanup_retry(
 ) -> dict[str, Any]:
     """Run the same idempotent cleanup body for both task names."""
     try:
-        document_service.cleanup_deleted_document_data(
+        completed = document_service.run_deleted_document_cleanup(
             document_id,
             user_id=user_id,
             workspace_id=workspace_id,
@@ -35,8 +37,15 @@ def _run_document_cleanup_retry(
             )
             return {"document_id": document_id, "status": "failed"}
         attempt = int(getattr(getattr(self, "request", None), "retries", 0) or 0)
-        raise retry(exc=exc, countdown=min(300, 5 * (2**attempt)))
-    return {"document_id": document_id, "status": "completed"}
+        retry_delay = max(
+            1,
+            int(getattr(settings, "CELERY_DOCUMENT_CLEANUP_RETRY_DELAY_SECONDS", 60)),
+        )
+        raise retry(exc=exc, countdown=min(300, retry_delay * (2**attempt)))
+    return {
+        "document_id": document_id,
+        "status": "completed" if completed else "skipped",
+    }
 
 
 @celery_app.task(
@@ -77,3 +86,32 @@ def retry_visit_preparation_cleanup(
         user_id=user_id,
         workspace_id=workspace_id,
     )
+
+
+@celery_app.task(
+    name="app.tasks.document_cleanup.retry_pending_document_cleanups",
+)
+def retry_pending_document_cleanups(limit: int = 100) -> dict[str, Any]:
+    """Publish due tombstones so broker outages are recoverable later."""
+    candidates = document_repository.list_cleanup_candidates(limit=limit)
+    queued = 0
+    publish_failures = 0
+    for candidate in candidates:
+        try:
+            retry_document_cleanup.apply_async(kwargs=candidate)
+            queued += 1
+        except Exception as exc:
+            # Leave the durable pending/failed row untouched. A later beat run
+            # can publish it after the broker becomes available again.
+            publish_failures += 1
+            log.error(
+                "Could not publish cleanup for document %s: %s",
+                candidate.get("document_id", ""),
+                exc,
+            )
+    return {
+        "status": "completed",
+        "candidates": len(candidates),
+        "queued": queued,
+        "publish_failures": publish_failures,
+    }

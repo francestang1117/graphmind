@@ -40,6 +40,23 @@ class ActiveDocumentRepository(StaleDocumentRepository):
         }
 
 
+class TrackingCleanupRepository(ActiveDocumentRepository):
+    def __init__(self):
+        super().__init__()
+        self.failed = []
+        self.events = []
+
+    def claim_cleanup(self, *_args, **_kwargs):
+        return True
+
+    def mark_cleanup_completed(self, *_args, **_kwargs):
+        return None
+
+    def mark_cleanup_failed(self, *args, **kwargs):
+        self.events.append("state")
+        self.failed.append((args, kwargs))
+
+
 class ActiveJobRepository:
     def __init__(self):
         self.updates = []
@@ -174,3 +191,41 @@ def test_delete_does_not_report_success_when_visit_cleanup_fails(monkeypatch):
 
     assert exc.value.code == "document_cleanup_incomplete"
     assert cleanup_calls == ["literature", "visit_preparation"]
+
+
+def test_cleanup_failure_is_recorded_before_broker_publish(monkeypatch):
+    repository = TrackingCleanupRepository()
+    service = DocumentService(
+        storage=MissingFileStorage(),
+        repository=repository,
+        use_database=True,
+        virus_scan_enabled=False,
+        job_repo=EmptyJobRepository(),
+    )
+
+    def fail_cleanup(*_args, **_kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(service, "cleanup_deleted_document_data", fail_cleanup)
+    monkeypatch.setattr("app.services.document_service.settings.CELERY_ENABLED", True)
+
+    def fail_publish(**_kwargs):
+        repository.events.append("publish")
+        raise RuntimeError("broker unavailable")
+
+    monkeypatch.setattr(
+        "app.tasks.document_cleanup.retry_document_cleanup.apply_async",
+        fail_publish,
+    )
+
+    with pytest.raises(DocumentCleanupError):
+        service._cleanup_deleted_document_data(
+            "doc-1",
+            user_id="u1",
+            workspace_id="workspace-1",
+        )
+
+    assert len(repository.failed) == 1
+    assert repository.failed[0][0] == ("doc-1", "u1", "workspace-1")
+    assert repository.failed[0][1]["error_code"] == "RuntimeError"
+    assert repository.events == ["state", "publish"]
