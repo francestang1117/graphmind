@@ -207,6 +207,7 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         "literature_search_results",
         "literature_match_runs",
         "literature_evidence_matches",
+        "document_disease_links",
     }.issubset(
         set(inspector.get_table_names())
     )
@@ -257,6 +258,23 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
     assert inspector.get_foreign_keys("literature_match_runs")
     assert inspector.get_foreign_keys("literature_search_results")
     assert inspector.get_foreign_keys("literature_evidence_matches")
+    disease_link_columns = {
+        item["name"] for item in inspector.get_columns("document_disease_links")
+    }
+    assert {
+        "user_id",
+        "workspace_id",
+        "document_id",
+        "concept_id",
+        "ontology_version",
+        "source_search_run_id",
+    }.issubset(disease_link_columns)
+    disease_link_unique = [
+        item["column_names"]
+        for item in inspector.get_unique_constraints("document_disease_links")
+    ]
+    assert ["user_id", "workspace_id", "document_id", "concept_id"] in disease_link_unique
+    assert inspector.get_foreign_keys("document_disease_links")
     chunk_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_chunks")]
     entity_uniques = [item["column_names"] for item in inspector.get_unique_constraints("parsed_entities")]
     assert ["user_id", "workspace_id", "document_id", "chunk_index"] in chunk_uniques

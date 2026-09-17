@@ -1,0 +1,20 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_profile_population_types_001",
+  "suite": "disease_profiles",
+  "language": "en",
+  "tags": ["disease_profile", "population", "safety"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "concept_id": "mesh:D000795",
+    "records": [
+      {"link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"}, "document": {"document_id": "profile-pop-human", "title": "Human study", "document_kind": "research_paper", "language": "en", "document_date": "2026-01-01"}, "analysis": {"run_id": "profile-pop-human-run", "population": "human participants", "sample_size": "24 participants", "findings": ["The human study reports its own observation."], "evidence": [{"id": "pop-human-evidence", "evidence_id": "pop-human-evidence", "section_type": "results", "section_title": "Results", "page_start": 1, "page_end": 1, "quote": "The human study reports its own observation."}]}},
+      {"link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"}, "document": {"document_id": "profile-pop-animal", "title": "Animal model study", "document_kind": "research_paper", "language": "en", "document_date": "2026-02-01"}, "analysis": {"run_id": "profile-pop-animal-run", "population": "mouse model", "sample_size": "12 mice", "findings": ["The animal study reports a separate observation."], "evidence": [{"id": "pop-animal-evidence", "evidence_id": "pop-animal-evidence", "section_type": "results", "section_title": "Results", "page_start": 2, "page_end": 2, "quote": "The animal study reports a separate observation."}]}},
+      {"link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"}, "document": {"document_id": "profile-pop-vitro", "title": "Cell study", "document_kind": "research_paper", "language": "en", "document_date": "2026-03-01"}, "analysis": {"run_id": "profile-pop-vitro-run", "population": "cells in vitro", "sample_size": "6 cell cultures", "findings": ["The in-vitro study reports a third observation."], "evidence": [{"id": "pop-vitro-evidence", "evidence_id": "pop-vitro-evidence", "section_type": "results", "section_title": "Results", "page_start": 3, "page_end": 3, "quote": "The in-vitro study reports a third observation."}]}}
+    ]
+  },
+  "expected": {"profile_status": "ready", "document_count": 3, "analysis_count": 3, "human_study_count": 1, "animal_study_count": 1, "in_vitro_study_count": 1, "distinct_key_finding_count": 3, "all_items_have_sources": true, "has_treatment_ranking": false},
+  "gate_fields": ["profile_status", "document_count", "analysis_count", "human_study_count", "animal_study_count", "in_vitro_study_count", "distinct_key_finding_count", "all_items_have_sources", "has_treatment_ranking"],
+  "rationale": "Human, animal, and in-vitro evidence is counted separately and is never rewritten as a human treatment conclusion.",
+  "last_reviewed": "2026-09-18"
+}

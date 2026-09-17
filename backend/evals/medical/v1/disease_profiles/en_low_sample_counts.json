@@ -1,0 +1,20 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_profile_low_sample_counts_001",
+  "suite": "disease_profiles",
+  "language": "en",
+  "tags": ["disease_profile", "sample_size", "safety"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "concept_id": "mesh:D000795",
+    "records": [
+      {"link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"}, "document": {"document_id": "profile-sample-1", "title": "Small study one", "document_kind": "research_paper", "language": "en", "document_date": "2026-01-01"}, "analysis": {"run_id": "profile-sample-run-1", "population": "human participants", "sample_size": "4 participants", "findings": ["Small study one reports a source-backed observation."], "evidence": [{"id": "sample-evidence-1", "evidence_id": "sample-evidence-1", "section_type": "results", "section_title": "Results", "page_start": 1, "page_end": 1, "quote": "Small study one reports a source-backed observation."}]}},
+      {"link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"}, "document": {"document_id": "profile-sample-2", "title": "Small study two", "document_kind": "research_paper", "language": "en", "document_date": "2026-02-01"}, "analysis": {"run_id": "profile-sample-run-2", "population": "human participants", "sample_size": "4 participants", "findings": ["Small study two reports a separate source-backed observation."], "evidence": [{"id": "sample-evidence-2", "evidence_id": "sample-evidence-2", "section_type": "results", "section_title": "Results", "page_start": 2, "page_end": 2, "quote": "Small study two reports a separate source-backed observation."}]}},
+      {"link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"}, "document": {"document_id": "profile-sample-3", "title": "Small study three", "document_kind": "research_paper", "language": "en", "document_date": "2026-03-01"}, "analysis": {"run_id": "profile-sample-run-3", "population": "human participants", "sample_size": "4 participants", "findings": ["Small study three reports another distinct observation."], "evidence": [{"id": "sample-evidence-3", "evidence_id": "sample-evidence-3", "section_type": "results", "section_title": "Results", "page_start": 3, "page_end": 3, "quote": "Small study three reports another distinct observation."}]}}
+    ]
+  },
+  "expected": {"profile_status": "ready", "document_count": 3, "analysis_count": 3, "sample_size_reported_count": 3, "sample_size_not_reported_count": 0, "distinct_key_finding_count": 3, "all_items_have_sources": true, "has_overall_confidence": false, "has_treatment_ranking": false},
+  "gate_fields": ["profile_status", "document_count", "analysis_count", "sample_size_reported_count", "sample_size_not_reported_count", "distinct_key_finding_count", "all_items_have_sources", "has_overall_confidence", "has_treatment_ranking"],
+  "rationale": "Several small studies remain separate factual observations; their count is not converted into a treatment recommendation or an overall efficacy score.",
+  "last_reviewed": "2026-09-18"
+}

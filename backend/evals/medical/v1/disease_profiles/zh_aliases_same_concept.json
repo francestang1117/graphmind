@@ -1,0 +1,27 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_profile_aliases_same_concept_001",
+  "suite": "disease_profiles",
+  "language": "zh",
+  "tags": ["disease_profile", "alias", "bilingual"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "concept_id": "mesh:D000795",
+    "records": [
+      {
+        "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "法布雷病", "ontology_version": "evaluation-ontology-v1"},
+        "document": {"document_id": "profile-alias-zh", "title": "法布雷病研究", "document_kind": "research_paper", "language": "zh", "document_date": "2026-01-01"},
+        "analysis": {"run_id": "profile-alias-run-zh", "population": "患者人群", "sample_size": "30 participants", "findings": ["研究报告了一项观察结果。"], "evidence": [{"id": "alias-zh-evidence", "evidence_id": "alias-zh-evidence", "section_type": "results", "section_title": "结果", "page_start": 2, "page_end": 2, "quote": "研究报告了一项观察结果。"}]}
+      },
+      {
+        "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"},
+        "document": {"document_id": "profile-alias-en", "title": "Fabry disease study", "document_kind": "research_paper", "language": "en", "document_date": "2026-02-01"},
+        "analysis": {"run_id": "profile-alias-run-en", "population": "human participants", "sample_size": "31 participants", "findings": ["The study reports a separate observation."], "evidence": [{"id": "alias-en-evidence", "evidence_id": "alias-en-evidence", "section_type": "results", "section_title": "Results", "page_start": 4, "page_end": 4, "quote": "The study reports a separate observation."}]}
+      }
+    ]
+  },
+  "expected": {"profile_status": "ready", "concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "document_count": 2, "analysis_count": 2, "link_aliases": ["Fabry disease", "法布雷病"], "distinct_key_finding_count": 2, "all_items_have_sources": true},
+  "gate_fields": ["profile_status", "concept_id", "preferred_name_en", "preferred_name_zh", "document_count", "analysis_count", "link_aliases", "distinct_key_finding_count", "all_items_have_sources"],
+  "rationale": "Chinese and English aliases are retained as link metadata while both documents aggregate under the same controlled concept ID.",
+  "last_reviewed": "2026-09-18"
+}

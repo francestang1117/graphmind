@@ -19,6 +19,8 @@ The current package covers five production boundaries:
   evidence limits, and safe omission of unsupported suggestions
 - `visit_preparation`: workspace-scoped question saving, source freshness,
   status/priority management, and immutable visit-brief snapshots
+- `disease_profiles`: deterministic multi-document grouping, concept scope,
+  source completeness, study-population separation, and retraction visibility
 
 The package contains synthetic non-identifying text only. It is not a clinical
 benchmark, diagnostic evaluation, evidence-quality assessment, or substitute
@@ -94,4 +96,13 @@ documented rationale.
 The visit-preparation adapter exercises server-owned question binding,
 idempotent refresh behavior, stale-source refusal, selection limits, dismissed
 question handling, and immutable snapshot semantics without calling external
-services.
+services. The disease-profile adapter expands compact synthetic records and
+passes them through the production deterministic aggregator. It checks that
+multiple documents stay separate, foreign concepts do not leak into a profile,
+Orphanet identifiers remain stable, animal and in-vitro evidence stay distinct
+from human studies, withdrawn articles remain visible with warnings, and no
+overall confidence or treatment ranking is invented.
+
+The `medical-eval-v1.3.0` package contains 50 synthetic cases. These are
+engineering regression checks, not clinically expert-validated quality
+judgments; expert review should be added incrementally.

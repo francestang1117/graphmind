@@ -1,0 +1,23 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_profile_ambiguous_concept_preserved_001",
+  "suite": "disease_profiles",
+  "language": "en",
+  "tags": ["disease_profile", "ambiguity", "privacy"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "concept_id": "mesh:D000795",
+    "unresolved_concepts": ["ALS"],
+    "records": [
+      {
+        "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"},
+        "document": {"document_id": "profile-ambiguous-doc", "title": "Fabry disease evidence", "document_kind": "research_paper", "language": "en", "document_date": "2026-01-15"},
+        "analysis": {"run_id": "profile-ambiguous-run", "population": "human participants", "sample_size": "20 participants", "findings": ["The selected concept has one source-backed finding."], "evidence": [{"id": "ambiguous-evidence", "evidence_id": "ambiguous-evidence", "section_type": "results", "section_title": "Results", "page_start": 2, "page_end": 2, "quote": "The selected concept has one source-backed finding."}]}
+      }
+    ]
+  },
+  "expected": {"profile_status": "ready", "concept_id": "mesh:D000795", "ambiguous_concepts_preserved": ["ALS"], "document_count": 1, "foreign_records_ignored": 0, "all_items_have_sources": true, "has_treatment_ranking": false},
+  "gate_fields": ["profile_status", "concept_id", "ambiguous_concepts_preserved", "document_count", "foreign_records_ignored", "all_items_have_sources", "has_treatment_ranking"],
+  "rationale": "An ambiguous abbreviation remains unresolved metadata; only the explicitly selected local concept contributes to this profile.",
+  "last_reviewed": "2026-09-18"
+}
