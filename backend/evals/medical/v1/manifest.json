@@ -1,8 +1,8 @@
 {
   "schema_version": "medical-eval-v1",
-  "dataset_version": "medical-eval-v1.1.0",
-  "description": "Synthetic bilingual regression cases for GraphMind medical services.",
-  "case_count": 35,
+  "dataset_version": "medical-eval-v1.2.0",
+  "description": "Synthetic bilingual regression cases for GraphMind medical services, including visit preparation.",
+  "case_count": 42,
   "cases": [
     {"case_id": "en_terminology_fabry_001", "suite": "terminology", "path": "terminology/en_fabry.json"},
     {"case_id": "zh_terminology_fabry_001", "suite": "terminology", "path": "terminology/zh_fabry.json"},
@@ -38,6 +38,13 @@
     {"case_id": "en_questions_duplicate_topic_001", "suite": "clinician_questions", "path": "clinician_questions/en_duplicate_topic.json"},
     {"case_id": "zh_questions_provider_ids_replaced_001", "suite": "clinician_questions", "path": "clinician_questions/zh_provider_ids_replaced.json"},
     {"case_id": "en_questions_evidence_cap_001", "suite": "clinician_questions", "path": "clinician_questions/en_evidence_cap.json"},
-    {"case_id": "zh_questions_missing_source_001", "suite": "clinician_questions", "path": "clinician_questions/zh_missing_source.json"}
+    {"case_id": "zh_questions_missing_source_001", "suite": "clinician_questions", "path": "clinician_questions/zh_missing_source.json"},
+    {"case_id": "en_visit_server_bound_001", "suite": "visit_preparation", "path": "visit_preparation/en_server_bound.json"},
+    {"case_id": "zh_visit_refresh_state_001", "suite": "visit_preparation", "path": "visit_preparation/zh_refresh_state.json"},
+    {"case_id": "en_visit_stale_source_001", "suite": "visit_preparation", "path": "visit_preparation/en_stale_source.json"},
+    {"case_id": "zh_visit_selection_limit_001", "suite": "visit_preparation", "path": "visit_preparation/zh_selection_limit.json"},
+    {"case_id": "en_visit_immutable_snapshot_001", "suite": "visit_preparation", "path": "visit_preparation/en_immutable_snapshot.json"},
+    {"case_id": "zh_visit_dismissed_question_001", "suite": "visit_preparation", "path": "visit_preparation/zh_dismissed_question.json"},
+    {"case_id": "en_visit_unvalidated_source_001", "suite": "visit_preparation", "path": "visit_preparation/en_unvalidated_source.json"}
   ]
 }

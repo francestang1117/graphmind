@@ -33,6 +33,8 @@ _WORKSPACE_TABLES = (
     "processing_jobs",
     "medical_document_profiles",
     "document_sections",
+    "clinician_questions",
+    "visit_briefs",
     "literature_search_runs",
     "literature_match_runs",
 )
@@ -49,6 +51,7 @@ def upgrade_persistence_schema(engine) -> None:
         _ensure_medical_document_columns(connection)
         _ensure_medical_tables(connection)
         _ensure_medical_ai_tables(connection)
+        _ensure_visit_preparation_tables(connection)
         _ensure_literature_tables(connection)
         _ensure_workspace_columns(connection)
         changed = _move_legacy_document_ids(connection)
@@ -78,6 +81,7 @@ def _upgrade_sqlite(engine) -> None:
                 _ensure_medical_document_columns(connection)
                 _ensure_medical_tables(connection)
                 _ensure_medical_ai_tables(connection)
+                _ensure_visit_preparation_tables(connection)
                 _ensure_literature_tables(connection)
                 _ensure_workspace_columns(connection)
                 changed = _move_legacy_document_ids(connection)
@@ -158,6 +162,11 @@ def _ensure_medical_document_columns(connection) -> None:
     if not _has_table(connection, "documents"):
         return
 
+    timestamp_type = (
+        "DATETIME"
+        if connection.dialect.name == "sqlite"
+        else "TIMESTAMP WITH TIME ZONE"
+    )
     columns = (
         ("document_kind", "VARCHAR(64)"),
         ("source_kind", "VARCHAR(64)"),
@@ -165,12 +174,28 @@ def _ensure_medical_document_columns(connection) -> None:
         ("document_date", "VARCHAR(32)"),
         ("parser_version", "VARCHAR(64)"),
         ("parsed_source_hash", "VARCHAR(64)"),
+        ("cleanup_status", "VARCHAR(32) NOT NULL DEFAULT 'not_required'"),
+        ("cleanup_attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("cleanup_next_retry_at", timestamp_type),
+        ("cleanup_last_error", "TEXT"),
     )
     for column, column_type in columns:
         if _has_column(connection, "documents", column):
             continue
         connection.exec_driver_sql(
             f"ALTER TABLE documents ADD COLUMN {column} {column_type}"
+        )
+
+    # Rows deleted before this migration still need a durable cleanup job.
+    # Minimal legacy schemas may not have deleted_at yet, so defer this update
+    # until that column is available.
+    if _has_column(connection, "documents", "deleted_at"):
+        connection.execute(
+            text(
+                "UPDATE documents SET cleanup_status = 'pending' "
+                "WHERE deleted_at IS NOT NULL "
+                "AND (cleanup_status IS NULL OR cleanup_status = 'not_required')"
+            )
         )
 
     connection.exec_driver_sql(
@@ -180,6 +205,10 @@ def _ensure_medical_document_columns(connection) -> None:
     connection.exec_driver_sql(
         "CREATE INDEX IF NOT EXISTS ix_documents_parsed_source_hash "
         "ON documents (parsed_source_hash)"
+    )
+    connection.exec_driver_sql(
+        "CREATE INDEX IF NOT EXISTS ix_documents_cleanup_status "
+        "ON documents (cleanup_status)"
     )
 
 
@@ -260,6 +289,31 @@ def _ensure_medical_tables(connection) -> None:
         connection.exec_driver_sql(
             f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"
         )
+
+    _normalize_clinician_question_positions(connection)
+
+
+def _normalize_clinician_question_positions(connection) -> None:
+    """Repair legacy per-document positions into workspace status groups."""
+    if not _has_table(connection, "clinician_questions"):
+        return
+
+    rows = connection.execute(
+        text(
+            "SELECT id, user_id, workspace_id, status "
+            "FROM clinician_questions "
+            "ORDER BY user_id, workspace_id, status, position, created_at, id"
+        )
+    ).all()
+    next_position: dict[tuple[str, str, str], int] = {}
+    for row in rows:
+        group = (str(row.user_id), str(row.workspace_id), str(row.status))
+        position = next_position.get(group, 0)
+        connection.execute(
+            text("UPDATE clinician_questions SET position = :position WHERE id = :id"),
+            {"id": row.id, "position": position},
+        )
+        next_position[group] = position + 1
 
 def _ensure_literature_match_tables(connection, timestamp_type: str | None = None) -> None:
     """Create the local finding-to-article match tables for older databases."""
@@ -537,6 +591,184 @@ def _ensure_medical_ai_tables(connection) -> None:
         ("ix_medical_analysis_evidence_chunk_id", "medical_analysis_evidence", "chunk_id"),
         ("ix_medical_analysis_evidence_section_id", "medical_analysis_evidence", "section_id"),
         ("ix_medical_analysis_evidence_section_type", "medical_analysis_evidence", "section_type"),
+    )
+    for name, table, column in indexes:
+        connection.exec_driver_sql(
+            f"CREATE INDEX IF NOT EXISTS {name} ON {table} ({column})"
+        )
+
+def _ensure_visit_preparation_tables(connection) -> None:
+    """Create saved clinician questions and visit-brief snapshots."""
+    if not _has_table(connection, "documents"):
+        return
+
+    timestamp_type = (
+        "DATETIME"
+        if connection.dialect.name == "sqlite"
+        else "TIMESTAMP WITH TIME ZONE"
+    )
+
+    if not _has_table(connection, "clinician_questions"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE clinician_questions (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                analysis_run_id VARCHAR(64) NOT NULL,
+                suggestion_id VARCHAR(100) NOT NULL,
+                question TEXT NOT NULL,
+                rationale TEXT NOT NULL,
+                category VARCHAR(64) NOT NULL,
+                topic VARCHAR(64) NOT NULL,
+                source_kind VARCHAR(64) NOT NULL,
+                source_id VARCHAR(200) NOT NULL,
+                evidence_ids_json TEXT NOT NULL,
+                language VARCHAR(16) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                priority INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                user_note TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                created_at {timestamp_type} NOT NULL,
+                updated_at {timestamp_type} NOT NULL,
+                CONSTRAINT uq_clinician_questions_scope_document_topic
+                    UNIQUE (user_id, workspace_id, document_id, category, topic),
+                CONSTRAINT fk_clinician_questions_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+                CONSTRAINT fk_clinician_questions_analysis
+                    FOREIGN KEY (analysis_run_id)
+                    REFERENCES medical_analysis_runs(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+    if not _has_table(connection, "visit_briefs"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE visit_briefs (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                workspace_id VARCHAR(64) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                language VARCHAR(16) NOT NULL,
+                generated_at {timestamp_type} NOT NULL,
+                data_cutoff_at {timestamp_type} NOT NULL,
+                disclaimer TEXT NOT NULL,
+                created_at {timestamp_type} NOT NULL
+            )
+            """
+        )
+
+    if not _has_table(connection, "visit_brief_items"):
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE visit_brief_items (
+                id VARCHAR(64) NOT NULL PRIMARY KEY,
+                visit_brief_id VARCHAR(64) NOT NULL,
+                clinician_question_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                document_title_snapshot VARCHAR(255) NOT NULL DEFAULT '',
+                document_date_snapshot VARCHAR(32) NOT NULL DEFAULT '',
+                parsed_source_hash_snapshot VARCHAR(64) NOT NULL DEFAULT '',
+                analysis_run_id VARCHAR(64) NOT NULL,
+                position INTEGER NOT NULL,
+                question_snapshot TEXT NOT NULL,
+                rationale_snapshot TEXT NOT NULL,
+                user_note_snapshot TEXT NOT NULL,
+                evidence_snapshot_json TEXT NOT NULL,
+                CONSTRAINT uq_visit_brief_items_brief_position
+                    UNIQUE (visit_brief_id, position),
+                CONSTRAINT fk_visit_brief_items_brief
+                    FOREIGN KEY (visit_brief_id) REFERENCES visit_briefs(id) ON DELETE CASCADE,
+                CONSTRAINT fk_visit_brief_items_question
+                    FOREIGN KEY (clinician_question_id)
+                    REFERENCES clinician_questions(id) ON DELETE CASCADE,
+                CONSTRAINT fk_visit_brief_items_document
+                    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+                CONSTRAINT fk_visit_brief_items_analysis
+                    FOREIGN KEY (analysis_run_id)
+                    REFERENCES medical_analysis_runs(id) ON DELETE CASCADE
+            )
+            """
+        )
+
+    # Existing PR13 databases need the same immutable source fields. Defaults
+    # keep old rows readable when their original document has been deleted.
+    for column, definition in (
+        ("document_title_snapshot", "VARCHAR(255) NOT NULL DEFAULT ''"),
+        ("document_date_snapshot", "VARCHAR(32) NOT NULL DEFAULT ''"),
+        ("parsed_source_hash_snapshot", "VARCHAR(64) NOT NULL DEFAULT ''"),
+    ):
+        if not _has_column(connection, "visit_brief_items", column):
+            connection.exec_driver_sql(
+                f"ALTER TABLE visit_brief_items ADD COLUMN {column} {definition}"
+            )
+
+    # Backfill only from columns that exist in the old database. Some legacy
+    # PostgreSQL fixtures contain just document ids and ownership fields.
+    document_columns = {
+        column
+        for column in (
+            "original_filename",
+            "filename",
+            "document_date",
+            "parsed_source_hash",
+        )
+        if _has_column(connection, "documents", column)
+    }
+    document_expressions: list[tuple[str, str]] = []
+    if "original_filename" in document_columns:
+        filename_fallback = (
+            "d.filename" if "filename" in document_columns else "''"
+        )
+        document_expressions.append(
+            (
+                "document_title_snapshot",
+                "COALESCE(NULLIF(d.original_filename, ''), "
+                f"{filename_fallback}, '')",
+            )
+        )
+    elif "filename" in document_columns:
+        document_expressions.append(
+            ("document_title_snapshot", "COALESCE(d.filename, '')")
+        )
+    if "document_date" in document_columns:
+        document_expressions.append(
+            ("document_date_snapshot", "COALESCE(d.document_date, '')")
+        )
+    if "parsed_source_hash" in document_columns:
+        document_expressions.append(
+            ("parsed_source_hash_snapshot", "COALESCE(d.parsed_source_hash, '')")
+        )
+
+    # Rows for already-deleted documents remain explicitly blank.
+    for column, document_expression in document_expressions:
+        connection.execute(
+            text(
+                f"UPDATE visit_brief_items SET {column} = "
+                f"(SELECT {document_expression} FROM documents AS d "
+                f"WHERE d.id = visit_brief_items.document_id) "
+                f"WHERE {column} = '' AND EXISTS "
+                f"(SELECT 1 FROM documents AS d WHERE d.id = visit_brief_items.document_id)"
+            )
+        )
+
+    indexes = (
+        ("ix_clinician_questions_user_id", "clinician_questions", "user_id"),
+        ("ix_clinician_questions_workspace_id", "clinician_questions", "workspace_id"),
+        ("ix_clinician_questions_document_id", "clinician_questions", "document_id"),
+        ("ix_clinician_questions_analysis_run_id", "clinician_questions", "analysis_run_id"),
+        ("ix_clinician_questions_status", "clinician_questions", "status"),
+        ("ix_clinician_questions_topic", "clinician_questions", "topic"),
+        ("ix_visit_briefs_user_id", "visit_briefs", "user_id"),
+        ("ix_visit_briefs_workspace_id", "visit_briefs", "workspace_id"),
+        ("ix_visit_briefs_status", "visit_briefs", "status"),
+        ("ix_visit_brief_items_brief_id", "visit_brief_items", "visit_brief_id"),
+        ("ix_visit_brief_items_question_id", "visit_brief_items", "clinician_question_id"),
+        ("ix_visit_brief_items_document_id", "visit_brief_items", "document_id"),
+        ("ix_visit_brief_items_analysis_run_id", "visit_brief_items", "analysis_run_id"),
     )
     for name, table, column in indexes:
         connection.exec_driver_sql(
@@ -1234,6 +1466,10 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
                 document_date VARCHAR(32),
                 parser_version VARCHAR(64),
                 parsed_source_hash VARCHAR(64),
+                cleanup_status VARCHAR(32) NOT NULL DEFAULT 'not_required',
+                cleanup_attempts INTEGER NOT NULL DEFAULT 0,
+                cleanup_next_retry_at DATETIME,
+                cleanup_last_error TEXT,
                 created_at DATETIME NOT NULL,
                 modified_at DATETIME NOT NULL,
                 deleted_at DATETIME,
@@ -1244,7 +1480,8 @@ def _sqlite_table_definition(table: str) -> tuple[str, str]:
             "id, user_id, workspace_id, filename, stored_filename, original_filename, "
             "file_extension, file_type, mime_type, file_hash, file_path, file_size, "
             "status, document_kind, source_kind, language, document_date, parser_version, "
-            "parsed_source_hash, "
+            "parsed_source_hash, cleanup_status, cleanup_attempts, "
+            "cleanup_next_retry_at, cleanup_last_error, "
             "created_at, modified_at, deleted_at",
         ),
         "parsed_chunks": (
@@ -1620,6 +1857,7 @@ def _sqlite_indexes(table: str) -> tuple[tuple[str, str], ...]:
             ("ix_documents_file_extension", "file_extension"),
             ("ix_documents_document_kind", "document_kind"),
             ("ix_documents_parsed_source_hash", "parsed_source_hash"),
+            ("ix_documents_cleanup_status", "cleanup_status"),
             ("ix_documents_deleted_at", "deleted_at"),
         ),
         "parsed_chunks": common + (("ix_parsed_chunks_document_id", "document_id"),),

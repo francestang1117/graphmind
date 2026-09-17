@@ -1,6 +1,7 @@
 import type {
   MedicalInsightEvidence,
   MedicalInsightReport,
+  MedicalQuestionSuggestion,
 } from "../../../services/api";
 import QuestionSuggestionCard from "./QuestionSuggestionCard";
 
@@ -8,12 +9,20 @@ interface Props {
   report: MedicalInsightReport;
   evidenceById: Map<string, MedicalInsightEvidence>;
   onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
+  onSaveSuggestion?: (suggestion: MedicalQuestionSuggestion) => void;
+  savedSuggestionIds?: ReadonlySet<string>;
+  staleSuggestionIds?: ReadonlySet<string>;
+  savingSuggestionId?: string | null;
 }
 
 export default function QuestionSuggestionList({
   report,
   evidenceById,
   onSelectEvidence,
+  onSaveSuggestion,
+  savedSuggestionIds,
+  staleSuggestionIds,
+  savingSuggestionId,
 }: Props) {
   const suggestions = (report.question_suggestions ?? []).slice(0, 5);
   const legacyQuestions = report.schema_version === "medical-insights-v2"
@@ -37,6 +46,10 @@ export default function QuestionSuggestionList({
               suggestion={suggestion}
               evidenceById={evidenceById}
               onSelectEvidence={onSelectEvidence}
+              onSave={onSaveSuggestion ? () => onSaveSuggestion(suggestion) : undefined}
+              saved={savedSuggestionIds?.has(suggestion.id) ?? false}
+              stale={staleSuggestionIds?.has(suggestion.id) ?? false}
+              saving={savingSuggestionId === suggestion.id}
             />
           ))}
         </div>

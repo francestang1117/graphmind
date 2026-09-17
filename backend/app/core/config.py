@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "cache+memory://"
     # Local uploads still use FastAPI background tasks unless this is enabled.
     CELERY_ENABLED: bool = False
+    # Deleted-document cleanup is durable and requires a worker plus a
+    # broker-backed compensation sweep outside local development.
+    CELERY_DOCUMENT_CLEANUP_ENABLED: bool = True
+    CELERY_DOCUMENT_CLEANUP_INTERVAL_SECONDS: int = 60
+    CELERY_DOCUMENT_CLEANUP_RETRY_DELAY_SECONDS: int = 60
     # Off by default: reindexing is handy, surprise background work is not.
     CELERY_REINDEX_ENABLED: bool = False
     CELERY_REINDEX_INTERVAL_SECONDS: int = 86400
@@ -225,6 +230,24 @@ def validate_runtime_config(config: Settings | None = None) -> None:
             problems.append(
                 "MEDICAL_ONTOLOGY_DIR must point to a valid local disease ontology "
                 "when literature search is enabled outside development and test."
+            )
+
+    if not is_local:
+        broker = runtime.CELERY_BROKER_URL.strip().lower()
+        if not runtime.CELERY_ENABLED:
+            problems.append(
+                "CELERY_ENABLED must be true outside development and test so "
+                "document cleanup can be recovered."
+            )
+        if not runtime.CELERY_DOCUMENT_CLEANUP_ENABLED:
+            problems.append(
+                "CELERY_DOCUMENT_CLEANUP_ENABLED must be true outside development "
+                "and test."
+            )
+        if not broker or broker.startswith("memory://"):
+            problems.append(
+                "CELERY_BROKER_URL must use a durable broker outside development "
+                "and test."
             )
 
     if runtime.AUTH_REQUIRED or not is_local:

@@ -1,5 +1,7 @@
 """Database-backed document repository tests."""
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -7,6 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base
 from app.core.errors import DatabaseOperationError
+from app.models.persistence import DocumentRecord
 from app.services.document_repository import DocumentRepository
 
 
@@ -63,6 +66,54 @@ def test_repository_soft_delete_hides_document():
     assert repo.get("hash.md", "u1") is None
     assert repo.has_any("u1") is True
     assert repo.has_record("hash.md", "u1") is True
+
+
+def test_repository_persists_and_reclaims_cleanup_state():
+    repo = _repo()
+    metadata = _metadata()
+    repo.save_metadata(metadata)
+    repo.mark_deleted("hash.md", "u1")
+
+    with repo.session_factory() as db:
+        record = db.get(DocumentRecord, metadata["document_id"])
+        assert record.deleted_at is not None
+        assert record.cleanup_status == "pending"
+        assert record.cleanup_attempts == 0
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    assert repo.claim_cleanup(
+        metadata["document_id"],
+        "u1",
+        now=now,
+        lease_seconds=60,
+    ) is True
+    assert repo.claim_cleanup(metadata["document_id"], "u1", now=now) is False
+    assert repo.list_cleanup_candidates(now=now) == []
+
+    repo.mark_cleanup_failed(
+        metadata["document_id"],
+        "u1",
+        next_retry_at=now + timedelta(seconds=60),
+        error_code="database_unavailable",
+    )
+    assert repo.list_cleanup_candidates(now=now) == []
+
+    retry_at = now + timedelta(seconds=61)
+    assert repo.list_cleanup_candidates(now=retry_at) == [
+        {
+            "document_id": metadata["document_id"],
+            "user_id": "u1",
+            "workspace_id": metadata["workspace_id"],
+        }
+    ]
+    assert repo.claim_cleanup(metadata["document_id"], "u1", now=retry_at) is True
+
+    repo.mark_cleanup_completed(metadata["document_id"], "u1")
+    assert repo.list_cleanup_candidates(now=retry_at + timedelta(minutes=1)) == []
+    with repo.session_factory() as db:
+        record = db.get(DocumentRecord, metadata["document_id"])
+        assert record.cleanup_status == "completed"
+        assert record.cleanup_attempts == 2
 
 
 def test_repository_updates_existing_record():

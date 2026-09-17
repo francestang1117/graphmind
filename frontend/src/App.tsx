@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   BookOpen,
+  ClipboardList,
   CircleHelp,
   MessageSquare,
   MoreHorizontal,
@@ -15,25 +16,29 @@ import SearchPanel from "./components/SearchPanel";
 import ChatPanel from "./components/ChatPanel";
 import AuthControl from "./components/AuthControl";
 import AuthDialog from "./components/AuthDialog";
-import { AUTH_REQUIRED_EVENT, checkHealth } from "./services/api";
+import { AUTH_REQUIRED_EVENT, checkHealth, listWorkspaces, type WorkspaceInfo } from "./services/api";
 import { useAppStore } from "./stores/appStore";
 import { useAuthStore } from "./stores/authStore";
+import VisitPreparationPanel from "./components/VisitPreparationPanel";
 
-type Tab = "upload" | "graph" | "search" | "chat";
+type Tab = "upload" | "graph" | "search" | "chat" | "visit-prep";
 
 const tabs: Array<{ id: Tab; label: string; title: string; icon: typeof Upload }> = [
   { id: "upload", label: "Documents", title: "Documents", icon: Upload },
   { id: "graph", label: "Graph", title: "Knowledge Graph", icon: Network },
   { id: "search", label: "Search", title: "Semantic Search", icon: Search },
   { id: "chat", label: "AI Chat", title: "AI Chat", icon: MessageSquare },
+  { id: "visit-prep", label: "Visit Prep", title: "Visit Preparation", icon: ClipboardList },
 ];
 
 function App() {
   // Keep tab state local; cross-panel data lives in the small Zustand store.
   const [activeTab, setActiveTab] = useState<Tab>("upload");
   const [authOpen, setAuthOpen] = useState(false);
+  const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const { files, backendOnline, setBackendOnline, graphStats, setFiles, setGraphStats, setConversationId } = useAppStore();
-  const { user, restore } = useAuthStore();
+  const { user, ready: authReady, restore } = useAuthStore();
   const active = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
 
   useEffect(() => {
@@ -57,6 +62,31 @@ function App() {
     setGraphStats(null);
     setConversationId(null);
   }, [user?.id, setFiles, setGraphStats, setConversationId]);
+
+  useEffect(() => {
+    if (!authReady) return undefined;
+
+    let cancelled = false;
+    listWorkspaces()
+      .then((items) => {
+        if (cancelled) return;
+        setWorkspaces(items);
+        setActiveWorkspaceId((current) => (
+          current && items.some((item) => item.id === current)
+            ? current
+            : items[0]?.id ?? null
+        ));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkspaces([]);
+          setActiveWorkspaceId(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, user?.id]);
 
   return (
     <div className="kw-shell">
@@ -110,6 +140,21 @@ function App() {
         <header className="kw-topbar">
           <h1>{active.title}</h1>
           <div className="kw-top-actions">
+            {activeTab === "visit-prep" && (
+              <label className="kw-workspace-picker">
+                <span>Research project</span>
+                <select
+                  aria-label="Research project"
+                  value={activeWorkspaceId ?? ""}
+                  onChange={(event) => setActiveWorkspaceId(event.target.value || null)}
+                >
+                  {workspaces.length === 0 && <option value="">No projects</option>}
+                  {workspaces.map((workspace) => (
+                    <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
             <a className="kw-doc-button" href="http://localhost:8000/docs" target="_blank">
               <BookOpen size={18} />
               View docs
@@ -130,6 +175,12 @@ function App() {
             {activeTab === "graph" && <GraphPanel />}
             {activeTab === "search" && <SearchPanel />}
             {activeTab === "chat" && <ChatPanel />}
+            {activeTab === "visit-prep" && (
+              <VisitPreparationPanel
+                key={activeWorkspaceId ?? "none"}
+                workspaceId={activeWorkspaceId}
+              />
+            )}
           </div>
         </section>
       </main>

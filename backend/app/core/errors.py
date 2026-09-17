@@ -94,6 +94,12 @@ class DatabaseOperationError(AppError):
     message = "Database operation failed."
 
 
+class DocumentCleanupError(AppError):
+    status_code = 503
+    code = "document_cleanup_incomplete"
+    message = "Document deletion is incomplete. Cleanup will be retried."
+
+
 class MalwareDetectedError(AppError):
     status_code = 400
     code = "malware_detected"

@@ -83,6 +83,17 @@ export interface UploadResponse {
   document_kind?: string | null;
 }
 
+export interface WorkspaceInfo {
+  id: string;
+  user_id: string;
+  name: string;
+  research_question: string;
+  domain: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MedicalInsightEvidence {
   id: string;
   evidence_id: string;
@@ -227,6 +238,84 @@ export interface MedicalInsightRun {
   validation_status?: string;
   warnings?: string[];
   evidence?: MedicalInsightEvidence[];
+}
+
+export type ClinicianQuestionStatus = "saved" | "asked" | "answered" | "dismissed";
+export type ClinicianQuestionSourceStatus = "current" | "outdated" | "unavailable";
+
+export interface ClinicianQuestion {
+  id: string;
+  workspace_id: string;
+  document_id: string;
+  document_title: string;
+  analysis_run_id: string;
+  suggestion_id: string;
+  question: string;
+  rationale: string;
+  category: string;
+  topic: string;
+  source_kind: string;
+  source_id: string;
+  evidence_ids: string[];
+  language: string;
+  status: ClinicianQuestionStatus;
+  priority: 1 | 2 | 3;
+  position: number;
+  user_note: string;
+  version: number;
+  source_status: ClinicianQuestionSourceStatus;
+  evidence: VisitBriefEvidence[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClinicianQuestionList {
+  items: ClinicianQuestion[];
+  total: number;
+}
+
+export interface VisitBriefEvidence {
+  evidence_id: string;
+  chunk_id?: string | null;
+  section_id?: string | null;
+  section_type: string;
+  section_title: string;
+  page_start?: number | null;
+  page_end?: number | null;
+  quote: string;
+  character_start?: number | null;
+  character_end?: number | null;
+}
+
+export interface VisitBriefItem {
+  id: string;
+  clinician_question_id: string;
+  document_id: string;
+  document_title: string;
+  document_date: string;
+  parsed_source_hash: string;
+  analysis_run_id: string;
+  position: number;
+  question: string;
+  rationale: string;
+  user_note: string;
+  evidence: VisitBriefEvidence[];
+}
+
+export interface VisitBrief {
+  id: string;
+  workspace_id: string;
+  status: "active" | string;
+  language: string;
+  generated_at: string;
+  data_cutoff_at: string;
+  disclaimer: string;
+  items: VisitBriefItem[];
+}
+
+export interface VisitBriefList {
+  items: VisitBrief[];
+  total: number;
 }
 
 export interface MedicalInsightConfig {
@@ -561,6 +650,9 @@ export const loginAccount = (email: string, password: string) => {
 export const getCurrentUser = (): Promise<User> =>
   http.get("/auth/me").then((r) => r.data);
 
+export const listWorkspaces = (): Promise<WorkspaceInfo[]> =>
+  http.get<WorkspaceInfo[]>("/workspaces/").then((r) => r.data);
+
 export const logoutAccount = () => http.post("/auth/logout", {});
 
 export const getAuthProviders = (): Promise<AuthProviders> =>
@@ -724,6 +816,99 @@ export const getCurrentMedicalInsights = (
       workspaceParams(workspaceId),
     )
     .then((r) => r.data);
+
+export const saveClinicianQuestion = (
+  workspaceId: string,
+  body: { analysis_run_id: string; suggestion_id: string },
+): Promise<{ item: ClinicianQuestion; created: boolean; source_refreshed: boolean }> =>
+  http
+    .post<{ item: ClinicianQuestion; created: boolean; source_refreshed: boolean }>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/clinician-questions`,
+      body,
+    )
+    .then((r) => r.data);
+
+export const listClinicianQuestions = (
+  workspaceId: string,
+  options: { status?: ClinicianQuestionStatus; includeDismissed?: boolean; limit?: number } = {},
+): Promise<ClinicianQuestionList> =>
+  http
+    .get<ClinicianQuestionList>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/clinician-questions`,
+      {
+        params: {
+          status: options.status,
+          include_dismissed: options.includeDismissed,
+          limit: options.limit,
+        },
+      },
+    )
+    .then((r) => r.data);
+
+export const updateClinicianQuestion = (
+  workspaceId: string,
+  questionId: string,
+  body: {
+    status?: ClinicianQuestionStatus;
+    priority?: 1 | 2 | 3;
+    user_note?: string;
+    expected_version: number;
+  },
+): Promise<ClinicianQuestion> =>
+  http
+    .patch<ClinicianQuestion>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/clinician-questions/${encodeURIComponent(questionId)}`,
+      body,
+    )
+    .then((r) => r.data);
+
+export const reorderClinicianQuestions = (
+  workspaceId: string,
+  body: {
+    question_id: string;
+    target_question_id: string;
+    expected_version: number;
+    target_expected_version: number;
+  },
+): Promise<ClinicianQuestion[]> =>
+  http
+    .patch<ClinicianQuestion[]>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/clinician-questions/reorder`,
+      body,
+    )
+    .then((r) => r.data);
+
+export const deleteClinicianQuestion = (workspaceId: string, questionId: string) =>
+  http.delete(
+    `/workspaces/${encodeURIComponent(workspaceId)}/clinician-questions/${encodeURIComponent(questionId)}`,
+  );
+
+export const createVisitBrief = (
+  workspaceId: string,
+  body: { question_ids: string[]; include_user_notes: boolean },
+): Promise<VisitBrief> =>
+  http
+    .post<VisitBrief>(`/workspaces/${encodeURIComponent(workspaceId)}/visit-briefs`, body)
+    .then((r) => r.data);
+
+export const listVisitBriefs = (workspaceId: string, limit = 20): Promise<VisitBriefList> =>
+  http
+    .get<VisitBriefList>(`/workspaces/${encodeURIComponent(workspaceId)}/visit-briefs`, {
+      params: { limit },
+    })
+    .then((r) => r.data);
+
+export const getVisitBrief = (workspaceId: string, briefId: string): Promise<VisitBrief> =>
+  http
+    .get<VisitBrief>(
+      `/workspaces/${encodeURIComponent(workspaceId)}/visit-briefs/${encodeURIComponent(briefId)}`,
+    )
+    .then((r) => r.data);
+
+export const deleteVisitBrief = (workspaceId: string, briefId: string) =>
+  http.delete(
+    `/workspaces/${encodeURIComponent(workspaceId)}/visit-briefs/${encodeURIComponent(briefId)}`,
+  );
 
 export const previewLiteratureSearch = (
   documentId: string,

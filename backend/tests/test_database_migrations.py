@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import NullPool
 
 from app.core.database import Base
-from app.core.database_migrations import _ensure_literature_tables, upgrade_persistence_schema
+from app.core.database_migrations import (
+    _ensure_literature_tables,
+    _ensure_visit_preparation_tables,
+    upgrade_persistence_schema,
+)
 from app.core.workspace import default_workspace_id
 from app.models.persistence import (
     DocumentRecord,
@@ -187,12 +191,17 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         assert db.scalar(text("SELECT workspace_id FROM graph_edges")) == default_workspace_id("user-1")
         assert db.scalar(text("SELECT workspace_id FROM processing_jobs WHERE job_id = 'old-job'")) == default_workspace_id("user-1")
         assert db.scalar(text("SELECT id FROM workspaces WHERE user_id = 'user-1'")) == default_workspace_id("user-1")
+        assert db.scalar(text("SELECT cleanup_status FROM documents")) == "not_required"
+        assert db.scalar(text("SELECT cleanup_attempts FROM documents")) == 0
 
     inspector = inspect(engine)
     assert {
         "medical_document_profiles",
         "document_sections",
         "medical_analysis_runs",
+        "clinician_questions",
+        "visit_briefs",
+        "visit_brief_items",
         "literature_articles",
         "literature_search_runs",
         "literature_search_results",
@@ -205,6 +214,27 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
         item["name"] for item in inspector.get_columns("medical_analysis_runs")
     }
     assert "external_processing_confirmed_at" in run_columns
+    question_columns = {
+        item["name"] for item in inspector.get_columns("clinician_questions")
+    }
+    assert {
+        "analysis_run_id",
+        "suggestion_id",
+        "evidence_ids_json",
+        "user_note",
+        "version",
+    }.issubset(question_columns)
+    brief_item_columns = {
+        item["name"] for item in inspector.get_columns("visit_brief_items")
+    }
+    assert {
+        "question_snapshot",
+        "evidence_snapshot_json",
+        "user_note_snapshot",
+        "document_title_snapshot",
+        "document_date_snapshot",
+        "parsed_source_hash_snapshot",
+    }.issubset(brief_item_columns)
     literature_run_columns = {
         item["name"] for item in inspector.get_columns("literature_search_runs")
     }
@@ -239,6 +269,24 @@ def test_upgrade_moves_document_references_and_adds_artifact_constraints():
     )
     assert inspector.get_foreign_keys("graph_edges")[0]["referred_table"] == "documents"
     assert inspector.get_foreign_keys("processing_jobs")[0]["referred_table"] == "documents"
+
+
+def test_upgrade_marks_existing_deleted_documents_for_cleanup():
+    engine = _legacy_engine()
+    with engine.begin() as db:
+        db.execute(
+            text("UPDATE documents SET deleted_at = '2026-05-03' WHERE user_id = 'user-1'")
+        )
+
+    upgrade_persistence_schema(engine)
+    upgrade_persistence_schema(engine)
+
+    with engine.connect() as db:
+        assert db.scalar(text("SELECT cleanup_status FROM documents")) == "pending"
+        assert db.scalar(text("SELECT cleanup_attempts FROM documents")) == 0
+        assert db.scalar(text("SELECT cleanup_next_retry_at FROM documents")) is None
+
+    engine.dispose()
 
 
 def test_backfill_keeps_children_in_the_document_workspace_after_repeat():
@@ -580,6 +628,126 @@ def test_upgrade_cleans_legacy_postgres_references():
         with cleanup_engine.begin() as db:
             db.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
         cleanup_engine.dispose()
+
+
+def test_visit_brief_upgrade_backfills_immutable_source_fields():
+    engine = create_engine("sqlite:///:memory:", future=True)
+    with engine.begin() as db:
+        db.exec_driver_sql(
+            """
+            CREATE TABLE documents (
+                id VARCHAR(255) PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                filename VARCHAR(255) NOT NULL,
+                original_filename VARCHAR(255) NOT NULL,
+                document_date VARCHAR(32),
+                parsed_source_hash VARCHAR(64)
+            )
+            """
+        )
+        db.exec_driver_sql(
+            """
+            CREATE TABLE medical_analysis_runs (
+                id VARCHAR(64) PRIMARY KEY
+            )
+            """
+        )
+        db.exec_driver_sql(
+            """
+            CREATE TABLE visit_brief_items (
+                id VARCHAR(64) PRIMARY KEY,
+                visit_brief_id VARCHAR(64) NOT NULL,
+                clinician_question_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                analysis_run_id VARCHAR(64) NOT NULL,
+                position INTEGER NOT NULL,
+                question_snapshot TEXT NOT NULL,
+                rationale_snapshot TEXT NOT NULL,
+                user_note_snapshot TEXT NOT NULL,
+                evidence_snapshot_json TEXT NOT NULL
+            )
+            """
+        )
+        db.exec_driver_sql(
+            "INSERT INTO documents VALUES ('doc-1', 'user-1', 'stored.pdf', 'paper.pdf', '2026-08-01', 'p-hash')"
+        )
+        db.exec_driver_sql(
+            """
+            INSERT INTO visit_brief_items VALUES (
+                'item-1', 'brief-1', 'question-1', 'doc-1', 'analysis-1', 0,
+                'Question', 'Reason', '', '[]'
+            )
+            """
+        )
+
+    with engine.begin() as db:
+        _ensure_visit_preparation_tables(db)
+
+    with engine.connect() as db:
+        assert db.execute(
+            text(
+                "SELECT document_title_snapshot, document_date_snapshot, "
+                "parsed_source_hash_snapshot FROM visit_brief_items"
+            )
+        ).one() == ("paper.pdf", "2026-08-01", "p-hash")
+    engine.dispose()
+
+
+def test_visit_brief_upgrade_handles_minimal_legacy_documents_table():
+    """Old PostgreSQL-style document tables may lack optional metadata columns."""
+    engine = create_engine("sqlite:///:memory:", future=True)
+    with engine.begin() as db:
+        db.exec_driver_sql(
+            """
+            CREATE TABLE documents (
+                id VARCHAR(255) PRIMARY KEY,
+                user_id VARCHAR(64) NOT NULL,
+                file_hash VARCHAR(64) NOT NULL
+            )
+            """
+        )
+        db.exec_driver_sql(
+            "CREATE TABLE medical_analysis_runs (id VARCHAR(64) PRIMARY KEY)"
+        )
+        db.exec_driver_sql(
+            """
+            CREATE TABLE visit_brief_items (
+                id VARCHAR(64) PRIMARY KEY,
+                visit_brief_id VARCHAR(64) NOT NULL,
+                clinician_question_id VARCHAR(64) NOT NULL,
+                document_id VARCHAR(255) NOT NULL,
+                analysis_run_id VARCHAR(64) NOT NULL,
+                position INTEGER NOT NULL,
+                question_snapshot TEXT NOT NULL,
+                rationale_snapshot TEXT NOT NULL,
+                user_note_snapshot TEXT NOT NULL,
+                evidence_snapshot_json TEXT NOT NULL
+            )
+            """
+        )
+        db.exec_driver_sql(
+            "INSERT INTO documents VALUES ('doc-1', 'user-1', 'hash-1')"
+        )
+        db.exec_driver_sql(
+            """
+            INSERT INTO visit_brief_items VALUES (
+                'item-1', 'brief-1', 'question-1', 'doc-1', 'analysis-1', 0,
+                'Question', 'Reason', '', '[]'
+            )
+            """
+        )
+
+    with engine.begin() as db:
+        _ensure_visit_preparation_tables(db)
+
+    with engine.connect() as db:
+        assert db.execute(
+            text(
+                "SELECT document_title_snapshot, document_date_snapshot, "
+                "parsed_source_hash_snapshot FROM visit_brief_items"
+            )
+        ).one() == ("", "", "")
+    engine.dispose()
 
 
 def test_existing_literature_runs_table_gets_ontology_provenance_columns():

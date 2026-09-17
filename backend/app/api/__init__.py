@@ -12,6 +12,7 @@ from app.api.endpoints import (
     medical_insights,
     scraper,
     search,
+    visit_preparation,
     workspaces,
 )
 
@@ -28,3 +29,4 @@ router.include_router(workspaces.router, prefix="/workspaces", tags=["workspaces
 router.include_router(literature.router, tags=["literature"])
 router.include_router(literature_matches.router, tags=["literature-matches"])
 router.include_router(medical_insights.router, tags=["medical-insights"])
+router.include_router(visit_preparation.router, tags=["visit-preparation"])

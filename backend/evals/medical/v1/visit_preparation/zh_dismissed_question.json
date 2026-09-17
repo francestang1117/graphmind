@@ -1,0 +1,31 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_visit_dismissed_question_001",
+  "suite": "visit_preparation",
+  "language": "zh",
+  "tags": ["visit_preparation", "status", "abstention"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "title": "合成结果研究",
+    "document_kind": "research_paper",
+    "language": "zh",
+    "chunks": [{"id": "chunk-1", "text": "研究报告了一个结果。", "section_type": "results"}],
+    "document": {"parsed_source_hash": "hash-v1", "analysis_parsed_source_hash": "hash-v1", "validation_status": "validated", "is_current": true},
+    "report": {
+      "document_kind": "research_paper",
+      "language": "zh",
+      "overview": {"title": "合成结果研究", "summary": "研究报告了一个结果。", "evidence_ids": ["EVIDENCE_001"]},
+      "key_findings": [{"id": "finding_001", "statement": "研究报告了一个结果。", "plain_explanation": "原文报告了结果。", "evidence_ids": ["EVIDENCE_001"]}],
+      "question_suggestions": [{"id": "question_001", "question": "任意问题？", "rationale": "任意理由。", "category": "clarify_finding", "topic": "reported_result", "source_kind": "key_findings", "source_id": "finding_001", "evidence_ids": []}]
+    },
+    "operations": [
+      {"action": "save", "suggestion_id": "question_001"},
+      {"action": "update", "question_id": "question_001", "status": "dismissed"},
+      {"action": "create_brief", "question_ids": ["question_001"]}
+    ]
+  },
+  "expected": {"report_valid": true, "normalization_valid": true, "save_status": "created", "question_count": 1, "question_statuses": ["dismissed"], "brief_status": "rejected", "brief_item_count": 0, "error_code": "visit_brief_question_dismissed"},
+  "gate_fields": ["report_valid", "normalization_valid", "save_status", "question_count", "question_statuses", "brief_status", "brief_item_count", "error_code"],
+  "rationale": "A question set aside by the user cannot silently re-enter a printable visit brief.",
+  "last_reviewed": "2026-09-16"
+}

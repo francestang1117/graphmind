@@ -13,6 +13,7 @@ EvalSuite = Literal[
     "insight_safety",
     "literature_matching",
     "clinician_questions",
+    "visit_preparation",
 ]
 ReviewStatus = Literal["engineering_reviewed", "clinical_reviewed", "deprecated"]
 
