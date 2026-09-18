@@ -205,6 +205,40 @@ def test_profile_items_rejects_unbounded_offset_cursor_before_service_call(monke
     assert service_called is False
 
 
+def test_profile_items_does_not_emit_cursor_past_maximum(monkeypatch):
+    _patch_scope(monkeypatch)
+    monkeypatch.setattr(
+        disease_profiles.disease_profile_service,
+        "get_items",
+        lambda **_kwargs: {
+            "section": "key_findings",
+            "items": [
+                {
+                    "id": f"item-{index}",
+                    "item_type": "finding",
+                    "section": "key_findings",
+                }
+                for index in range(20)
+            ],
+            "total": 10_021,
+        },
+    )
+
+    response = asyncio.run(
+        disease_profiles.get_disease_profile_items(
+            "mesh:D000795",
+            workspace_id="workspace-1",
+            section="key_findings",
+            limit=20,
+            cursor=disease_profiles._encode_cursor("10000"),
+            user=SimpleNamespace(id="user-1"),
+        )
+    )
+
+    assert len(response.items) == 20
+    assert response.next_cursor is None
+
+
 def test_delete_link_returns_no_content_and_forwards_scope(monkeypatch):
     _patch_scope(monkeypatch)
     captured = {}

@@ -319,12 +319,14 @@ class DiseaseProfileRepository:
         try:
             with self.session_factory() as db:
                 statement = (
+                    # A concept is the stable profile and cursor identity.
+                    # Names and ontology versions may change between links,
+                    # so they must not split one profile into multiple rows.
                     select(
                         DocumentDiseaseLinkRecord.concept_id.label("concept_id"),
-                        DocumentDiseaseLinkRecord.preferred_name_en.label("preferred_name_en"),
-                        DocumentDiseaseLinkRecord.preferred_name_zh.label("preferred_name_zh"),
-                        DocumentDiseaseLinkRecord.ontology_version.label("ontology_version"),
-                        func.count(DocumentDiseaseLinkRecord.document_id).label("document_count"),
+                        func.count(
+                            func.distinct(DocumentDiseaseLinkRecord.document_id)
+                        ).label("document_count"),
                         func.max(DocumentDiseaseLinkRecord.updated_at).label("last_updated_at"),
                     )
                     .join(
@@ -340,9 +342,6 @@ class DiseaseProfileRepository:
                     )
                     .group_by(
                         DocumentDiseaseLinkRecord.concept_id,
-                        DocumentDiseaseLinkRecord.preferred_name_en,
-                        DocumentDiseaseLinkRecord.preferred_name_zh,
-                        DocumentDiseaseLinkRecord.ontology_version,
                     )
                     .order_by(DocumentDiseaseLinkRecord.concept_id)
                     .limit(page_size + 1)
@@ -357,9 +356,6 @@ class DiseaseProfileRepository:
                     "items": [
                         {
                             "concept_id": str(row["concept_id"]),
-                            "preferred_name_en": str(row["preferred_name_en"] or ""),
-                            "preferred_name_zh": str(row["preferred_name_zh"] or ""),
-                            "ontology_version": str(row["ontology_version"] or ""),
                             "document_count": int(row["document_count"] or 0),
                             "last_updated_at": _iso(row["last_updated_at"]),
                         }

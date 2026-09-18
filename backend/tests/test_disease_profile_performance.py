@@ -64,6 +64,8 @@ def test_repository_pages_concepts_before_loading_profile_inputs():
     suffix = uuid.uuid4().hex
     user_id = f"perf-user-{suffix}"
     workspace_id = f"perf-workspace-{suffix}"
+    other_workspace_id = f"other-workspace-{suffix}"
+    other_user_id = f"other-user-{suffix}"
     rows: list[tuple[str, str]] = []
 
     try:
@@ -89,6 +91,49 @@ def test_repository_pages_concepts_before_loading_profile_inputs():
                         link_source="manual_selection",
                     )
                 )
+            db.add(
+                _document(
+                    f"perf-document-{suffix}-other-workspace",
+                    user_id,
+                    other_workspace_id,
+                )
+            )
+            db.add(
+                _document(
+                    f"perf-document-{suffix}-other-user",
+                    other_user_id,
+                    workspace_id,
+                )
+            )
+            db.flush()
+            db.add(
+                DocumentDiseaseLinkRecord(
+                    id=f"perf-link-{suffix}-other-workspace",
+                    user_id=user_id,
+                    workspace_id=other_workspace_id,
+                    document_id=f"perf-document-{suffix}-other-workspace",
+                    concept_id="mesh:PERF-900",
+                    preferred_name_en="Other Workspace Disease",
+                    preferred_name_zh="其他项目疾病",
+                    matched_alias="Other Workspace Disease",
+                    ontology_version="test-v1",
+                    link_source="manual_selection",
+                )
+            )
+            db.add(
+                DocumentDiseaseLinkRecord(
+                    id=f"perf-link-{suffix}-other-user",
+                    user_id=other_user_id,
+                    workspace_id=workspace_id,
+                    document_id=f"perf-document-{suffix}-other-user",
+                    concept_id="mesh:PERF-901",
+                    preferred_name_en="Other User Disease",
+                    preferred_name_zh="其他用户疾病",
+                    matched_alias="Other User Disease",
+                    ontology_version="test-v1",
+                    link_source="manual_selection",
+                )
+            )
             db.commit()
 
         repository = DiseaseProfileRepository()
@@ -127,6 +172,143 @@ def test_repository_pages_concepts_before_loading_profile_inputs():
         assert [item["document"]["document_id"] for item in selected["mesh:PERF-001"]] == [
             rows[1][0]
         ]
+    finally:
+        with SessionLocal() as db:
+            db.query(DocumentDiseaseLinkRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(DocumentRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(DocumentDiseaseLinkRecord).filter_by(
+                user_id=user_id,
+                workspace_id=other_workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(DocumentDiseaseLinkRecord).filter_by(
+                user_id=other_user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(DocumentRecord).filter_by(
+                user_id=user_id,
+                workspace_id=other_workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(DocumentRecord).filter_by(
+                user_id=other_user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.commit()
+
+
+def test_repository_groups_same_concept_across_ontology_versions():
+    suffix = uuid.uuid4().hex
+    user_id = f"version-user-{suffix}"
+    workspace_id = f"version-workspace-{suffix}"
+    document_ids = [f"version-document-{suffix}-{index}" for index in range(2)]
+
+    try:
+        with SessionLocal() as db:
+            for index, document_id in enumerate(document_ids):
+                db.add(_document(document_id, user_id, workspace_id))
+                db.flush()
+                db.add(
+                    DocumentDiseaseLinkRecord(
+                        id=f"version-link-{suffix}-{index}",
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        document_id=document_id,
+                        concept_id="mesh:D000795",
+                        preferred_name_en=(
+                            "Fabry Disease" if index == 0 else "Fabry disease"
+                        ),
+                        preferred_name_zh="法布雷病",
+                        matched_alias="法布雷病",
+                        ontology_version=f"test-v{index + 1}",
+                        link_source="manual_selection",
+                    )
+                )
+            db.commit()
+
+        repository = DiseaseProfileRepository()
+        page = repository.list_profile_concept_page(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            limit=1,
+        )
+
+        assert [item["concept_id"] for item in page["items"]] == ["mesh:D000795"]
+        assert page["items"][0]["document_count"] == 2
+        assert page["next_cursor"] is None
+
+        profile = DiseaseProfileService().list_profiles(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            limit=1,
+        )
+        assert [item["concept_id"] for item in profile["items"]] == ["mesh:D000795"]
+        assert profile["items"][0]["document_count"] == 2
+        assert profile["next_cursor"] is None
+    finally:
+        with SessionLocal() as db:
+            db.query(DocumentDiseaseLinkRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(DocumentRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.commit()
+
+
+def test_repository_concept_page_has_stable_fifty_item_boundary():
+    suffix = uuid.uuid4().hex
+    user_id = f"boundary-user-{suffix}"
+    workspace_id = f"boundary-workspace-{suffix}"
+    document_ids = [f"boundary-document-{suffix}-{index}" for index in range(51)]
+
+    try:
+        with SessionLocal() as db:
+            for index, document_id in enumerate(document_ids):
+                db.add(_document(document_id, user_id, workspace_id))
+            db.flush()
+            for index, document_id in enumerate(document_ids):
+                db.add(
+                    DocumentDiseaseLinkRecord(
+                        id=f"boundary-link-{suffix}-{index}",
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        document_id=document_id,
+                        concept_id=f"mesh:BOUNDARY-{index:03d}",
+                        preferred_name_en="Boundary Disease",
+                        preferred_name_zh="边界疾病",
+                        matched_alias="Boundary Disease",
+                        ontology_version="test-v1",
+                        link_source="manual_selection",
+                    )
+                )
+            db.commit()
+
+        repository = DiseaseProfileRepository()
+        first_page = repository.list_profile_concept_page(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            limit=50,
+        )
+        second_page = repository.list_profile_concept_page(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            limit=50,
+            after_concept_id=first_page["next_cursor"],
+        )
+
+        assert len(first_page["items"]) == 50
+        assert first_page["next_cursor"] == "mesh:BOUNDARY-049"
+        assert [item["concept_id"] for item in second_page["items"]] == [
+            "mesh:BOUNDARY-050"
+        ]
+        assert second_page["next_cursor"] is None
     finally:
         with SessionLocal() as db:
             db.query(DocumentDiseaseLinkRecord).filter_by(
