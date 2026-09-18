@@ -21,7 +21,7 @@ def test_full_evaluation_passes_all_declared_hard_gates() -> None:
     dataset = load_dataset(require_minimum=32)
     report = run_evaluation(dataset, suite="full")
 
-    assert report.case_count >= 32
+    assert report.case_count >= 50
     assert report.passed_cases == report.case_count
     assert report.failed_cases == 0
     assert report.hard_gates_passed is True

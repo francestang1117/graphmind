@@ -44,6 +44,7 @@ def test_default_dataset_has_required_bilingual_case_balance() -> None:
         "literature_matching",
         "clinician_questions",
         "visit_preparation",
+        "disease_profiles",
     }
 
 

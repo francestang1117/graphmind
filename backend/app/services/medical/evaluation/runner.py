@@ -91,6 +91,8 @@ def _case_metrics(case: EvaluationCase, actual: dict[str, Any]) -> dict[str, flo
         values["candidate_count"] = float(len(actual.get("candidate_ids", [])))
     if case.suite == "clinician_questions":
         values["question_count"] = float(actual.get("question_count", 0))
+    if case.suite == "disease_profiles":
+        values["profile_document_count"] = float(actual.get("document_count", 0))
     return values
 
 

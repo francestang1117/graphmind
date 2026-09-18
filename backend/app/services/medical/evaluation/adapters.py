@@ -21,6 +21,7 @@ from app.services.medical.ai.question_templates import (
 from app.services.medical.ai.question_validator import validate_questions
 from app.services.medical.ai.safety_validator import validate_safety
 from app.services.medical.ai.support_validator import validate_support
+from app.services.medical.disease_profile.aggregator import DiseaseProfileAggregator
 from app.services.medical.evidence_matching.matcher import match_articles
 from app.services.medical.evidence_matching.models import MatchableFinding
 from app.services.medical.evaluation.models import EvaluationCase
@@ -92,6 +93,7 @@ def evaluate_case(case: EvaluationCase, dataset_root: Path) -> dict[str, Any]:
         "literature_matching": evaluate_literature_matching,
         "clinician_questions": evaluate_clinician_questions,
         "visit_preparation": evaluate_visit_preparation,
+        "disease_profiles": evaluate_disease_profiles,
     }[case.suite]
     return adapter(case, dataset_root)
 
@@ -392,6 +394,300 @@ def evaluate_clinician_questions(case: EvaluationCase, _dataset_root: Path) -> d
             *safety.errors,
         ])),
     }
+
+
+def evaluate_disease_profiles(case: EvaluationCase, _dataset_root: Path) -> dict[str, Any]:
+    """Replay compact synthetic records through the production aggregator."""
+    payload = case.input
+    concept_id = str(payload.get("concept_id") or "")
+    raw_records = payload.get("records", [])
+    if not concept_id or not isinstance(raw_records, list):
+        raise EvaluationAdapterError("disease profile cases require a concept and records")
+
+    records = [_profile_record(item, index) for index, item in enumerate(raw_records)]
+    scoped_records = [
+        record
+        for record in records
+        if str((record.get("link") or {}).get("concept_id") or "") == concept_id
+    ]
+    foreign_document_ids = [
+        str((record.get("document") or {}).get("document_id") or "")
+        for record in records
+        if record not in scoped_records
+    ]
+    profile = DiseaseProfileAggregator().aggregate(
+        concept_id=concept_id,
+        inputs=scoped_records,
+    )
+    if not profile:
+        return {
+            "profile_status": "empty",
+            "concept_id": concept_id,
+            "document_count": 0,
+            "analysis_count": 0,
+            "foreign_records_ignored": len(foreign_document_ids),
+            "all_items_have_sources": True,
+            "private_notes_exposed": False,
+            "has_overall_confidence": False,
+            "has_treatment_ranking": False,
+        }
+
+    all_sections = profile.get("_all_sections") or {}
+    all_items = [
+        item
+        for values in all_sections.values()
+        if isinstance(values, list)
+        for item in values
+        if isinstance(item, Mapping)
+    ]
+    unbacked_items = [
+        item
+        for item in all_items
+        if not item.get("evidence")
+        and not (
+            item.get("item_type") == "attribute"
+            and item.get("support_status") == "not_reported"
+        )
+    ]
+    articles = [item for item in all_sections.get("external_studies", []) if isinstance(item, Mapping)]
+    serialized = json.dumps(profile, ensure_ascii=False, sort_keys=True)
+    stats = profile["stats"]
+    return {
+        "profile_status": "ready",
+        "concept_id": profile["concept_id"],
+        "preferred_name_en": profile["preferred_name_en"],
+        "preferred_name_zh": profile["preferred_name_zh"],
+        "ontology_version": profile["ontology_version"],
+        "document_count": profile["document_count"],
+        "analysis_count": profile["analysis_count"],
+        "external_article_count": profile["external_article_count"],
+        "flagged_article_count": stats["flagged_article_count"],
+        "warning_codes": profile["warnings"],
+        "section_counts": profile["section_counts"],
+        "research_paper_count": stats["research_paper_count"],
+        "guideline_count": stats["guideline_count"],
+        "other_medical_document_count": stats["other_medical_document_count"],
+        "human_study_count": stats["human_study_count"],
+        "animal_study_count": stats["animal_study_count"],
+        "in_vitro_study_count": stats["in_vitro_study_count"],
+        "sample_size_reported_count": stats["sample_size_reported_count"],
+        "sample_size_not_reported_count": stats["sample_size_not_reported_count"],
+        "foreign_records_ignored": len(foreign_document_ids),
+        "foreign_document_ids_exposed": any(
+            document_id and document_id in serialized for document_id in foreign_document_ids
+        ),
+        "all_items_have_sources": not unbacked_items,
+        "private_notes_exposed": "user_note" in serialized,
+        "has_overall_confidence": any(
+            key in profile for key in ("confidence", "overall_confidence", "quality_score")
+        ),
+        "has_treatment_ranking": any(
+            key in profile
+            for key in ("treatment_ranking", "treatment_rankings", "recommended_treatment")
+        ),
+        "distinct_key_finding_count": len(all_sections.get("key_findings", [])),
+        "withdrawn_article_visible": any(
+            str(item.get("retraction_status") or "") in {"retracted", "retraction_notice"}
+            and bool(item.get("flagged"))
+            for item in articles
+        ),
+        "external_article_unique_count": len(
+            {(str(item.get("source") or ""), str(item.get("external_id") or "")) for item in articles}
+        ),
+        "link_aliases": sorted(
+            {
+                str((record.get("link") or {}).get("matched_alias") or "")
+                for record in scoped_records
+                if str((record.get("link") or {}).get("matched_alias") or "")
+            }
+        ),
+        "ambiguous_concepts_preserved": [
+            str(value) for value in payload.get("unresolved_concepts", [])
+        ],
+    }
+
+
+def _profile_record(value: Any, index: int) -> dict[str, Any]:
+    """Expand a readable evaluation record into the repository snapshot shape."""
+    if not isinstance(value, Mapping):
+        raise EvaluationAdapterError("disease profile record must be an object")
+    link = dict(value.get("link") or {})
+    document = dict(value.get("document") or {})
+    if not link.get("concept_id") or not document.get("document_id"):
+        raise EvaluationAdapterError("disease profile record needs a link and document")
+    document_id = str(document["document_id"])
+    document.setdefault("title", f"Synthetic document {index + 1}")
+    document.setdefault("document_kind", "research_paper")
+    document.setdefault("language", "en")
+    document.setdefault("document_date", "2026-01-01")
+    document.setdefault("file_hash", f"file-{document_id}")
+    document.setdefault("parsed_source_hash", f"parsed-{document_id}")
+    document.setdefault("modified_at", "2026-09-18T00:00:00+00:00")
+    link.setdefault("preferred_name_en", "Synthetic condition")
+    link.setdefault("preferred_name_zh", "合成疾病")
+    link.setdefault("matched_alias", link["preferred_name_en"])
+    link.setdefault("ontology_version", "evaluation-ontology-v1")
+    link.setdefault("updated_at", "2026-09-18T00:00:00+00:00")
+
+    analysis_input = value.get("analysis")
+    analyses = []
+    if isinstance(analysis_input, Mapping):
+        analysis = dict(analysis_input)
+        run_id = str(analysis.get("run_id") or f"run-{document_id}")
+        analysis["run"] = _profile_run(analysis.get("run"), run_id, document)
+        analysis["report"] = _profile_report(analysis, document_id)
+        analysis["evidence"] = _profile_evidence(analysis, analysis["report"])
+        analysis.setdefault("valid", True)
+        analysis.setdefault("warnings", [])
+        analyses.append(analysis)
+    elif isinstance(value.get("analyses"), list):
+        analyses = [dict(item) for item in value["analyses"] if isinstance(item, Mapping)]
+
+    matches = value.get("matches")
+    if matches is None:
+        run_id = str((analyses[0].get("run") or {}).get("run_id") or f"run-{document_id}") if analyses else f"run-{document_id}"
+        matches = [
+            {
+                "analysis_run_id": run_id,
+                "match_specificity": "condition_only",
+                "relevance_score": 50,
+                "article": dict(article),
+            }
+            for article in value.get("articles", [])
+            if isinstance(article, Mapping)
+        ]
+    return {
+        "link": link,
+        "document": document,
+        "analyses": analyses,
+        "matches": [dict(item) for item in matches if isinstance(item, Mapping)],
+        "questions": [dict(item) for item in value.get("questions", []) if isinstance(item, Mapping)],
+    }
+
+
+def _profile_run(value: Any, run_id: str, document: Mapping[str, Any]) -> dict[str, Any]:
+    run = dict(value) if isinstance(value, Mapping) else {}
+    run.update(
+        {
+            "run_id": run_id,
+            "document_id": document["document_id"],
+            "status": run.get("status", "succeeded"),
+            "source_hash": run.get("source_hash", document["file_hash"]),
+            "parsed_source_hash": run.get("parsed_source_hash", document["parsed_source_hash"]),
+            "validation_status": run.get("validation_status", "validated"),
+            "is_current": run.get("is_current", True),
+            "updated_at": run.get("updated_at", "2026-09-18T00:00:00+00:00"),
+        }
+    )
+    return run
+
+
+def _profile_report(analysis: Mapping[str, Any], document_id: str) -> dict[str, Any]:
+    report = dict(analysis.get("report") or {})
+    evidence_ids = [
+        str(item.get("evidence_id") or item.get("id") or "")
+        for item in analysis.get("evidence", [])
+        if isinstance(item, Mapping) and str(item.get("evidence_id") or item.get("id") or "")
+    ]
+    evidence_ids = evidence_ids or [f"evidence-{document_id}"]
+    for field in (
+        "key_findings",
+        "limitations",
+        "what_it_means",
+        "what_it_does_not_mean",
+        "applicability",
+        "future_research",
+    ):
+        input_field = "findings" if field == "key_findings" else field
+        if input_field in analysis:
+            report[field] = _profile_findings(
+                analysis.get(input_field), evidence_ids[0], field
+            )
+
+    methods = dict(report.get("study_methods") or {})
+    method_values = {
+        "population": analysis.get("population"),
+        "human_animal_in_vitro": analysis.get("population"),
+        "sample_size": analysis.get("sample_size"),
+        "comparator": analysis.get("comparator"),
+    }
+    for name, value in method_values.items():
+        status = str(analysis.get(f"{name}_status") or "supported")
+        if value is not None or f"{name}_status" in analysis:
+            methods[name] = _profile_attribute(value, status, evidence_ids[0])
+    if methods:
+        report["study_methods"] = methods
+
+    if "medical_terms" in analysis:
+        report["medical_terms"] = [
+            {
+                "term": str(item.get("term") if isinstance(item, Mapping) else item),
+                "explanation": "A synthetic term explanation.",
+                "evidence_ids": [evidence_ids[0]],
+            }
+            for item in analysis["medical_terms"]
+        ]
+    return report
+
+
+def _profile_findings(value: Any, evidence_id: str, field: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    findings = []
+    for index, item in enumerate(value):
+        if isinstance(item, Mapping):
+            finding = dict(item)
+            finding.setdefault("id", f"{field}-{index + 1}")
+            finding.setdefault("statement", str(finding.get("text") or "Synthetic finding"))
+            finding.setdefault("plain_explanation", "A synthetic source-backed observation.")
+            finding.setdefault("evidence_ids", [evidence_id])
+        else:
+            finding = {
+                "id": f"{field}-{index + 1}",
+                "statement": str(item),
+                "plain_explanation": "A synthetic source-backed observation.",
+                "evidence_ids": [evidence_id],
+            }
+        findings.append(finding)
+    return findings
+
+
+def _profile_attribute(value: Any, status: str, evidence_id: str) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {
+        "value": "" if value is None else str(value),
+        "support_status": status,
+        "evidence_ids": [] if status == "not_reported" else [evidence_id],
+    }
+
+
+def _profile_evidence(analysis: Mapping[str, Any], report: Mapping[str, Any]) -> list[dict[str, Any]]:
+    raw = analysis.get("evidence")
+    if isinstance(raw, list) and raw:
+        return [dict(item) for item in raw if isinstance(item, Mapping)]
+    ids = {"evidence-placeholder"}
+    for values in report.values():
+        if isinstance(values, list):
+            for item in values:
+                if isinstance(item, Mapping):
+                    ids.update(str(value) for value in item.get("evidence_ids", []) if value)
+        elif isinstance(values, Mapping):
+            for item in values.values():
+                if isinstance(item, Mapping):
+                    ids.update(str(value) for value in item.get("evidence_ids", []) if value)
+    return [
+        {
+            "id": value,
+            "evidence_id": value,
+            "section_type": "results",
+            "section_title": "Synthetic results",
+            "page_start": 1,
+            "page_end": 1,
+            "quote": "Synthetic source text.",
+        }
+        for value in sorted(ids)
+    ]
 
 
 def evaluate_visit_preparation(case: EvaluationCase, _dataset_root: Path) -> dict[str, Any]:

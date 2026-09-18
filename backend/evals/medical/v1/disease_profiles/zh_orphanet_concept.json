@@ -1,0 +1,22 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_profile_orphanet_concept_001",
+  "suite": "disease_profiles",
+  "language": "zh",
+  "tags": ["disease_profile", "orphanet", "rare_disease"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "concept_id": "orpha:324",
+    "records": [
+      {
+        "link": {"concept_id": "orpha:324", "preferred_name_en": "Fabry disease", "preferred_name_zh": "法布雷病", "matched_alias": "法布雷病", "ontology_version": "orphanet-evaluation-v1"},
+        "document": {"document_id": "profile-orpha-doc", "title": "罕见病研究资料", "document_kind": "research_paper", "language": "zh", "document_date": "2026-04-01"},
+        "analysis": {"run_id": "profile-orpha-run", "population": "患者人群", "sample_size": "18 participants", "findings": ["资料报告了一项可追溯的观察结果。"], "evidence": [{"id": "orpha-evidence", "evidence_id": "orpha-evidence", "section_type": "results", "section_title": "结果", "page_start": 5, "page_end": 5, "quote": "资料报告了一项可追溯的观察结果。"}]}
+      }
+    ]
+  },
+  "expected": {"profile_status": "ready", "concept_id": "orpha:324", "ontology_version": "orphanet-evaluation-v1", "document_count": 1, "analysis_count": 1, "all_items_have_sources": true, "has_overall_confidence": false},
+  "gate_fields": ["profile_status", "concept_id", "ontology_version", "document_count", "analysis_count", "all_items_have_sources", "has_overall_confidence"],
+  "rationale": "An Orphanet-backed concept is a stable profile key and does not require an external query or a generated medical claim.",
+  "last_reviewed": "2026-09-18"
+}

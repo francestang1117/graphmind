@@ -1,0 +1,32 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_profile_three_document_types_001",
+  "suite": "disease_profiles",
+  "language": "en",
+  "tags": ["disease_profile", "multi_document", "smoke"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "concept_id": "mesh:D000795",
+    "records": [
+      {
+        "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"},
+        "document": {"document_id": "profile-doc-paper", "title": "Synthetic Fabry research paper", "document_kind": "research_paper", "language": "en", "document_date": "2026-01-01"},
+        "analysis": {"run_id": "profile-run-paper", "population": "human participants", "sample_size": "40 participants", "comparator": "usual care", "findings": ["The study reported a measured outcome."], "evidence": [{"id": "paper-result", "evidence_id": "paper-result", "section_type": "results", "section_title": "Results", "page_start": 3, "page_end": 3, "quote": "The study reported a measured outcome."}]}
+      },
+      {
+        "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease guideline", "ontology_version": "evaluation-ontology-v1"},
+        "document": {"document_id": "profile-doc-guideline", "title": "Synthetic Fabry clinical guideline", "document_kind": "guideline", "language": "en", "document_date": "2026-02-01"},
+        "analysis": {"run_id": "profile-run-guideline", "population": "patients with the condition", "sample_size": "not reported", "sample_size_status": "not_reported", "comparator": null, "comparator_status": "not_reported", "findings": ["The guideline describes a clinical recommendation."], "evidence": [{"id": "guideline-recommendation", "evidence_id": "guideline-recommendation", "section_type": "recommendations", "section_title": "Recommendations", "page_start": 8, "page_end": 8, "quote": "The guideline describes a clinical recommendation."}]}
+      },
+      {
+        "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "法布雷病", "ontology_version": "evaluation-ontology-v1"},
+        "document": {"document_id": "profile-doc-report", "title": "Synthetic Fabry clinical report", "document_kind": "clinical_report", "language": "en", "document_date": "2026-03-01"},
+        "analysis": {"run_id": "profile-run-report", "population": "human participants", "sample_size": "12 participants", "comparator": "none", "findings": ["The report describes an observed clinical measurement."], "evidence": [{"id": "report-result", "evidence_id": "report-result", "section_type": "results", "section_title": "Results", "page_start": 2, "page_end": 2, "quote": "The report describes an observed clinical measurement."}]}
+      }
+    ]
+  },
+  "expected": {"profile_status": "ready", "concept_id": "mesh:D000795", "document_count": 3, "analysis_count": 3, "research_paper_count": 1, "guideline_count": 1, "other_medical_document_count": 1, "distinct_key_finding_count": 3, "all_items_have_sources": true, "has_overall_confidence": false, "has_treatment_ranking": false},
+  "gate_fields": ["profile_status", "concept_id", "document_count", "analysis_count", "research_paper_count", "guideline_count", "other_medical_document_count", "distinct_key_finding_count", "all_items_have_sources", "has_overall_confidence", "has_treatment_ranking"],
+  "rationale": "Three source document types for one controlled disease remain separate and source-linked; the profile does not invent a confidence score or treatment ranking.",
+  "last_reviewed": "2026-09-18"
+}

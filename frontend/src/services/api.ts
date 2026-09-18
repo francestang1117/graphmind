@@ -240,6 +240,175 @@ export interface MedicalInsightRun {
   evidence?: MedicalInsightEvidence[];
 }
 
+export type DiseaseProfileSection =
+  | "key_findings"
+  | "study_methods"
+  | "limitations"
+  | "what_it_means"
+  | "what_it_does_not_mean"
+  | "applicability"
+  | "future_research"
+  | "medical_terms"
+  | "clinician_questions"
+  | "external_studies";
+
+export interface DiseaseProfileSource {
+  source_type: "document_evidence" | "external_article";
+  evidence_id?: string | null;
+  document_id?: string | null;
+  document_title: string;
+  document_date: string;
+  analysis_run_id?: string | null;
+  parsed_source_hash: string;
+  section_type: string;
+  section_title: string;
+  page_start?: number | null;
+  page_end?: number | null;
+  quote: string;
+  source: string;
+  external_id: string;
+  source_url: string;
+  retraction_status: string;
+  flagged: boolean;
+  warnings: string[];
+}
+
+export interface DiseaseProfileItem {
+  id: string;
+  item_type: "finding" | "attribute" | "term" | "question" | "article";
+  section: DiseaseProfileSection;
+  document_id?: string | null;
+  document_ids: string[];
+  document_title: string;
+  document_titles: string[];
+  document_kind: string;
+  document_date: string;
+  analysis_run_id?: string | null;
+  parsed_source_hash: string;
+  source_status: "current" | "outdated" | "unavailable";
+  title: string;
+  text: string;
+  explanation: string;
+  value: string;
+  support_status: string;
+  term: string;
+  question: string;
+  rationale: string;
+  category: string;
+  topic: string;
+  source_kind: string;
+  source_id: string;
+  evidence_ids: string[];
+  evidence: DiseaseProfileSource[];
+  source: string;
+  external_id: string;
+  doi?: string | null;
+  pmcid?: string | null;
+  journal: string;
+  publication_date?: string | null;
+  publication_year?: number | null;
+  publication_types: string[];
+  source_url: string;
+  retraction_status: string;
+  flagged: boolean;
+  warnings: string[];
+  relevance_score?: number | null;
+  match_specificity: string;
+}
+
+export interface DiseaseProfileDocument {
+  document_id: string;
+  title: string;
+  document_kind: string;
+  language: string;
+  document_date: string;
+  parsed_source_hash: string;
+  source_status: "current" | "outdated" | "unavailable";
+  warnings: string[];
+}
+
+export interface DiseaseProfileStats {
+  document_count: number;
+  research_paper_count: number;
+  guideline_count: number;
+  other_medical_document_count: number;
+  valid_analysis_count: number;
+  expired_analysis_count: number;
+  external_article_count: number;
+  flagged_article_count: number;
+  comparator_reported_count: number;
+  comparator_not_reported_count: number;
+  human_study_count: number;
+  animal_study_count: number;
+  in_vitro_study_count: number;
+  unknown_study_population_count: number;
+  sample_size_reported_count: number;
+  sample_size_not_reported_count: number;
+  unknown_date_count: number;
+}
+
+export interface DiseaseProfileSummary {
+  concept_id: string;
+  preferred_name_en: string;
+  preferred_name_zh: string;
+  ontology_version: string;
+  document_count: number;
+  analysis_count: number;
+  external_article_count: number;
+  saved_question_count: number;
+  last_updated_at: string;
+  section_counts: Partial<Record<DiseaseProfileSection, number>>;
+  warnings: string[];
+}
+
+export interface DiseaseProfileDetail extends DiseaseProfileSummary {
+  stats: DiseaseProfileStats;
+  documents: DiseaseProfileDocument[];
+  sections: Array<{
+    section: DiseaseProfileSection;
+    count: number;
+    items: DiseaseProfileItem[];
+  }>;
+}
+
+export interface DiseaseProfileList {
+  items: DiseaseProfileSummary[];
+  next_cursor?: string | null;
+}
+
+export interface DiseaseProfileItems {
+  section: DiseaseProfileSection;
+  items: DiseaseProfileItem[];
+  next_cursor?: string | null;
+}
+
+export interface DiseaseConceptOption {
+  concept_id: string;
+  preferred_name_en: string;
+  preferred_name_zh: string;
+  ontology_version: string;
+  matched_alias: string;
+}
+
+export interface DiseaseConceptSearchResult {
+  items: DiseaseConceptOption[];
+}
+
+export interface UnassignedDiseaseDocument {
+  document_id: string;
+  title: string;
+  document_kind: string;
+  language: string;
+  document_date: string;
+  medical_confidence: number;
+  classifier_version: string;
+  warnings: string[];
+}
+
+export interface UnassignedDiseaseDocumentList {
+  items: UnassignedDiseaseDocument[];
+}
+
 export type ClinicianQuestionStatus = "saved" | "asked" | "answered" | "dismissed";
 export type ClinicianQuestionSourceStatus = "current" | "outdated" | "unavailable";
 
@@ -815,6 +984,97 @@ export const getCurrentMedicalInsights = (
       `/documents/${encodeURIComponent(documentId)}/medical-insights/current`,
       workspaceParams(workspaceId),
     )
+    .then((r) => r.data);
+
+export const searchDiseaseConcepts = (
+  query: string,
+  limit = 20,
+): Promise<DiseaseConceptSearchResult> =>
+  http
+    .get<DiseaseConceptSearchResult>("/disease-profiles/concepts/search", {
+      params: { q: query, limit },
+    })
+    .then((r) => r.data);
+
+export const createDiseaseLink = (
+  documentId: string,
+  workspaceId: string,
+  body: {
+    concept_id: string;
+    matched_alias?: string;
+    source_search_run_id?: string | null;
+  },
+): Promise<{ link: { id: string; document_id: string; concept_id: string }; created: boolean }> =>
+  http
+    .post(
+      `/documents/${encodeURIComponent(documentId)}/disease-links`,
+      body,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const deleteDiseaseLink = (
+  documentId: string,
+  conceptId: string,
+  workspaceId: string,
+) =>
+  http.delete(
+    `/documents/${encodeURIComponent(documentId)}/disease-links/${encodeURIComponent(conceptId)}`,
+    workspaceParams(workspaceId),
+  );
+
+export const listDiseaseProfiles = (
+  workspaceId: string,
+  options: { limit?: number; cursor?: string | null } = {},
+): Promise<DiseaseProfileList> =>
+  http
+    .get<DiseaseProfileList>("/disease-profiles", {
+      params: {
+        workspace_id: workspaceId,
+        limit: options.limit,
+        cursor: options.cursor,
+      },
+    })
+    .then((r) => r.data);
+
+export const getDiseaseProfile = (
+  conceptId: string,
+  workspaceId: string,
+): Promise<DiseaseProfileDetail> =>
+  http
+    .get<DiseaseProfileDetail>(
+      `/disease-profiles/${encodeURIComponent(conceptId)}`,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const getDiseaseProfileItems = (
+  conceptId: string,
+  section: DiseaseProfileSection,
+  workspaceId: string,
+  options: { limit?: number; cursor?: string | null } = {},
+): Promise<DiseaseProfileItems> =>
+  http
+    .get<DiseaseProfileItems>(
+      `/disease-profiles/${encodeURIComponent(conceptId)}/items`,
+      {
+        params: {
+          workspace_id: workspaceId,
+          section,
+          limit: options.limit,
+          cursor: options.cursor,
+        },
+      },
+    )
+    .then((r) => r.data);
+
+export const listUnassignedDiseaseDocuments = (
+  workspaceId: string,
+): Promise<UnassignedDiseaseDocumentList> =>
+  http
+    .get<UnassignedDiseaseDocumentList>("/disease-profiles/unassigned-documents", {
+      params: { workspace_id: workspaceId },
+    })
     .then((r) => r.data);
 
 export const saveClinicianQuestion = (

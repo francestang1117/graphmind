@@ -1,0 +1,19 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_profile_withdrawn_article_001",
+  "suite": "disease_profiles",
+  "language": "zh",
+  "tags": ["disease_profile", "retraction", "safety"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "concept_id": "mesh:D000795",
+    "records": [
+      {"link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "法布雷病", "ontology_version": "evaluation-ontology-v1"}, "document": {"document_id": "profile-withdrawn-a", "title": "撤稿状态测试资料 A", "document_kind": "research_paper", "language": "zh", "document_date": "2026-01-01"}, "analysis": {"run_id": "profile-withdrawn-run-a", "population": "患者人群", "sample_size": "14 participants", "findings": ["资料 A 报告了一项观察结果。"], "evidence": [{"id": "withdrawn-evidence-a", "evidence_id": "withdrawn-evidence-a", "section_type": "results", "section_title": "结果", "page_start": 2, "page_end": 2, "quote": "资料 A 报告了一项观察结果。"}]}, "articles": [{"source": "pubmed", "external_id": "withdrawn-100", "title": "Synthetic public article", "retraction_status": "normal", "source_url": "https://pubmed.ncbi.nlm.nih.gov/withdrawn-100"}]},
+      {"link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"}, "document": {"document_id": "profile-withdrawn-b", "title": "撤稿状态测试资料 B", "document_kind": "guideline", "language": "zh", "document_date": "2026-02-01"}, "analysis": {"run_id": "profile-withdrawn-run-b", "population": "患者人群", "sample_size": "not reported", "sample_size_status": "not_reported", "findings": ["资料 B 不改变资料 A 的独立来源。"], "evidence": [{"id": "withdrawn-evidence-b", "evidence_id": "withdrawn-evidence-b", "section_type": "discussion", "section_title": "讨论", "page_start": 3, "page_end": 3, "quote": "资料 B 不改变资料 A 的独立来源。"}]}, "articles": [{"source": "pubmed", "external_id": "withdrawn-100", "title": "Synthetic public article", "retraction_status": "retracted", "source_url": "https://pubmed.ncbi.nlm.nih.gov/withdrawn-100"}]}
+    ]
+  },
+  "expected": {"profile_status": "ready", "document_count": 2, "external_article_count": 0, "external_article_unique_count": 1, "flagged_article_count": 1, "warning_codes": ["retracted_external_article_present"], "withdrawn_article_visible": true},
+  "gate_fields": ["profile_status", "document_count", "external_article_count", "external_article_unique_count", "flagged_article_count", "warning_codes", "withdrawn_article_visible"],
+  "rationale": "A withdrawn public article remains visible with a warning, is deduplicated by source and identifier, and is excluded from the ordinary article count.",
+  "last_reviewed": "2026-09-18"
+}

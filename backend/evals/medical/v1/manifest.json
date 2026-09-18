@@ -1,8 +1,8 @@
 {
   "schema_version": "medical-eval-v1",
-  "dataset_version": "medical-eval-v1.2.0",
-  "description": "Synthetic bilingual regression cases for GraphMind medical services, including visit preparation.",
-  "case_count": 42,
+  "dataset_version": "medical-eval-v1.3.0",
+  "description": "Synthetic bilingual regression cases for GraphMind medical services, including visit preparation and disease profiles.",
+  "case_count": 50,
   "cases": [
     {"case_id": "en_terminology_fabry_001", "suite": "terminology", "path": "terminology/en_fabry.json"},
     {"case_id": "zh_terminology_fabry_001", "suite": "terminology", "path": "terminology/zh_fabry.json"},
@@ -45,6 +45,14 @@
     {"case_id": "zh_visit_selection_limit_001", "suite": "visit_preparation", "path": "visit_preparation/zh_selection_limit.json"},
     {"case_id": "en_visit_immutable_snapshot_001", "suite": "visit_preparation", "path": "visit_preparation/en_immutable_snapshot.json"},
     {"case_id": "zh_visit_dismissed_question_001", "suite": "visit_preparation", "path": "visit_preparation/zh_dismissed_question.json"},
-    {"case_id": "en_visit_unvalidated_source_001", "suite": "visit_preparation", "path": "visit_preparation/en_unvalidated_source.json"}
+    {"case_id": "en_visit_unvalidated_source_001", "suite": "visit_preparation", "path": "visit_preparation/en_unvalidated_source.json"},
+    {"case_id": "en_profile_three_document_types_001", "suite": "disease_profiles", "path": "disease_profiles/en_three_document_types.json"},
+    {"case_id": "zh_profile_aliases_same_concept_001", "suite": "disease_profiles", "path": "disease_profiles/zh_aliases_same_concept.json"},
+    {"case_id": "zh_profile_orphanet_concept_001", "suite": "disease_profiles", "path": "disease_profiles/zh_orphanet_concept.json"},
+    {"case_id": "en_profile_ambiguous_concept_preserved_001", "suite": "disease_profiles", "path": "disease_profiles/en_ambiguous_concept_preserved.json"},
+    {"case_id": "zh_profile_two_concepts_isolated_001", "suite": "disease_profiles", "path": "disease_profiles/zh_two_concepts_isolated.json"},
+    {"case_id": "en_profile_population_types_001", "suite": "disease_profiles", "path": "disease_profiles/en_population_types.json"},
+    {"case_id": "zh_profile_withdrawn_article_001", "suite": "disease_profiles", "path": "disease_profiles/zh_withdrawn_article.json"},
+    {"case_id": "en_profile_low_sample_counts_001", "suite": "disease_profiles", "path": "disease_profiles/en_low_sample_counts.json"}
   ]
 }

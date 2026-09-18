@@ -1,0 +1,32 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_profile_two_concepts_isolated_001",
+  "suite": "disease_profiles",
+  "language": "zh",
+  "tags": ["disease_profile", "isolation", "privacy"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "concept_id": "mesh:D000795",
+    "records": [
+      {
+        "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "法布雷病", "ontology_version": "evaluation-ontology-v1"},
+        "document": {"document_id": "profile-isolation-fabry-1", "title": "法布雷病资料 A", "document_kind": "research_paper", "language": "zh", "document_date": "2026-01-01"},
+        "analysis": {"run_id": "profile-isolation-run-1", "population": "患者人群", "sample_size": "10 participants", "findings": ["法布雷病资料 A 的观察结果。"], "evidence": [{"id": "isolation-evidence-1", "evidence_id": "isolation-evidence-1", "section_type": "results", "section_title": "结果", "page_start": 1, "page_end": 1, "quote": "法布雷病资料 A 的观察结果。"}]}
+      },
+      {
+        "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"},
+        "document": {"document_id": "profile-isolation-fabry-2", "title": "法布雷病资料 B", "document_kind": "guideline", "language": "zh", "document_date": "2026-02-01"},
+        "analysis": {"run_id": "profile-isolation-run-2", "population": "患者人群", "sample_size": "not reported", "sample_size_status": "not_reported", "findings": ["法布雷病资料 B 的独立观察结果。"], "evidence": [{"id": "isolation-evidence-2", "evidence_id": "isolation-evidence-2", "section_type": "recommendations", "section_title": "建议", "page_start": 4, "page_end": 4, "quote": "法布雷病资料 B 的独立观察结果。"}]}
+      },
+      {
+        "link": {"concept_id": "mesh:D005776", "preferred_name_en": "Gaucher Disease", "preferred_name_zh": "戈谢病", "matched_alias": "戈谢病", "ontology_version": "evaluation-ontology-v1"},
+        "document": {"document_id": "profile-isolation-gaucher", "title": "戈谢病资料", "document_kind": "research_paper", "language": "zh", "document_date": "2026-03-01"},
+        "analysis": {"run_id": "profile-isolation-gaucher-run", "population": "患者人群", "sample_size": "11 participants", "findings": ["不应出现在法布雷病档案中的结果。"], "evidence": [{"id": "isolation-foreign-evidence", "evidence_id": "isolation-foreign-evidence", "section_type": "results", "section_title": "结果", "page_start": 1, "page_end": 1, "quote": "不应出现在法布雷病档案中的结果。"}]}
+      }
+    ]
+  },
+  "expected": {"profile_status": "ready", "concept_id": "mesh:D000795", "document_count": 2, "analysis_count": 2, "foreign_records_ignored": 1, "foreign_document_ids_exposed": false, "distinct_key_finding_count": 2, "all_items_have_sources": true},
+  "gate_fields": ["profile_status", "concept_id", "document_count", "analysis_count", "foreign_records_ignored", "foreign_document_ids_exposed", "distinct_key_finding_count", "all_items_have_sources"],
+  "rationale": "A profile is scoped by the selected concept ID; records linked to another disease must not leak into its documents or findings.",
+  "last_reviewed": "2026-09-18"
+}

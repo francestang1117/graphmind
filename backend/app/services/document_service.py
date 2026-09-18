@@ -225,6 +225,9 @@ class DocumentService:
         from app.services.medical.evidence_matching.repository import (
             evidence_matching_repository,
         )
+        from app.services.medical.disease_profile.repository import (
+            disease_profile_repository,
+        )
         from app.services.medical.literature.repository import literature_repository
         from app.services.medical.repository import medical_repository
         from app.services.medical.visit_preparation.repository import (
@@ -267,6 +270,15 @@ class DocumentService:
             medical_analysis_repository.delete_for_document(document_id, user_id=user_id)
             evidence_matching_repository.delete_for_document(document_id, user_id=user_id)
             literature_repository.delete_for_document(document_id, user_id=user_id)
+
+        # Links are part of the live read model. Remove them during the same
+        # idempotent cleanup retry so a deleted document cannot keep a profile
+        # visible after its analysis and literature rows are gone.
+        disease_profile_repository.delete_for_document(
+            document_id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+        )
 
         visit_preparation_repository.delete_for_document(
             document_id,

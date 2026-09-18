@@ -1884,3 +1884,44 @@ backoff behavior, and task/service tests cover broker publish failure and
 worker retry. The local backend suite is now `561 passed, 5 skipped`; the
 PostgreSQL-specific checks remain conditional when no test database URL is
 configured.
+
+## 2026-09 - V2 PR14: Disease Research Profiles and Multi-document Aggregation
+
+PR14 adds a workspace-scoped disease research profile read model. Users can
+link a classified medical document to a locally selected MeSH or Orphanet
+concept, review unassigned classified documents, and remove a link without
+changing the source document or its medical analysis. The link stores the
+concept names, matched alias, ontology version, source type, and optional
+confirmed search-run reference. For this MVP each document has one primary
+disease link, enforced by a unique `(user_id, workspace_id, document_id)` key;
+content-level multi-disease ownership is deferred until findings and matches
+can carry their own concept IDs.
+
+Profile reads batch-load linked documents, current validated analyses, evidence,
+literature matches, and non-dismissed clinician questions before passing them
+to a deterministic aggregator. The aggregator keeps findings from different
+documents separate, groups only by the explicit concept ID, preserves document
+and analysis snapshots, deduplicates external articles by `(source,
+external_id)`, and keeps withdrawn or corrected article warnings visible. It
+does not call AI or external services, merge semantic findings, assign an
+overall confidence score, rank treatments, or expose private Visit Prep notes.
+Outdated, unavailable, malformed, and deleted sources are excluded or marked
+with safe warnings rather than breaking the whole profile.
+
+The backend exposes scoped link, profile, section-pagination, local concept
+search, and unassigned-document APIs. The frontend adds a Disease Profiles
+workspace page with local concept selection, linked-source management,
+source-aware sections, a public-article drawer, retraction warnings, and a
+Visit Prep entry point. Workspace and user checks are applied before all
+profile reads and writes; disease-name search remains local-only.
+
+Document cleanup now removes disease links as part of the existing idempotent
+deleted-document cleanup chain. Migration coverage includes the new table,
+foreign keys, primary-link constraint, workspace backfill, legacy duplicate
+collapse, and orphan cleanup. The
+offline evaluation package is `medical-eval-v1.3.0` with 50 synthetic cases,
+including 8 disease-profile cases and 365 hard checks. The local backend suite
+is `569 passed, 5 skipped`; the frontend suite is `39 passed`, with lint and
+production build passing. These cases are engineering regression checks, not
+clinically expert-validated quality judgments; expert review should be added
+incrementally.

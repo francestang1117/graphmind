@@ -3,6 +3,7 @@ import {
   BookOpen,
   ClipboardList,
   CircleHelp,
+  FolderSearch,
   MessageSquare,
   MoreHorizontal,
   Network,
@@ -20,14 +21,16 @@ import { AUTH_REQUIRED_EVENT, checkHealth, listWorkspaces, type WorkspaceInfo } 
 import { useAppStore } from "./stores/appStore";
 import { useAuthStore } from "./stores/authStore";
 import VisitPreparationPanel from "./components/VisitPreparationPanel";
+import DiseaseProfilePanel from "./components/DiseaseProfilePanel";
 
-type Tab = "upload" | "graph" | "search" | "chat" | "visit-prep";
+type Tab = "upload" | "graph" | "search" | "chat" | "disease-profiles" | "visit-prep";
 
 const tabs: Array<{ id: Tab; label: string; title: string; icon: typeof Upload }> = [
   { id: "upload", label: "Documents", title: "Documents", icon: Upload },
   { id: "graph", label: "Graph", title: "Knowledge Graph", icon: Network },
   { id: "search", label: "Search", title: "Semantic Search", icon: Search },
   { id: "chat", label: "AI Chat", title: "AI Chat", icon: MessageSquare },
+  { id: "disease-profiles", label: "Disease Profiles", title: "Disease Research Profiles", icon: FolderSearch },
   { id: "visit-prep", label: "Visit Prep", title: "Visit Preparation", icon: ClipboardList },
 ];
 
@@ -140,7 +143,7 @@ function App() {
         <header className="kw-topbar">
           <h1>{active.title}</h1>
           <div className="kw-top-actions">
-            {activeTab === "visit-prep" && (
+            {(activeTab === "visit-prep" || activeTab === "disease-profiles") && (
               <label className="kw-workspace-picker">
                 <span>Research project</span>
                 <select
@@ -175,6 +178,13 @@ function App() {
             {activeTab === "graph" && <GraphPanel />}
             {activeTab === "search" && <SearchPanel />}
             {activeTab === "chat" && <ChatPanel />}
+            {activeTab === "disease-profiles" && (
+              <DiseaseProfilePanel
+                key={activeWorkspaceId ?? "none"}
+                workspaceId={activeWorkspaceId}
+                onOpenVisitPrep={() => setActiveTab("visit-prep")}
+              />
+            )}
             {activeTab === "visit-prep" && (
               <VisitPreparationPanel
                 key={activeWorkspaceId ?? "none"}
