@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createDiseaseLink,
   deleteDiseaseLink,
@@ -19,13 +19,19 @@ export function useDiseaseProfiles(
   const listKey = ["disease-profiles", workspaceKey];
   const unassignedKey = ["disease-profile-unassigned", workspaceKey];
 
-  const listQuery = useQuery({
+  const listQuery = useInfiniteQuery({
     queryKey: listKey,
-    queryFn: () => listDiseaseProfiles(workspaceId as string, { limit: 50 }),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => listDiseaseProfiles(workspaceId as string, {
+      limit: 50,
+      cursor: pageParam,
+    }),
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: Boolean(workspaceId),
     refetchOnWindowFocus: false,
   });
-  const selectedConceptId = conceptId ?? listQuery.data?.items[0]?.concept_id ?? null;
+  const profiles = listQuery.data?.pages.flatMap((page) => page.items) ?? [];
+  const selectedConceptId = conceptId ?? profiles[0]?.concept_id ?? null;
   const detailKey = ["disease-profile", workspaceKey, selectedConceptId ?? "none"];
   const detailQuery = useQuery({
     queryKey: detailKey,
@@ -64,7 +70,10 @@ export function useDiseaseProfiles(
   });
 
   return {
-    list: listQuery.data?.items ?? [],
+    list: profiles,
+    hasMoreProfiles: Boolean(listQuery.hasNextPage),
+    loadMoreProfiles: listQuery.fetchNextPage,
+    loadingMoreProfiles: listQuery.isFetchingNextPage,
     selectedConceptId,
     listQuery,
     detail: detailQuery.data ?? null,

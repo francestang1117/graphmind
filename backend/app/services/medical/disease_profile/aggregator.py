@@ -40,15 +40,20 @@ class DiseaseProfileAggregator:
         concept_id: str,
         inputs: Iterable[Mapping[str, Any]],
         preview_limit: int = 5,
+        enabled_sections: Iterable[str] | None = None,
+        collect_items: bool = True,
     ) -> dict[str, Any]:
         records = [dict(item) for item in inputs]
         if not records:
             return {}
 
+        active_sections = set(enabled_sections or PROFILE_SECTIONS)
+        active_sections.intersection_update(PROFILE_SECTIONS)
         warnings: list[str] = []
         sections: dict[str, list[dict[str, Any]]] = {
             section: [] for section in PROFILE_SECTIONS
         }
+        section_counts = {section: 0 for section in PROFILE_SECTIONS}
         documents = {
             str(item.get("document", {}).get("document_id")): item.get("document", {})
             for item in records
@@ -126,10 +131,15 @@ class DiseaseProfileAggregator:
                     document=document,
                     run=run,
                     evidence=evidence_by_run[run_id],
+                    enabled_sections=active_sections,
+                    collect_items=collect_items,
+                    section_counts=section_counts,
                 )
                 self._add_method_stats(stats, report)
 
             questions = record.get("questions") or []
+            if "clinician_questions" not in active_sections:
+                questions = []
             if isinstance(questions, list):
                 for question in questions:
                     if not isinstance(question, Mapping):
@@ -150,38 +160,44 @@ class DiseaseProfileAggregator:
                     )
                     if not sources:
                         continue
-                    sections["clinician_questions"].append(
-                        {
-                            "id": f"{document_id}:{run_id}:question:{question.get('id')}",
-                            "item_type": "question",
-                            "section": "clinician_questions",
-                            "document_id": document_id,
-                            "document_title": document.get("title", ""),
-                            "document_kind": document.get("document_kind", ""),
-                            "document_date": document.get("document_date", ""),
-                            "analysis_run_id": run_id,
-                            "parsed_source_hash": str(
-                                (current_run or {}).get("parsed_source_hash") or ""
-                            ),
-                            "source_status": "current",
-                            "question": str(question.get("question") or ""),
-                            "rationale": str(question.get("rationale") or ""),
-                            "category": str(question.get("category") or ""),
-                            "topic": str(question.get("topic") or ""),
-                            "source_kind": str(question.get("source_kind") or ""),
-                            "source_id": str(question.get("source_id") or ""),
-                            "evidence_ids": evidence_ids,
-                            "evidence": sources,
-                        }
-                    )
+                    section_counts["clinician_questions"] += 1
+                    if collect_items:
+                        sections["clinician_questions"].append(
+                            {
+                                "id": f"{document_id}:{run_id}:question:{question.get('id')}",
+                                "item_type": "question",
+                                "section": "clinician_questions",
+                                "document_id": document_id,
+                                "document_title": document.get("title", ""),
+                                "document_kind": document.get("document_kind", ""),
+                                "document_date": document.get("document_date", ""),
+                                "analysis_run_id": run_id,
+                                "parsed_source_hash": str(
+                                    (current_run or {}).get("parsed_source_hash") or ""
+                                ),
+                                "source_status": "current",
+                                "question": str(question.get("question") or ""),
+                                "rationale": str(question.get("rationale") or ""),
+                                "category": str(question.get("category") or ""),
+                                "topic": str(question.get("topic") or ""),
+                                "source_kind": str(question.get("source_kind") or ""),
+                                "source_id": str(question.get("source_id") or ""),
+                                "evidence_ids": evidence_ids,
+                                "evidence": sources,
+                            }
+                        )
                     all_question_count += 1
 
-        self._add_external_studies(
-            sections=sections,
-            records=records,
-            valid_analysis_ids=valid_analysis_ids,
-            warnings=warnings,
-        )
+        external_stats = (0, 0)
+        if "external_studies" in active_sections:
+            external_stats = self._add_external_studies(
+                sections=sections,
+                records=records,
+                valid_analysis_ids=valid_analysis_ids,
+                warnings=warnings,
+                collect_items=collect_items,
+                section_counts=section_counts,
+            )
 
         for section in PROFILE_SECTIONS:
             sections[section] = sorted(
@@ -210,15 +226,7 @@ class DiseaseProfileAggregator:
         )
         stats["valid_analysis_count"] = valid_analysis_count
         stats["expired_analysis_count"] = expired_analysis_count
-        stats["external_article_count"] = sum(
-            1
-            for item in sections["external_studies"]
-            if str(item.get("retraction_status") or "unknown")
-            not in _WITHDRAWN_ARTICLE_STATUSES
-        )
-        stats["flagged_article_count"] = sum(
-            1 for item in sections["external_studies"] if item.get("flagged")
-        )
+        stats["external_article_count"], stats["flagged_article_count"] = external_stats
         stats["document_count"] = len(documents)
         document_views = _document_views(records, documents)
 
@@ -235,9 +243,7 @@ class DiseaseProfileAggregator:
             "saved_question_count": all_question_count,
             "last_updated_at": last_updated,
             "documents": document_views,
-            "section_counts": {
-                section: len(sections[section]) for section in PROFILE_SECTIONS
-            },
+            "section_counts": section_counts,
             "stats": stats,
             "sections": {
                 section: sections[section][: max(0, min(int(preview_limit), 50))]
@@ -245,9 +251,52 @@ class DiseaseProfileAggregator:
             },
             # The service consumes this in-memory view for cursor paging and
             # removes it before validating the public response model.
-            "_all_sections": sections,
+            "_all_sections": sections if collect_items else {},
             "warnings": unique_warnings,
         }
+
+    def aggregate_summary(
+        self,
+        *,
+        concept_id: str,
+        inputs: Iterable[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Build counts and health metadata without retaining item payloads."""
+        return self.aggregate(
+            concept_id=concept_id,
+            inputs=inputs,
+            preview_limit=0,
+            collect_items=False,
+        )
+
+    def aggregate_detail(
+        self,
+        *,
+        concept_id: str,
+        inputs: Iterable[Mapping[str, Any]],
+        preview_limit: int = 5,
+    ) -> dict[str, Any]:
+        """Build the bounded detail preview for one disease profile."""
+        return self.aggregate(
+            concept_id=concept_id,
+            inputs=inputs,
+            preview_limit=preview_limit,
+        )
+
+    def aggregate_section(
+        self,
+        *,
+        concept_id: str,
+        inputs: Iterable[Mapping[str, Any]],
+        section: str,
+    ) -> dict[str, Any]:
+        """Build only one public section while retaining its count metadata."""
+        return self.aggregate(
+            concept_id=concept_id,
+            inputs=inputs,
+            preview_limit=0,
+            enabled_sections={section},
+        )
 
     def _add_report_sections(
         self,
@@ -258,6 +307,9 @@ class DiseaseProfileAggregator:
         document: Mapping[str, Any],
         run: Mapping[str, Any],
         evidence: Mapping[str, Mapping[str, Any]],
+        enabled_sections: set[str],
+        collect_items: bool,
+        section_counts: dict[str, int],
     ) -> None:
         run_id = str(run.get("run_id") or "")
         for section in (
@@ -268,6 +320,8 @@ class DiseaseProfileAggregator:
             "applicability",
             "future_research",
         ):
+            if section not in enabled_sections:
+                continue
             values = report.get(section)
             if not isinstance(values, list):
                 continue
@@ -287,22 +341,24 @@ class DiseaseProfileAggregator:
                 )
                 if not statement or not sources:
                     continue
-                sections[section].append(
-                    _finding_item(
-                        section=section,
-                        document=document,
-                        run=run,
-                        item_id=f"{run_id}:{section}:{value.get('id') or index}",
-                        text=statement,
-                        explanation=explanation,
-                        evidence_ids=evidence_ids,
-                        sources=sources,
-                        interpretation_type=str(value.get("interpretation_type") or ""),
+                section_counts[section] += 1
+                if collect_items:
+                    sections[section].append(
+                        _finding_item(
+                            section=section,
+                            document=document,
+                            run=run,
+                            item_id=f"{run_id}:{section}:{value.get('id') or index}",
+                            text=statement,
+                            explanation=explanation,
+                            evidence_ids=evidence_ids,
+                            sources=sources,
+                            interpretation_type=str(value.get("interpretation_type") or ""),
+                        )
                     )
-                )
 
         methods = report.get("study_methods")
-        if isinstance(methods, Mapping):
+        if "study_methods" in enabled_sections and isinstance(methods, Mapping):
             for field in (
                 "design",
                 "population",
@@ -334,25 +390,27 @@ class DiseaseProfileAggregator:
                     sources = []
                 elif not item_value or not sources:
                     continue
-                sections["study_methods"].append(
-                    {
-                        **_base_item(
-                            section="study_methods",
-                            document=document,
-                            run=run,
-                            item_id=f"{run_id}:study_methods:{field}",
-                            item_type="attribute",
-                            evidence_ids=evidence_ids,
-                            sources=sources,
-                        ),
-                        "title": field.replace("_", " ").title(),
-                        "value": item_value,
-                        "support_status": support_status,
-                    }
-                )
+                section_counts["study_methods"] += 1
+                if collect_items:
+                    sections["study_methods"].append(
+                        {
+                            **_base_item(
+                                section="study_methods",
+                                document=document,
+                                run=run,
+                                item_id=f"{run_id}:study_methods:{field}",
+                                item_type="attribute",
+                                evidence_ids=evidence_ids,
+                                sources=sources,
+                            ),
+                            "title": field.replace("_", " ").title(),
+                            "value": item_value,
+                            "support_status": support_status,
+                        }
+                    )
 
         terms = report.get("medical_terms")
-        if isinstance(terms, list):
+        if "medical_terms" in enabled_sections and isinstance(terms, list):
             for index, value in enumerate(terms):
                 if not isinstance(value, Mapping):
                     continue
@@ -369,21 +427,23 @@ class DiseaseProfileAggregator:
                 )
                 if not term or not explanation or not sources:
                     continue
-                sections["medical_terms"].append(
-                    {
-                        **_base_item(
-                            section="medical_terms",
-                            document=document,
-                            run=run,
-                            item_id=f"{run_id}:medical_terms:{index}",
-                            item_type="term",
-                            evidence_ids=evidence_ids,
-                            sources=sources,
-                        ),
-                        "term": term,
-                        "explanation": explanation,
-                    }
-                )
+                section_counts["medical_terms"] += 1
+                if collect_items:
+                    sections["medical_terms"].append(
+                        {
+                            **_base_item(
+                                section="medical_terms",
+                                document=document,
+                                run=run,
+                                item_id=f"{run_id}:medical_terms:{index}",
+                                item_type="term",
+                                evidence_ids=evidence_ids,
+                                sources=sources,
+                            ),
+                            "term": term,
+                            "explanation": explanation,
+                        }
+                    )
 
     def _add_method_stats(self, stats: dict[str, int], report: Mapping[str, Any]) -> None:
         methods = report.get("study_methods")
@@ -424,7 +484,9 @@ class DiseaseProfileAggregator:
         records: list[dict[str, Any]],
         valid_analysis_ids: set[str],
         warnings: list[str],
-    ) -> None:
+        collect_items: bool,
+        section_counts: dict[str, int],
+    ) -> tuple[int, int]:
         by_key: dict[tuple[str, str], dict[str, Any]] = {}
         for record in records:
             document = record.get("document") or {}
@@ -514,7 +576,17 @@ class DiseaseProfileAggregator:
                     warning = "This external article has a correction notice."
                     if warning not in current["warnings"]:
                         current["warnings"].append(warning)
-        sections["external_studies"].extend(by_key.values())
+        article_count = sum(
+            1
+            for item in by_key.values()
+            if str(item.get("retraction_status") or "unknown")
+            not in _WITHDRAWN_ARTICLE_STATUSES
+        )
+        flagged_count = sum(1 for item in by_key.values() if item.get("flagged"))
+        section_counts["external_studies"] = len(by_key)
+        if collect_items:
+            sections["external_studies"].extend(by_key.values())
+        return article_count, flagged_count
 
 
 def _document_views(

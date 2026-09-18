@@ -126,11 +126,21 @@ function configure({
   profiles = [summary],
   selectedConceptId = "mesh:D000795",
   unassigned = [],
-}: { profiles?: typeof summary[]; selectedConceptId?: string | null; unassigned?: UnassignedDiseaseDocument[] } = {}) {
+  hasMoreProfiles = false,
+}: {
+  profiles?: typeof summary[];
+  selectedConceptId?: string | null;
+  unassigned?: UnassignedDiseaseDocument[];
+  hasMoreProfiles?: boolean;
+} = {}) {
   const linkDocument = vi.fn().mockResolvedValue(undefined);
   const unlinkDocument = vi.fn().mockResolvedValue(undefined);
+  const loadMoreProfiles = vi.fn().mockResolvedValue(undefined);
   hooks.useDiseaseProfiles.mockReturnValue({
     list: profiles,
+    hasMoreProfiles,
+    loadingMoreProfiles: false,
+    loadMoreProfiles,
     selectedConceptId,
     listQuery: { isLoading: false, error: null, refetch: vi.fn() },
     detail,
@@ -155,7 +165,7 @@ function configure({
     },
     isLoading: false,
   });
-  return { linkDocument, unlinkDocument };
+  return { linkDocument, unlinkDocument, loadMoreProfiles };
 }
 
 describe("DiseaseProfilePanel", () => {
@@ -223,5 +233,16 @@ describe("DiseaseProfilePanel", () => {
       conceptId: "mesh:D000795",
     });
     expect(screen.queryByText("private note")).not.toBeInTheDocument();
+  });
+
+  it("loads the next disease profile page without replacing the current list", async () => {
+    const user = userEvent.setup();
+    const { loadMoreProfiles } = configure({ hasMoreProfiles: true });
+    render(<DiseaseProfilePanel workspaceId="workspace-1" onOpenVisitPrep={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: "Load more profiles" }));
+
+    expect(loadMoreProfiles).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /Fabry Disease/ })).toBeInTheDocument();
   });
 });

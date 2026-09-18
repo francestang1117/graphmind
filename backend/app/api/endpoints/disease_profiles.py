@@ -26,6 +26,8 @@ from app.services.medical.disease_profile.service import disease_profile_service
 
 router = APIRouter()
 
+_MAX_PROFILE_ITEMS_OFFSET = 10_000
+
 
 class _StrictRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -301,7 +303,7 @@ def _decode_offset(value: str) -> int:
             code="disease_profile_invalid_cursor",
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         ) from exc
-    if offset < 0:
+    if offset < 0 or offset > _MAX_PROFILE_ITEMS_OFFSET:
         raise AppError(
             "The items cursor is invalid.",
             code="disease_profile_invalid_cursor",

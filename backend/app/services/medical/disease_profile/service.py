@@ -11,10 +11,47 @@ from app.services.medical.disease_profile.aggregator import (
 from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 from app.services.medical.disease_profile.repository import (
     DiseaseProfileRepository,
+    ProfileInputOptions,
     disease_profile_repository,
 )
 from app.services.medical.terminology import DiseaseOntologyError, get_default_ontology
 from app.services.medical.terminology.normalizer import normalize_terminology_text
+
+
+_ALL_PROFILE_INPUTS = ProfileInputOptions()
+_MAX_PROFILE_ITEMS_OFFSET = 10_000
+_SECTION_INPUT_OPTIONS = {
+    "key_findings": ProfileInputOptions(
+        analyses=True, evidence=True, literature_matches=False, clinician_questions=False
+    ),
+    "study_methods": ProfileInputOptions(
+        analyses=True, evidence=True, literature_matches=False, clinician_questions=False
+    ),
+    "limitations": ProfileInputOptions(
+        analyses=True, evidence=True, literature_matches=False, clinician_questions=False
+    ),
+    "what_it_means": ProfileInputOptions(
+        analyses=True, evidence=True, literature_matches=False, clinician_questions=False
+    ),
+    "what_it_does_not_mean": ProfileInputOptions(
+        analyses=True, evidence=True, literature_matches=False, clinician_questions=False
+    ),
+    "applicability": ProfileInputOptions(
+        analyses=True, evidence=True, literature_matches=False, clinician_questions=False
+    ),
+    "future_research": ProfileInputOptions(
+        analyses=True, evidence=True, literature_matches=False, clinician_questions=False
+    ),
+    "medical_terms": ProfileInputOptions(
+        analyses=True, evidence=True, literature_matches=False, clinician_questions=False
+    ),
+    "clinician_questions": ProfileInputOptions(
+        analyses=True, evidence=True, literature_matches=False, clinician_questions=True
+    ),
+    "external_studies": ProfileInputOptions(
+        analyses=True, evidence=False, literature_matches=True, clinician_questions=False
+    ),
+}
 
 
 class DiseaseProfileService:
@@ -129,20 +166,30 @@ class DiseaseProfileService:
         limit: int = 50,
         cursor_concept_id: str | None = None,
     ) -> dict[str, Any]:
+        concept_page = self.repository.list_profile_concept_page(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            limit=limit,
+            after_concept_id=cursor_concept_id,
+        )
+        concept_rows = concept_page.get("items") or []
+        concept_ids = [str(row.get("concept_id")) for row in concept_rows]
         grouped = self.repository.load_profile_inputs(
             user_id=user_id,
             workspace_id=workspace_id,
+            concept_ids=concept_ids,
+            include=_ALL_PROFILE_INPUTS,
         )
-        concept_ids = sorted(grouped)
-        if cursor_concept_id:
-            concept_ids = [item for item in concept_ids if item > cursor_concept_id]
-        selected = concept_ids[: max(1, min(int(limit), 50))]
         summaries = []
-        for concept_id in selected:
-            payload = self._aggregate(concept_id, grouped[concept_id], preview_limit=0)
-            summaries.append(self._summary(payload))
-        next_cursor = selected[-1] if len(concept_ids) > len(selected) and selected else None
-        return {"items": summaries, "next_cursor": next_cursor}
+        for concept_id in concept_ids:
+            records = grouped.get(concept_id)
+            if records:
+                payload = self.aggregator.aggregate_summary(
+                    concept_id=concept_id,
+                    inputs=records,
+                )
+                summaries.append(self._summary(payload))
+        return {"items": summaries, "next_cursor": concept_page.get("next_cursor")}
 
     def get_profile(
         self,
@@ -154,12 +201,17 @@ class DiseaseProfileService:
         grouped = self.repository.load_profile_inputs(
             user_id=user_id,
             workspace_id=workspace_id,
-            concept_id=concept_id,
+            concept_ids=[concept_id],
+            include=_ALL_PROFILE_INPUTS,
         )
         records = grouped.get(concept_id)
         if not records:
             return None
-        payload = self._aggregate(concept_id, records, preview_limit=5)
+        payload = self.aggregator.aggregate_detail(
+            concept_id=concept_id,
+            inputs=records,
+            preview_limit=5,
+        )
         preview_sections = payload.get("sections") or {}
         section_counts = payload.get("section_counts") or {}
         payload.pop("_all_sections", None)
@@ -189,15 +241,26 @@ class DiseaseProfileService:
                 code="disease_profile_invalid_section",
                 status_code=422,
             )
+        if int(offset) < 0 or int(offset) > _MAX_PROFILE_ITEMS_OFFSET:
+            raise DiseaseProfileError(
+                "The requested disease profile item offset is invalid.",
+                code="disease_profile_invalid_cursor",
+                status_code=422,
+            )
         grouped = self.repository.load_profile_inputs(
             user_id=user_id,
             workspace_id=workspace_id,
-            concept_id=concept_id,
+            concept_ids=[concept_id],
+            include=_SECTION_INPUT_OPTIONS[section],
         )
         records = grouped.get(concept_id)
         if not records:
             return None
-        payload = self._aggregate(concept_id, records, preview_limit=0)
+        payload = self.aggregator.aggregate_section(
+            concept_id=concept_id,
+            inputs=records,
+            section=section,
+        )
         all_sections = payload.get("_all_sections") or {}
         items = list(all_sections.get(section) or [])
         page_limit = max(1, min(int(limit), 50))
@@ -205,7 +268,7 @@ class DiseaseProfileService:
         return {
             "section": section,
             "items": items[start : start + page_limit],
-            "total": len(items),
+            "total": int((payload.get("section_counts") or {}).get(section, len(items))),
         }
 
     def list_unassigned_documents(
@@ -225,11 +288,13 @@ class DiseaseProfileService:
         records: list[dict[str, Any]],
         *,
         preview_limit: int,
+        enabled_sections: set[str] | None = None,
     ) -> dict[str, Any]:
         payload = self.aggregator.aggregate(
             concept_id=concept_id,
             inputs=records,
             preview_limit=preview_limit,
+            enabled_sections=enabled_sections,
         )
         return payload
 

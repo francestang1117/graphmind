@@ -155,6 +155,9 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
           selectedId={effectiveConceptId}
           loading={profiles.listQuery.isLoading}
           onSelect={selectConcept}
+          hasMore={profiles.hasMoreProfiles}
+          loadingMore={profiles.loadingMoreProfiles}
+          onLoadMore={() => { void profiles.loadMoreProfiles(); }}
         />
         <UnassignedDocuments
           documents={profiles.unassigned}

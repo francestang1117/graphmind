@@ -176,6 +176,35 @@ def test_profile_items_rejects_malformed_cursor_before_service_call(monkeypatch)
     assert service_called is False
 
 
+def test_profile_items_rejects_unbounded_offset_cursor_before_service_call(monkeypatch):
+    _patch_scope(monkeypatch)
+    service_called = False
+
+    def get_items(**_kwargs):
+        nonlocal service_called
+        service_called = True
+        return None
+
+    monkeypatch.setattr(disease_profiles.disease_profile_service, "get_items", get_items)
+    oversized = disease_profiles._encode_cursor("10001")
+
+    with pytest.raises(AppError) as error:
+        asyncio.run(
+            disease_profiles.get_disease_profile_items(
+                "mesh:D000795",
+                workspace_id="workspace-1",
+                section="key_findings",
+                limit=20,
+                cursor=oversized,
+                user=SimpleNamespace(id="user-1"),
+            )
+        )
+
+    assert error.value.code == "disease_profile_invalid_cursor"
+    assert error.value.status_code == 422
+    assert service_called is False
+
+
 def test_delete_link_returns_no_content_and_forwards_scope(monkeypatch):
     _patch_scope(monkeypatch)
     captured = {}

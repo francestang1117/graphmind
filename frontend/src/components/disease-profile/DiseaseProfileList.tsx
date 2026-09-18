@@ -1,4 +1,4 @@
-import { FileText, FolderOpen } from "lucide-react";
+import { FileText, FolderOpen, Loader2 } from "lucide-react";
 import type { DiseaseProfileSummary } from "../../services/api";
 
 interface Props {
@@ -6,9 +6,20 @@ interface Props {
   selectedId: string | null;
   loading: boolean;
   onSelect: (conceptId: string) => void;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
-export default function DiseaseProfileList({ profiles, selectedId, loading, onSelect }: Props) {
+export default function DiseaseProfileList({
+  profiles,
+  selectedId,
+  loading,
+  onSelect,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
+}: Props) {
   if (loading) {
     return <div className="disease-profile-list-state">Loading disease profiles...</div>;
   }
@@ -38,6 +49,17 @@ export default function DiseaseProfileList({ profiles, selectedId, loading, onSe
           </span>
         </button>
       ))}
+      {hasMore && onLoadMore && (
+        <button
+          className="disease-profile-load-more"
+          type="button"
+          onClick={onLoadMore}
+          disabled={loadingMore}
+        >
+          {loadingMore && <Loader2 className="spin" size={14} />}
+          {loadingMore ? "Loading more..." : "Load more profiles"}
+        </button>
+      )}
     </div>
   );
 }
