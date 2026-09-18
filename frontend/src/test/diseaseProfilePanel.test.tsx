@@ -127,11 +127,13 @@ function configure({
   selectedConceptId = "mesh:D000795",
   unassigned = [],
   hasMoreProfiles = false,
+  detailValue = detail,
 }: {
   profiles?: typeof summary[];
   selectedConceptId?: string | null;
   unassigned?: UnassignedDiseaseDocument[];
   hasMoreProfiles?: boolean;
+  detailValue?: typeof detail;
 } = {}) {
   const linkDocument = vi.fn().mockResolvedValue(undefined);
   const unlinkDocument = vi.fn().mockResolvedValue(undefined);
@@ -143,7 +145,7 @@ function configure({
     loadMoreProfiles,
     selectedConceptId,
     listQuery: { isLoading: false, error: null, refetch: vi.fn() },
-    detail,
+    detail: detailValue,
     detailQuery: { isLoading: false, error: null, refetch: vi.fn() },
     unassigned,
     unassignedQuery: { isLoading: false, error: null, refetch: vi.fn() },
@@ -166,6 +168,26 @@ function configure({
     isLoading: false,
   });
   return { linkDocument, unlinkDocument, loadMoreProfiles };
+}
+
+function findingPageItem(index: number) {
+  return {
+    ...finding,
+    id: `run-1:key_findings:finding-${index}`,
+    text: `Finding ${index}`,
+  };
+}
+
+function detailWithFindingCount(count: number) {
+  return {
+    ...detail,
+    section_counts: { key_findings: count },
+    sections: [{
+      section: "key_findings" as const,
+      count,
+      items: Array.from({ length: Math.min(5, count) }, (_, index) => findingPageItem(index)),
+    }],
+  };
 }
 
 describe("DiseaseProfilePanel", () => {
@@ -244,5 +266,53 @@ describe("DiseaseProfilePanel", () => {
 
     expect(loadMoreProfiles).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: /Fabry Disease/ })).toBeInTheDocument();
+  });
+
+  it("appends a single section page even when the API has no next cursor", async () => {
+    const user = userEvent.setup();
+    const pageItems = Array.from({ length: 10 }, (_, index) => findingPageItem(index));
+    configure({ detailValue: detailWithFindingCount(10) });
+    hooks.useDiseaseProfileItems.mockImplementation(
+      (_workspaceId: string, _conceptId: string, _section: string, _cursor: string | null, enabled: boolean) => ({
+        data: enabled ? { section: "key_findings", items: pageItems, next_cursor: null } : undefined,
+        isLoading: false,
+      }),
+    );
+
+    render(<DiseaseProfilePanel workspaceId="workspace-1" onOpenVisitPrep={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Key findings 10" }));
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+
+    expect(screen.getAllByRole("article")).toHaveLength(10);
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+  });
+
+  it("appends and finishes on the last section page without duplicates", async () => {
+    const user = userEvent.setup();
+    const firstPage = Array.from({ length: 20 }, (_, index) => findingPageItem(index));
+    const lastPage = Array.from({ length: 5 }, (_, index) => findingPageItem(index + 20));
+    configure({ detailValue: detailWithFindingCount(25) });
+    hooks.useDiseaseProfileItems.mockImplementation(
+      (_workspaceId: string, _conceptId: string, _section: string, cursor: string | null, enabled: boolean) => ({
+        data: enabled
+          ? {
+              section: "key_findings",
+              items: cursor === "20" ? lastPage : firstPage,
+              next_cursor: cursor === "20" ? null : "20",
+            }
+          : undefined,
+        isLoading: false,
+      }),
+    );
+
+    render(<DiseaseProfilePanel workspaceId="workspace-1" onOpenVisitPrep={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Key findings 25" }));
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getAllByRole("article")).toHaveLength(20);
+
+    await user.click(screen.getByRole("button", { name: "Load more" }));
+    expect(screen.getAllByRole("article")).toHaveLength(25);
+    expect(screen.queryByRole("button", { name: "Load more" })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/^Finding /)).toHaveLength(25);
   });
 });

@@ -60,6 +60,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   const [expandedSection, setExpandedSection] = useState<SectionName | null>(null);
   const [sectionCursors, setSectionCursors] = useState<Partial<Record<SectionName, string | null>>>({});
   const [extraItems, setExtraItems] = useState<Partial<Record<SectionName, DiseaseProfileItem[]>>>({});
+  const [completedSections, setCompletedSections] = useState<Partial<Record<SectionName, boolean>>>({});
   const [sourceItem, setSourceItem] = useState<DiseaseProfileItem | null>(null);
   const [actionError, setActionError] = useState("");
   const profiles = useDiseaseProfiles(workspaceId, selectedConceptId);
@@ -85,6 +86,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     if (expandedSection !== section) {
       setSectionCursors((current) => ({ ...current, [section]: null }));
       setExtraItems((current) => ({ ...current, [section]: [] }));
+      setCompletedSections((current) => ({ ...current, [section]: false }));
     }
   };
 
@@ -93,6 +95,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     setExpandedSection(null);
     setSectionCursors({});
     setExtraItems({});
+    setCompletedSections({});
     setSourceItem(null);
     setActionError("");
   };
@@ -118,9 +121,11 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   };
 
   const loadMore = () => {
-    const next = sectionItemsQuery.data?.next_cursor;
-    if (!next) return;
     const pageItems = sectionItemsQuery.data?.items ?? [];
+    if (!pageItems.length) {
+      setCompletedSections((current) => ({ ...current, [activeSection]: true }));
+      return;
+    }
     setExtraItems((current) => {
       const previous = current[activeSection] ?? [];
       const seen = new Set(previous.map((item) => item.id));
@@ -129,7 +134,12 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
         [activeSection]: [...previous, ...pageItems.filter((item) => !seen.has(item.id))],
       };
     });
-    setSectionCursors((current) => ({ ...current, [activeSection]: next }));
+    const next = sectionItemsQuery.data?.next_cursor;
+    if (next) {
+      setSectionCursors((current) => ({ ...current, [activeSection]: next }));
+    } else {
+      setCompletedSections((current) => ({ ...current, [activeSection]: true }));
+    }
   };
 
   if (!workspaceId) {
@@ -216,7 +226,9 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
                 const preview = summary?.items ?? [];
                 const seen = new Set(preview.map((item) => item.id));
                 const items = [...preview, ...loaded.filter((item) => !seen.has(item.id))];
-                const hasMore = Boolean(sectionItemsQuery.data?.next_cursor) || items.length < (summary?.count ?? 0);
+                const page = expandedSection === section ? sectionItemsQuery.data : undefined;
+                const hasMore = !completedSections[section]
+                  && (Boolean(page?.next_cursor) || items.length < (summary?.count ?? 0));
                 return (
                   <DiseaseProfileSection
                     key={section}
