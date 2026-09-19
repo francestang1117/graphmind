@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
+from app.services.medical.disease_profile.comparison_builder import build_comparison_preview
 from app.services.medical.disease_profile.models import (
     ComparisonDocument,
     ComparisonDocumentSelection,
@@ -70,6 +71,59 @@ def _document(document_id: str) -> dict:
         "limitations": [],
         "limitations_total": 0,
         "limitations_truncated": False,
+    }
+
+
+def _input(document_id: str, *, coverage: dict | None = None, finding_count: int = 1) -> dict:
+    document = _document(document_id)
+    evidence = {
+        "id": f"evidence-{document_id}",
+        "evidence_id": f"evidence-{document_id}",
+        "section_type": "results",
+        "section_title": "Results",
+        "page_start": 2,
+        "page_end": 2,
+        "quote": "The study reported this outcome.",
+    }
+    report = {
+        "study_methods": {
+            field: {
+                "value": f"Reported {field}.",
+                "support_status": "supported",
+                "evidence_ids": [f"evidence-{document_id}"],
+            }
+            for field in (
+                "design",
+                "population",
+                "human_animal_in_vitro",
+                "sample_size",
+                "comparator",
+            )
+        },
+        "key_findings": [
+            {
+                "id": f"finding-{index}",
+                "statement": f"Finding {index} from {document_id}.",
+                "plain_explanation": "A report-level statement.",
+                "evidence_ids": [f"evidence-{document_id}"],
+            }
+            for index in range(finding_count)
+        ],
+        "limitations": [],
+    }
+    if coverage is not None:
+        report["coverage"] = coverage
+    return {
+        "document": document,
+        "analyses": [{
+            "run": {
+                "run_id": f"run-{document_id}",
+                "parsed_source_hash": f"parsed-{document_id}",
+            },
+            "report": report,
+            "evidence": [evidence],
+            "valid": True,
+        }],
     }
 
 
@@ -183,3 +237,83 @@ def test_findings_and_questions_are_bounded_by_the_contract():
                 for index in range(4)
             ],
         )
+
+
+def test_builder_preserves_document_order_and_all_five_methods():
+    preview = build_comparison_preview(
+        concept_id="mesh:D000795",
+        inputs=[
+            _input("doc-2", coverage={"complete": True, "selected_chunks": 2, "total_chunks": 2}),
+            _input("doc-1", coverage={"complete": False, "selected_chunks": 1, "total_chunks": 3}),
+        ],
+        language="en",
+    )
+
+    assert [document.document_id for document in preview.documents] == ["doc-2", "doc-1"]
+    assert set(preview.documents[0].methods.model_dump()) == {
+        "design",
+        "population",
+        "human_animal_in_vitro",
+        "sample_size",
+        "comparator",
+    }
+    assert preview.documents[0].coverage_status == "complete"
+    assert preview.documents[1].coverage_status == "partial"
+    assert any(question.document_id == "doc-2" for question in preview.discussion_questions)
+    assert not any("contrad" in warning.lower() for warning in preview.warnings)
+
+
+def test_builder_marks_missing_coverage_unknown_and_not_reported_without_evidence():
+    record = _input("doc-1")
+    record["analyses"][0]["report"]["study_methods"]["comparator"] = {
+        "value": "A placebo group was used.",
+        "support_status": "not_reported",
+        "evidence_ids": ["evidence-doc-1"],
+    }
+    preview = build_comparison_preview(
+        concept_id="mesh:D000795",
+        inputs=[record, _input("doc-2")],
+        language="zh",
+    )
+
+    document = preview.documents[0]
+    assert document.coverage_status == "unknown"
+    assert document.methods.comparator.value == "所选分析证据未报告此字段。"
+    assert document.methods.comparator.evidence == []
+    assert "comparison_coverage_unknown" in preview.warnings
+
+
+def test_builder_filters_reference_evidence_and_marks_findings_truncated():
+    record = _input("doc-1", finding_count=12)
+    record["analyses"][0]["evidence"].append({
+        "id": "reference-evidence",
+        "evidence_id": "reference-evidence",
+        "section_type": "references",
+        "section_title": "References",
+        "quote": "A citation list.",
+    })
+    record["analyses"][0]["report"]["key_findings"][0]["evidence_ids"] = [
+        "reference-evidence"
+    ]
+    preview = build_comparison_preview(
+        concept_id="mesh:D000795",
+        inputs=[record, _input("doc-2")],
+    )
+
+    document = preview.documents[0]
+    assert len(document.findings) == 10
+    assert document.findings_total == 11
+    assert document.findings_truncated is True
+    assert len(preview.documents[1].findings) == 1
+
+
+def test_builder_does_not_create_questions_without_source_evidence():
+    record = _input("doc-1")
+    for method in record["analyses"][0]["report"]["study_methods"].values():
+        method["evidence_ids"] = []
+    preview = build_comparison_preview(
+        concept_id="mesh:D000795",
+        inputs=[record, _input("doc-2")],
+    )
+
+    assert all(question.document_id != "doc-1" for question in preview.discussion_questions)
