@@ -8,6 +8,8 @@ import {
   getDiseaseProfileItems,
   listDiseaseProfiles,
   listUnassignedDiseaseDocuments,
+  previewDiseaseProfileComparison,
+  type ComparisonPreviewRequest,
   type DiseaseProfileItem,
   type DiseaseProfileDocumentsPage,
   searchDiseaseConcepts,
@@ -211,5 +213,18 @@ export function useDiseaseProfileExternalSourceDocuments(
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: Boolean(workspaceId && conceptId && source && externalId),
     refetchOnWindowFocus: false,
+  });
+}
+
+export function useDiseaseComparisonPreview(
+  workspaceId: string | null | undefined,
+  conceptId: string | null | undefined,
+) {
+  return useMutation({
+    mutationFn: (input: ComparisonPreviewRequest) => previewDiseaseProfileComparison(
+      conceptId as string,
+      workspaceId as string,
+      input,
+    ),
   });
 }

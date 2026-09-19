@@ -9,11 +9,15 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
+  useDiseaseComparisonPreview,
   useDiseaseProfileExternalSourceDocuments,
   useDiseaseProfileItems,
   useDiseaseProfiles,
 } from "../hooks/useDiseaseProfiles";
 import type {
+  ComparisonLanguage,
+  ComparisonPreview,
+  DiseaseProfileDocument,
   DiseaseProfileItem,
   DiseaseProfileSection as SectionName,
 } from "../services/api";
@@ -21,6 +25,7 @@ import DiseaseProfileHeader from "./disease-profile/DiseaseProfileHeader";
 import DiseaseProfileList from "./disease-profile/DiseaseProfileList";
 import DiseaseProfileSection from "./disease-profile/DiseaseProfileSection";
 import DiseaseProfileStats from "./disease-profile/DiseaseProfileStats";
+import DiseaseComparisonPanel from "./disease-profile/DiseaseComparisonPanel";
 import DiseaseSourceDrawer from "./disease-profile/DiseaseSourceDrawer";
 import UnassignedDocuments from "./disease-profile/UnassignedDocuments";
 
@@ -49,7 +54,16 @@ function errorMessage(error: unknown, fallback: string) {
       if (error.response.data?.code === "disease_link_primary_exists") {
         return "Each document has one primary disease. Remove its current link before assigning another.";
       }
+      if (error.response.data?.code === "comparison_source_changed") {
+        return "A selected source changed. Refresh the profile and select current documents again.";
+      }
       return "This profile changed elsewhere. Refresh and try again.";
+    }
+    if (error.response?.status === 422) {
+      if (error.response.data?.code === "comparison_invalid_selection") {
+        return "Select two to five current documents with validated analyses.";
+      }
+      return "The selected comparison sources are not valid.";
     }
     if (error.response?.status === 503) return "Disease profile storage is temporarily unavailable.";
   }
@@ -64,8 +78,22 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   const [completedSections, setCompletedSections] = useState<Partial<Record<SectionName, boolean>>>({});
   const [sourceItem, setSourceItem] = useState<DiseaseProfileItem | null>(null);
   const [actionError, setActionError] = useState("");
+  const [documentSelection, setDocumentSelection] = useState<{ contextKey: string; ids: string[] }>({
+    contextKey: "",
+    ids: [],
+  });
+  const [comparisonResult, setComparisonResult] = useState<{
+    contextKey: string;
+    preview: ComparisonPreview;
+  } | null>(null);
+  const [comparisonLanguage, setComparisonLanguage] = useState<ComparisonLanguage>("en");
   const profiles = useDiseaseProfiles(workspaceId, selectedConceptId);
   const effectiveConceptId = profiles.selectedConceptId;
+  const comparisonMutation = useDiseaseComparisonPreview(workspaceId, effectiveConceptId);
+  const comparisonContextKey = `${workspaceId ?? "none"}:${effectiveConceptId ?? "none"}`;
+  const selectedDocumentIds = documentSelection.contextKey === comparisonContextKey
+    ? documentSelection.ids
+    : [];
   const activeSection = expandedSection ?? "key_findings";
   const sectionItemsQuery = useDiseaseProfileItems(
     workspaceId,
@@ -105,7 +133,25 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     setExtraItems({});
     setCompletedSections({});
     setSourceItem(null);
+    setDocumentSelection({ contextKey: "", ids: [] });
+    setComparisonResult(null);
+    comparisonMutation.reset();
     setActionError("");
+  };
+
+  const toggleDocumentSelection = (documentId: string) => {
+    setActionError("");
+    comparisonMutation.reset();
+    setComparisonResult(null);
+    setDocumentSelection((current) => {
+      const selected = current.contextKey === comparisonContextKey ? current.ids : [];
+      return {
+        contextKey: comparisonContextKey,
+        ids: selected.includes(documentId)
+          ? selected.filter((value) => value !== documentId)
+          : selected.length < 5 ? [...selected, documentId] : selected,
+      };
+    });
   };
 
   const linkDocument = async (input: { documentId: string; conceptId: string; matchedAlias: string }) => {
@@ -123,8 +169,39 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     setActionError("");
     try {
       await profiles.unlinkDocument({ documentId, conceptId: effectiveConceptId });
+      setDocumentSelection((current) => ({
+        contextKey: current.contextKey,
+        ids: current.ids.filter((value) => value !== documentId),
+      }));
+      setComparisonResult(null);
+      comparisonMutation.reset();
     } catch (error) {
       setActionError(errorMessage(error, "Could not remove this document from the profile."));
+    }
+  };
+
+  const compareSelectedDocuments = async () => {
+    const selectedDocuments = selectedDocumentIds
+      .map((documentId) => linkedDocuments.find((document) => document.document_id === documentId))
+      .filter((document): document is DiseaseProfileDocument => Boolean(
+        document?.source_status === "current" && document.parsed_source_hash,
+      ));
+    if (selectedDocuments.length < 2 || !effectiveConceptId || !workspaceId) {
+      setActionError("Select two to five current documents with validated analyses.");
+      return;
+    }
+    setActionError("");
+    try {
+      const preview = await comparisonMutation.mutateAsync({
+        documents: selectedDocuments.map((document) => ({
+          document_id: document.document_id,
+          expected_parsed_source_hash: document.parsed_source_hash,
+        })),
+        language: comparisonLanguage,
+      });
+      setComparisonResult({ contextKey: comparisonContextKey, preview });
+    } catch (error) {
+      setActionError(errorMessage(error, "Could not build this comparison preview."));
     }
   };
 
@@ -230,10 +307,53 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
             <section className="disease-profile-documents">
               <div className="disease-profile-subheading"><div><span className="disease-profile-eyebrow">Linked sources</span><h2>{selectedProfile.document_count} documents in this profile</h2></div></div>
               <p className="disease-profile-document-policy">Each document has one primary disease. Remove the current link to return it to Needs review before assigning another disease.</p>
+              <div className="disease-profile-comparison-toolbar">
+                <div>
+                  <span className="disease-profile-eyebrow">Compare sources</span>
+                  <strong>{selectedDocumentIds.length}/5 selected</strong>
+                </div>
+                <label>
+                  Output language
+                  <select
+                    value={comparisonLanguage}
+                    onChange={(event) => setComparisonLanguage(event.target.value as ComparisonLanguage)}
+                  >
+                    <option value="en">English</option>
+                    <option value="zh">中文</option>
+                    <option value="ja">日本語</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="disease-profile-compare-button"
+                  onClick={() => { void compareSelectedDocuments(); }}
+                  disabled={selectedDocumentIds.length < 2 || comparisonMutation.isPending}
+                >
+                  {comparisonMutation.isPending ? "Comparing..." : "Compare selected documents"}
+                </button>
+              </div>
+              {comparisonMutation.error && !actionError && (
+                <div className="disease-profile-inline-error" role="alert">
+                  <AlertCircle size={14} />
+                  <span>{errorMessage(comparisonMutation.error, "Could not load comparison preview.")}</span>
+                </div>
+              )}
               <div className="disease-profile-document-list">
                 {linkedDocuments.map((document) => (
                   <div className="disease-profile-document-row" key={document.document_id}>
-                    <div><strong>{document.title}</strong><span>{document.document_kind} · {document.source_status}{document.document_date ? ` · ${document.document_date}` : ""}</span></div>
+                    <div className="disease-profile-document-select">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${document.title} for comparison`}
+                        checked={selectedDocumentIds.includes(document.document_id)}
+                        onChange={() => toggleDocumentSelection(document.document_id)}
+                        disabled={document.source_status !== "current" || !document.parsed_source_hash || (!selectedDocumentIds.includes(document.document_id) && selectedDocumentIds.length >= 5)}
+                      />
+                      <div>
+                        <strong>{document.title}</strong>
+                        <span>{document.document_kind} · {document.source_status}{document.document_date ? ` · ${document.document_date}` : ""}</span>
+                      </div>
+                    </div>
                     <button type="button" className="disease-icon-button" aria-label={`Remove ${document.title} from profile`} title="Remove document from profile" onClick={() => { void unlinkDocument(document.document_id); }} disabled={profiles.unlinking}>
                       <Trash2 size={15} />
                     </button>
@@ -260,6 +380,12 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
                 </button>
               )}
             </section>
+            {comparisonResult?.contextKey === comparisonContextKey && comparisonResult.preview && (
+              <DiseaseComparisonPanel
+                preview={comparisonResult.preview}
+                workspaceId={workspaceId}
+              />
+            )}
             <div className="disease-profile-sections">
               {SECTION_ORDER.map((section) => {
                 const summary = selectedProfileSectionMap.get(section);

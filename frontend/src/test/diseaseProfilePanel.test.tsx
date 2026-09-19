@@ -5,6 +5,7 @@ import DiseaseProfilePanel from "../components/DiseaseProfilePanel";
 import type { UnassignedDiseaseDocument } from "../services/api";
 
 const hooks = vi.hoisted(() => ({
+  useDiseaseComparisonPreview: vi.fn(),
   useDiseaseProfiles: vi.fn(),
   useDiseaseProfileExternalSourceDocuments: vi.fn(),
   useDiseaseProfileItems: vi.fn(),
@@ -138,6 +139,7 @@ function configure({
   loadMoreDocuments = vi.fn().mockResolvedValue(undefined),
   documentsQuery,
   detailValue = detail,
+  comparisonMutation,
 }: {
   profiles?: typeof summary[];
   selectedConceptId?: string | null;
@@ -153,6 +155,13 @@ function configure({
   loadMoreDocuments?: () => Promise<unknown>;
   documentsQuery?: { error: unknown; refetch: () => Promise<unknown> };
   detailValue?: typeof detail;
+  comparisonMutation?: {
+    data?: unknown;
+    error?: unknown;
+    isPending?: boolean;
+    mutateAsync?: ReturnType<typeof vi.fn>;
+    reset?: ReturnType<typeof vi.fn>;
+  };
 } = {}) {
   const linkDocument = vi.fn().mockResolvedValue(undefined);
   const unlinkDocument = vi.fn().mockResolvedValue(undefined);
@@ -203,6 +212,13 @@ function configure({
       }],
     },
     isLoading: false,
+  });
+  hooks.useDiseaseComparisonPreview.mockReturnValue(comparisonMutation ?? {
+    data: undefined,
+    error: null,
+    isPending: false,
+    mutateAsync: vi.fn().mockResolvedValue(undefined),
+    reset: vi.fn(),
   });
   return { linkDocument, unlinkDocument, loadMoreProfiles };
 }
@@ -334,6 +350,49 @@ describe("DiseaseProfilePanel", () => {
     await user.click(screen.getByRole("button", { name: "Load more linked documents" }));
 
     expect(loadMoreDocuments).toHaveBeenCalledTimes(1);
+  });
+
+  it("compares two selected current documents in the chosen order", async () => {
+    const user = userEvent.setup();
+    const mutateAsync = vi.fn().mockResolvedValue(undefined);
+    const linkedDocuments = [
+      ...detail.documents,
+      {
+        document_id: "document-2",
+        title: "second-fabry-study.pdf",
+        document_kind: "guideline",
+        language: "en",
+        document_date: "2026-02-01",
+        parsed_source_hash: "parsed-2",
+        source_status: "current" as const,
+        warnings: [],
+      },
+    ];
+    configure({
+      detailValue: { ...detail, document_count: 2 },
+      linkedDocuments,
+      comparisonMutation: {
+        data: undefined,
+        error: null,
+        isPending: false,
+        mutateAsync,
+        reset: vi.fn(),
+      },
+    });
+
+    render(<DiseaseProfilePanel workspaceId="workspace-1" onOpenVisitPrep={vi.fn()} />);
+
+    await user.click(screen.getByRole("checkbox", { name: "Select fabry-study.pdf for comparison" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select second-fabry-study.pdf for comparison" }));
+    await user.click(screen.getByRole("button", { name: "Compare selected documents" }));
+
+    expect(mutateAsync).toHaveBeenCalledWith({
+      documents: [
+        { document_id: "document-1", expected_parsed_source_hash: "parsed-1" },
+        { document_id: "document-2", expected_parsed_source_hash: "parsed-2" },
+      ],
+      language: "en",
+    });
   });
 
   it("loads more unassigned documents and keeps the total count", async () => {

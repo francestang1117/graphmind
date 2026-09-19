@@ -1154,6 +1154,19 @@ export const getDiseaseProfile = (
     )
     .then((r) => r.data);
 
+export const previewDiseaseProfileComparison = (
+  conceptId: string,
+  workspaceId: string,
+  body: ComparisonPreviewRequest,
+): Promise<ComparisonPreview> =>
+  http
+    .post<ComparisonPreview>(
+      `/disease-profiles/${encodeURIComponent(conceptId)}/comparison-preview`,
+      body,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
 export const getDiseaseProfileDocuments = (
   conceptId: string,
   workspaceId: string,
