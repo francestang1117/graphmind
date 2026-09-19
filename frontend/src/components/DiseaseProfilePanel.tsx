@@ -7,7 +7,7 @@ import {
   ShieldAlert,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   useDiseaseComparisonPreview,
   useDiseaseProfileExternalSourceDocuments,
@@ -32,6 +32,27 @@ import UnassignedDocuments from "./disease-profile/UnassignedDocuments";
 interface Props {
   workspaceId: string | null;
   onOpenVisitPrep: () => void;
+}
+
+type ComparisonSourceSnapshot = {
+  document_id: string;
+  parsed_source_hash: string;
+};
+
+type ComparisonSnapshot = {
+  contextToken: object;
+  workspaceId: string | null;
+  conceptId: string | null;
+  language: ComparisonLanguage;
+  sources: ComparisonSourceSnapshot[];
+};
+
+function snapshotsMatch(left: ComparisonSnapshot, right: ComparisonSnapshot) {
+  return left.contextToken === right.contextToken
+    && left.workspaceId === right.workspaceId
+    && left.conceptId === right.conceptId
+    && left.language === right.language
+    && JSON.stringify(left.sources) === JSON.stringify(right.sources);
 }
 
 const SECTION_ORDER: SectionName[] = [
@@ -83,7 +104,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     ids: [],
   });
   const [comparisonResult, setComparisonResult] = useState<{
-    contextKey: string;
+    snapshot: ComparisonSnapshot;
     preview: ComparisonPreview;
   } | null>(null);
   const [comparisonLanguage, setComparisonLanguage] = useState<ComparisonLanguage>("en");
@@ -91,9 +112,16 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   const effectiveConceptId = profiles.selectedConceptId;
   const comparisonMutation = useDiseaseComparisonPreview(workspaceId, effectiveConceptId);
   const comparisonContextKey = `${workspaceId ?? "none"}:${effectiveConceptId ?? "none"}`;
-  const selectedDocumentIds = documentSelection.contextKey === comparisonContextKey
-    ? documentSelection.ids
-    : [];
+  const comparisonContextToken = useMemo(
+    () => ({ contextKey: comparisonContextKey }),
+    [comparisonContextKey],
+  );
+  const comparisonRequestVersion = useRef(0);
+  const currentComparisonSnapshotRef = useRef<ComparisonSnapshot | null>(null);
+  const selectedDocumentIds = useMemo(
+    () => documentSelection.contextKey === comparisonContextKey ? documentSelection.ids : [],
+    [comparisonContextKey, documentSelection.contextKey, documentSelection.ids],
+  );
   const activeSection = expandedSection ?? "key_findings";
   const sectionItemsQuery = useDiseaseProfileItems(
     workspaceId,
@@ -113,8 +141,37 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     () => new Map((selectedProfile?.sections ?? []).map((section) => [section.section, section])),
     [selectedProfile?.sections],
   );
-  const linkedDocuments = profiles.linkedDocuments ?? selectedProfile?.documents ?? [];
+  const linkedDocuments = useMemo(
+    () => profiles.linkedDocuments ?? selectedProfile?.documents ?? [],
+    [profiles.linkedDocuments, selectedProfile?.documents],
+  );
   const documentsQuery = profiles.documentsQuery;
+  const currentComparisonSnapshot = useMemo<ComparisonSnapshot>(() => ({
+    contextToken: comparisonContextToken,
+    workspaceId,
+    conceptId: effectiveConceptId,
+    language: comparisonLanguage,
+    sources: selectedDocumentIds.map((documentId) => ({
+      document_id: documentId,
+      parsed_source_hash: linkedDocuments.find((document) => document.document_id === documentId)?.parsed_source_hash ?? "",
+    })),
+  }), [
+    comparisonContextToken,
+    workspaceId,
+    effectiveConceptId,
+    comparisonLanguage,
+    selectedDocumentIds,
+    linkedDocuments,
+  ]);
+  useLayoutEffect(() => {
+    currentComparisonSnapshotRef.current = currentComparisonSnapshot;
+  }, [currentComparisonSnapshot]);
+
+  const invalidateComparison = () => {
+    comparisonRequestVersion.current += 1;
+    setComparisonResult(null);
+    comparisonMutation.reset();
+  };
 
   const toggleSection = (section: SectionName) => {
     setActionError("");
@@ -127,6 +184,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   };
 
   const selectConcept = (conceptId: string) => {
+    invalidateComparison();
     setSelectedConceptId(conceptId);
     setExpandedSection(null);
     setSectionCursors({});
@@ -134,15 +192,12 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     setCompletedSections({});
     setSourceItem(null);
     setDocumentSelection({ contextKey: "", ids: [] });
-    setComparisonResult(null);
-    comparisonMutation.reset();
     setActionError("");
   };
 
   const toggleDocumentSelection = (documentId: string) => {
     setActionError("");
-    comparisonMutation.reset();
-    setComparisonResult(null);
+    invalidateComparison();
     setDocumentSelection((current) => {
       const selected = current.contextKey === comparisonContextKey ? current.ids : [];
       return {
@@ -167,40 +222,57 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   const unlinkDocument = async (documentId: string) => {
     if (!effectiveConceptId) return;
     setActionError("");
+    invalidateComparison();
     try {
       await profiles.unlinkDocument({ documentId, conceptId: effectiveConceptId });
       setDocumentSelection((current) => ({
         contextKey: current.contextKey,
         ids: current.ids.filter((value) => value !== documentId),
       }));
-      setComparisonResult(null);
-      comparisonMutation.reset();
     } catch (error) {
       setActionError(errorMessage(error, "Could not remove this document from the profile."));
     }
   };
 
   const compareSelectedDocuments = async () => {
-    const selectedDocuments = selectedDocumentIds
-      .map((documentId) => linkedDocuments.find((document) => document.document_id === documentId))
-      .filter((document): document is DiseaseProfileDocument => Boolean(
-        document?.source_status === "current" && document.parsed_source_hash,
-      ));
-    if (selectedDocuments.length < 2 || !effectiveConceptId || !workspaceId) {
+    const selectedDocuments = selectedDocumentIds.map((documentId) =>
+      linkedDocuments.find((document) => document.document_id === documentId));
+    if (selectedDocuments.length !== selectedDocumentIds.length) {
+      setActionError("A selected source is no longer available. Refresh the profile and select documents again.");
+      invalidateComparison();
+      return;
+    }
+    const currentDocuments = selectedDocuments.filter((document): document is DiseaseProfileDocument => Boolean(
+      document?.source_status === "current" && document.parsed_source_hash,
+    ));
+    if (currentDocuments.length !== selectedDocumentIds.length || currentDocuments.length < 2 || !effectiveConceptId || !workspaceId) {
       setActionError("Select two to five current documents with validated analyses.");
       return;
     }
+    const snapshot: ComparisonSnapshot = {
+      ...currentComparisonSnapshot,
+      sources: currentDocuments.map((document) => ({
+        document_id: document.document_id,
+        parsed_source_hash: document.parsed_source_hash,
+      })),
+    };
+    const requestVersion = ++comparisonRequestVersion.current;
     setActionError("");
+    setComparisonResult(null);
     try {
       const preview = await comparisonMutation.mutateAsync({
-        documents: selectedDocuments.map((document) => ({
+        documents: currentDocuments.map((document) => ({
           document_id: document.document_id,
           expected_parsed_source_hash: document.parsed_source_hash,
         })),
         language: comparisonLanguage,
       });
-      setComparisonResult({ contextKey: comparisonContextKey, preview });
+      const current = currentComparisonSnapshotRef.current;
+      if (requestVersion !== comparisonRequestVersion.current || !current || !snapshotsMatch(snapshot, current)) return;
+      setComparisonResult({ snapshot, preview });
     } catch (error) {
+      const current = currentComparisonSnapshotRef.current;
+      if (requestVersion !== comparisonRequestVersion.current || !current || !snapshotsMatch(snapshot, current)) return;
       setActionError(errorMessage(error, "Could not build this comparison preview."));
     }
   };
@@ -316,7 +388,11 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
                   Output language
                   <select
                     value={comparisonLanguage}
-                    onChange={(event) => setComparisonLanguage(event.target.value as ComparisonLanguage)}
+                    onChange={(event) => {
+                      invalidateComparison();
+                      setActionError("");
+                      setComparisonLanguage(event.target.value as ComparisonLanguage);
+                    }}
                   >
                     <option value="en">English</option>
                     <option value="zh">中文</option>
@@ -332,12 +408,6 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
                   {comparisonMutation.isPending ? "Comparing..." : "Compare selected documents"}
                 </button>
               </div>
-              {comparisonMutation.error && !actionError && (
-                <div className="disease-profile-inline-error" role="alert">
-                  <AlertCircle size={14} />
-                  <span>{errorMessage(comparisonMutation.error, "Could not load comparison preview.")}</span>
-                </div>
-              )}
               <div className="disease-profile-document-list">
                 {linkedDocuments.map((document) => (
                   <div className="disease-profile-document-row" key={document.document_id}>
@@ -380,7 +450,8 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
                 </button>
               )}
             </section>
-            {comparisonResult?.contextKey === comparisonContextKey && comparisonResult.preview && (
+            {comparisonResult?.preview
+              && snapshotsMatch(comparisonResult.snapshot, currentComparisonSnapshot) && (
               <DiseaseComparisonPanel
                 preview={comparisonResult.preview}
                 workspaceId={workspaceId}

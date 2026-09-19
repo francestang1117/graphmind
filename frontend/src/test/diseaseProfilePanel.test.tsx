@@ -1,8 +1,8 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DiseaseProfilePanel from "../components/DiseaseProfilePanel";
-import type { UnassignedDiseaseDocument } from "../services/api";
+import type { ComparisonPreview, UnassignedDiseaseDocument } from "../services/api";
 
 const hooks = vi.hoisted(() => ({
   useDiseaseComparisonPreview: vi.fn(),
@@ -243,6 +243,60 @@ function detailWithFindingCount(count: number) {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
+function comparisonPreview(title: string): ComparisonPreview {
+  const notReported = {
+    value: "Not reported",
+    support_status: "not_reported" as const,
+    evidence: [],
+    warnings: [],
+  };
+  return {
+    concept_id: "mesh:D000795",
+    documents: [{
+      document_id: title,
+      title,
+      document_kind: "research_paper",
+      document_date: "2026-01-01",
+      open_filename: `${title}.pdf`,
+      analysis_run_id: `${title}-run`,
+      parsed_source_hash: `${title}-hash`,
+      coverage_status: "complete",
+      coverage: {
+        status: "complete",
+        selected_chunks: 1,
+        total_chunks: 1,
+        included_sections: ["methods"],
+        omitted_sections: [],
+      },
+      methods: {
+        design: notReported,
+        population: notReported,
+        human_animal_in_vitro: notReported,
+        sample_size: notReported,
+        comparator: notReported,
+      },
+      findings: [],
+      findings_total: 0,
+      findings_truncated: false,
+      limitations: [],
+      limitations_total: 0,
+      limitations_truncated: false,
+    }],
+    discussion_questions: [],
+    warnings: [],
+  };
+}
+
 describe("DiseaseProfilePanel", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -392,6 +446,70 @@ describe("DiseaseProfilePanel", () => {
         { document_id: "document-2", expected_parsed_source_hash: "parsed-2" },
       ],
       language: "en",
+    });
+  });
+
+  it("ignores a late comparison response after the selection changes", async () => {
+    const user = userEvent.setup();
+    const first = deferred<ComparisonPreview>();
+    const second = deferred<ComparisonPreview>();
+    const mutateAsync = vi.fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    const linkedDocuments = [
+      ...detail.documents,
+      {
+        document_id: "document-2",
+        title: "second-fabry-study.pdf",
+        document_kind: "guideline",
+        language: "en",
+        document_date: "2026-02-01",
+        parsed_source_hash: "parsed-2",
+        source_status: "current" as const,
+        warnings: [],
+      },
+      {
+        document_id: "document-3",
+        title: "third-fabry-study.pdf",
+        document_kind: "research_paper",
+        language: "en",
+        document_date: "2026-03-01",
+        parsed_source_hash: "parsed-3",
+        source_status: "current" as const,
+        warnings: [],
+      },
+    ];
+    configure({
+      detailValue: { ...detail, document_count: 3 },
+      linkedDocuments,
+      comparisonMutation: {
+        data: undefined,
+        error: null,
+        isPending: false,
+        mutateAsync,
+        reset: vi.fn(),
+      },
+    });
+
+    render(<DiseaseProfilePanel workspaceId="workspace-1" onOpenVisitPrep={vi.fn()} />);
+    await user.click(screen.getByRole("checkbox", { name: "Select fabry-study.pdf for comparison" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select second-fabry-study.pdf for comparison" }));
+    await user.click(screen.getByRole("button", { name: "Compare selected documents" }));
+
+    await user.click(screen.getByRole("checkbox", { name: "Select second-fabry-study.pdf for comparison" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select third-fabry-study.pdf for comparison" }));
+    await user.click(screen.getByRole("button", { name: "Compare selected documents" }));
+    expect(mutateAsync).toHaveBeenCalledTimes(2);
+
+    first.resolve(comparisonPreview("stale-ab"));
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Compare selected sources" })).not.toBeInTheDocument();
+    });
+
+    second.resolve(comparisonPreview("current-ac"));
+    await waitFor(() => {
+      expect(screen.getByText("current-ac")).toBeInTheDocument();
+      expect(screen.queryByText("stale-ab")).not.toBeInTheDocument();
     });
   });
 
