@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+from dataclasses import dataclass
 import json
 import logging
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Sequence
 import uuid
 
 from app.core.database import SessionLocal, db_enabled
@@ -26,16 +27,51 @@ from app.models.persistence import (
 from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 
 try:
-    from sqlalchemy import delete, select
+    from sqlalchemy import delete, func, select
     from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 except ImportError:  # pragma: no cover - dependencies are installed in app/test runs
     delete = None
+    func = None
     select = None
     IntegrityError = Exception
     SQLAlchemyError = Exception
 
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ProfileInputOptions:
+    """Select the derived tables needed by one profile read.
+
+    The options are deliberately server-owned.  Callers choose a known
+    section mapping instead of turning request input into table selection.
+    """
+
+    analyses: bool = True
+    evidence: bool = True
+    literature_matches: bool = True
+    clinician_questions: bool = True
+
+
+def is_current_valid_analysis(run: Any, result: Any, document: Any) -> bool:
+    """Return whether an analysis still describes the current document parse."""
+    if not run or not result or not document:
+        return False
+
+    def value(item: Any, name: str, default: Any = None) -> Any:
+        if isinstance(item, dict):
+            return item.get(name, default)
+        return getattr(item, name, default)
+
+    return bool(
+        value(run, "status") == "succeeded"
+        and value(result, "validation_status") == "validated"
+        and value(run, "is_current")
+        and value(run, "source_hash") == value(document, "file_hash", "")
+        and value(document, "parsed_source_hash", "")
+        and value(run, "parsed_source_hash") == value(document, "parsed_source_hash", "")
+    )
 
 
 class DiseaseProfileRepository:
@@ -269,15 +305,98 @@ class DiseaseProfileRepository:
                 status_code=503,
             ) from exc
 
+    def list_profile_concept_page(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        limit: int,
+        after_concept_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one bounded, scope-checked page of live profile concepts."""
+        self._require_available()
+        page_size = max(1, min(int(limit), 50))
+        try:
+            with self.session_factory() as db:
+                statement = (
+                    # A concept is the stable profile and cursor identity.
+                    # Names and ontology versions may change between links,
+                    # so they must not split one profile into multiple rows.
+                    select(
+                        DocumentDiseaseLinkRecord.concept_id.label("concept_id"),
+                        func.count(
+                            func.distinct(DocumentDiseaseLinkRecord.document_id)
+                        ).label("document_count"),
+                        func.max(DocumentDiseaseLinkRecord.updated_at).label("last_updated_at"),
+                    )
+                    .join(
+                        DocumentRecord,
+                        DocumentRecord.id == DocumentDiseaseLinkRecord.document_id,
+                    )
+                    .where(
+                        DocumentDiseaseLinkRecord.user_id == user_id,
+                        DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                        DocumentRecord.user_id == user_id,
+                        DocumentRecord.workspace_id == workspace_id,
+                        DocumentRecord.deleted_at.is_(None),
+                    )
+                    .group_by(
+                        DocumentDiseaseLinkRecord.concept_id,
+                    )
+                    .order_by(DocumentDiseaseLinkRecord.concept_id)
+                    .limit(page_size + 1)
+                )
+                if after_concept_id:
+                    statement = statement.where(
+                        DocumentDiseaseLinkRecord.concept_id > after_concept_id
+                    )
+                rows = db.execute(statement).mappings().all()
+                page = rows[:page_size]
+                return {
+                    "items": [
+                        {
+                            "concept_id": str(row["concept_id"]),
+                            "document_count": int(row["document_count"] or 0),
+                            "last_updated_at": _iso(row["last_updated_at"]),
+                        }
+                        for row in page
+                    ],
+                    "next_cursor": (
+                        str(page[-1]["concept_id"])
+                        if len(rows) > page_size and page
+                        else None
+                    ),
+                }
+        except SQLAlchemyError as exc:
+            log.warning("Could not list disease profile concepts")
+            raise DiseaseProfileError(
+                "Disease profile data is temporarily unavailable.",
+                code="disease_profile_storage_unavailable",
+                status_code=503,
+            ) from exc
+
     def load_profile_inputs(
         self,
         *,
         user_id: str,
         workspace_id: str,
+        concept_ids: Sequence[str] | None = None,
+        include: ProfileInputOptions | None = None,
         concept_id: str | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
-        """Batch-load links and all derived records needed by the aggregator."""
+        """Batch-load selected profile inputs without an N+1 query path.
+
+        ``concept_id`` remains as a compatibility alias for older internal
+        callers.  New reads must pass ``concept_ids`` explicitly; omitting
+        both returns an empty result instead of scanning a whole workspace.
+        """
         self._require_available()
+        if concept_ids is None:
+            concept_ids = [concept_id] if concept_id else []
+        selected_concepts = list(dict.fromkeys(str(value) for value in concept_ids if value))
+        if not selected_concepts:
+            return {}
+        options = include or ProfileInputOptions()
         try:
             with self.session_factory() as db:
                 link_query = (
@@ -292,6 +411,7 @@ class DiseaseProfileRepository:
                         DocumentRecord.user_id == user_id,
                         DocumentRecord.workspace_id == workspace_id,
                         DocumentRecord.deleted_at.is_(None),
+                        DocumentDiseaseLinkRecord.concept_id.in_(selected_concepts),
                     )
                     .order_by(
                         DocumentDiseaseLinkRecord.document_id,
@@ -299,10 +419,6 @@ class DiseaseProfileRepository:
                         DocumentDiseaseLinkRecord.id,
                     )
                 )
-                if concept_id is not None:
-                    link_query = link_query.where(
-                        DocumentDiseaseLinkRecord.concept_id == concept_id
-                    )
                 link_rows = db.execute(link_query).all()
                 if not link_rows:
                     return {}
@@ -320,38 +436,41 @@ class DiseaseProfileRepository:
                 for link, _document in link_rows:
                     links_by_document.setdefault(link.document_id, _link_dict(link))
 
-                analysis_rows = db.execute(
-                    select(MedicalAnalysisRunRecord, MedicalAnalysisResultRecord)
-                    .outerjoin(
-                        MedicalAnalysisResultRecord,
-                        MedicalAnalysisResultRecord.run_id == MedicalAnalysisRunRecord.id,
-                    )
-                    .where(
-                        MedicalAnalysisRunRecord.user_id == user_id,
-                        MedicalAnalysisRunRecord.workspace_id == workspace_id,
-                        MedicalAnalysisRunRecord.document_id.in_(document_ids),
-                    )
-                    .order_by(
-                        MedicalAnalysisRunRecord.document_id,
-                        MedicalAnalysisRunRecord.created_at.desc(),
-                    )
-                ).all()
-                evidence_by_run = self._load_evidence(db, [row[0].id for row in analysis_rows])
+                needs_analyses = bool(
+                    options.analyses
+                    or options.evidence
+                    or options.literature_matches
+                    or options.clinician_questions
+                )
+                analysis_rows = []
+                if needs_analyses:
+                    analysis_rows = db.execute(
+                        select(MedicalAnalysisRunRecord, MedicalAnalysisResultRecord)
+                        .outerjoin(
+                            MedicalAnalysisResultRecord,
+                            MedicalAnalysisResultRecord.run_id == MedicalAnalysisRunRecord.id,
+                        )
+                        .where(
+                            MedicalAnalysisRunRecord.user_id == user_id,
+                            MedicalAnalysisRunRecord.workspace_id == workspace_id,
+                            MedicalAnalysisRunRecord.document_id.in_(document_ids),
+                        )
+                        .order_by(
+                            MedicalAnalysisRunRecord.document_id,
+                            MedicalAnalysisRunRecord.created_at.desc(),
+                        )
+                    ).all()
+                evidence_by_run = self._load_evidence(
+                    db,
+                    [row[0].id for row in analysis_rows],
+                ) if options.evidence else {}
                 analyses_by_document: dict[str, list[dict[str, Any]]] = defaultdict(list)
                 for run, result in analysis_rows:
                     document = documents.get(run.document_id)
                     if not document:
                         continue
                     report = _loads_json(result.report_json, None) if result else None
-                    source_current = bool(
-                        run.status == "succeeded"
-                        and result
-                        and result.validation_status == "validated"
-                        and run.is_current
-                        and run.source_hash == document["file_hash"]
-                        and document["parsed_source_hash"]
-                        and run.parsed_source_hash == document["parsed_source_hash"]
-                    )
+                    source_current = is_current_valid_analysis(run, result, document)
                     report_valid = isinstance(report, dict)
                     warnings: list[str] = []
                     if source_current and not report_valid:
@@ -367,27 +486,29 @@ class DiseaseProfileRepository:
                         }
                     )
 
-                match_runs = db.scalars(
-                    select(LiteratureMatchRunRecord)
-                    .join(
-                        LiteratureSearchRunRecord,
-                        LiteratureSearchRunRecord.id == LiteratureMatchRunRecord.search_run_id,
-                    )
-                    .where(
-                        LiteratureMatchRunRecord.user_id == user_id,
-                        LiteratureMatchRunRecord.workspace_id == workspace_id,
-                        LiteratureMatchRunRecord.document_id.in_(document_ids),
-                        LiteratureMatchRunRecord.status == "completed",
-                        LiteratureSearchRunRecord.status == "succeeded",
-                    )
-                    .order_by(
-                        LiteratureMatchRunRecord.document_id,
-                        LiteratureMatchRunRecord.updated_at.desc(),
-                    )
-                ).all()
+                match_runs = []
+                if options.literature_matches:
+                    match_runs = db.scalars(
+                        select(LiteratureMatchRunRecord)
+                        .join(
+                            LiteratureSearchRunRecord,
+                            LiteratureSearchRunRecord.id == LiteratureMatchRunRecord.search_run_id,
+                        )
+                        .where(
+                            LiteratureMatchRunRecord.user_id == user_id,
+                            LiteratureMatchRunRecord.workspace_id == workspace_id,
+                            LiteratureMatchRunRecord.document_id.in_(document_ids),
+                            LiteratureMatchRunRecord.status == "completed",
+                            LiteratureSearchRunRecord.status == "succeeded",
+                        )
+                        .order_by(
+                            LiteratureMatchRunRecord.document_id,
+                            LiteratureMatchRunRecord.updated_at.desc(),
+                        )
+                    ).all()
                 match_run_ids = [row.id for row in match_runs]
                 match_rows = []
-                if match_run_ids:
+                if options.literature_matches and match_run_ids:
                     match_rows = db.execute(
                         select(LiteratureEvidenceMatchRecord, LiteratureArticleRecord)
                         .join(
@@ -424,20 +545,22 @@ class DiseaseProfileRepository:
                         }
                     )
 
-                question_rows = db.scalars(
-                    select(ClinicianQuestionRecord).where(
-                        ClinicianQuestionRecord.user_id == user_id,
-                        ClinicianQuestionRecord.workspace_id == workspace_id,
-                        ClinicianQuestionRecord.document_id.in_(document_ids),
-                        ClinicianQuestionRecord.status != "dismissed",
-                    )
-                    .order_by(
-                        ClinicianQuestionRecord.document_id,
-                        ClinicianQuestionRecord.position,
-                        ClinicianQuestionRecord.created_at,
-                        ClinicianQuestionRecord.id,
-                    )
-                ).all()
+                question_rows = []
+                if options.clinician_questions:
+                    question_rows = db.scalars(
+                        select(ClinicianQuestionRecord).where(
+                            ClinicianQuestionRecord.user_id == user_id,
+                            ClinicianQuestionRecord.workspace_id == workspace_id,
+                            ClinicianQuestionRecord.document_id.in_(document_ids),
+                            ClinicianQuestionRecord.status != "dismissed",
+                        )
+                        .order_by(
+                            ClinicianQuestionRecord.document_id,
+                            ClinicianQuestionRecord.position,
+                            ClinicianQuestionRecord.created_at,
+                            ClinicianQuestionRecord.id,
+                        )
+                    ).all()
                 questions_by_document: dict[str, list[dict[str, Any]]] = defaultdict(list)
                 for row in question_rows:
                     # Intentionally omit user_note: it is private to Visit Prep.

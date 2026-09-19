@@ -201,6 +201,36 @@ def test_aggregator_sanitizes_not_reported_attributes_from_current_input():
     assert item["evidence"] == []
 
 
+def test_aggregator_summary_keeps_counts_without_retaining_items():
+    record = _record("doc-summary", title="Summary paper", alias="Fabry Disease", run_id="run-summary")
+
+    summary = DiseaseProfileAggregator().aggregate_summary(
+        concept_id="mesh:D000795",
+        inputs=[record],
+    )
+
+    assert summary["section_counts"]["key_findings"] == 1
+    assert summary["section_counts"]["study_methods"] == 4
+    assert summary["section_counts"]["clinician_questions"] == 1
+    assert summary["sections"]["key_findings"] == []
+    assert summary["_all_sections"] == {}
+
+
+def test_aggregator_section_does_not_build_unrequested_sections():
+    record = _record("doc-section", title="Section paper", alias="Fabry Disease", run_id="run-section")
+
+    payload = DiseaseProfileAggregator().aggregate_section(
+        concept_id="mesh:D000795",
+        inputs=[record],
+        section="external_studies",
+    )
+
+    assert len(payload["_all_sections"]["external_studies"]) == 1
+    assert payload["_all_sections"]["key_findings"] == []
+    assert payload["_all_sections"]["clinician_questions"] == []
+    assert payload["section_counts"]["key_findings"] == 0
+
+
 def test_repository_links_are_idempotent_and_scope_checked():
     suffix = uuid.uuid4().hex
     document_id = f"document-{suffix}"

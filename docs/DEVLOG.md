@@ -1925,3 +1925,31 @@ is `569 passed, 5 skipped`; the frontend suite is `39 passed`, with lint and
 production build passing. These cases are engineering regression checks, not
 clinically expert-validated quality judgments; expert review should be added
 incrementally.
+
+## 2026-09 - V2 PR15: Bounded Disease Profile Reads
+
+PR15 bounds disease profile work before aggregation. The profile list now uses
+scope-checked concept keyset pagination and loads derived inputs only for the
+current page. The repository keeps the user and workspace predicates on every
+derived-record query and avoids an unbounded fallback when no concept range is
+provided.
+
+Profile section reads use a server-owned input map. Findings, methods,
+limitations, applicability, future research, and medical terms load validated
+analysis evidence; external studies load only current analysis metadata and
+literature matches; clinician questions load current analysis evidence and saved
+questions without loading literature matches. A shared current-analysis check
+continues to exclude stale, unvalidated, deleted, or parser-version-mismatched
+sources.
+
+The aggregator now exposes summary, detail, and section entry points. Summary
+aggregation retains counts and warnings without retaining item payloads, while
+section aggregation does not construct unrelated sections. Item offsets are
+capped at 10,000, and the frontend can load additional profile pages through
+the existing opaque cursor response without changing the API shape.
+
+Regression coverage includes concept pagination without duplicates, scoped
+batch loading, section input selection, summary/detail output compatibility,
+bounded item cursors, and frontend profile-page loading. The performance work
+does not add AI calls, external searches, new medical conclusions, caching, or
+multi-disease content ownership.

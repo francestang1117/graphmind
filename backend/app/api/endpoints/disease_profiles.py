@@ -26,6 +26,8 @@ from app.services.medical.disease_profile.service import disease_profile_service
 
 router = APIRouter()
 
+_MAX_PROFILE_ITEMS_OFFSET = 10_000
+
 
 class _StrictRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -202,8 +204,12 @@ async def get_disease_profile_items(
             status_code=status.HTTP_404_NOT_FOUND,
         )
     next_cursor = None
-    if offset + len(payload["items"]) < int(payload["total"]):
-        next_cursor = _encode_cursor(str(offset + len(payload["items"])))
+    next_offset = offset + len(payload["items"])
+    if (
+        next_offset < int(payload["total"])
+        and next_offset <= _MAX_PROFILE_ITEMS_OFFSET
+    ):
+        next_cursor = _encode_cursor(str(next_offset))
     return DiseaseProfileItemsView(
         section=payload["section"],
         items=payload["items"],
@@ -301,7 +307,7 @@ def _decode_offset(value: str) -> int:
             code="disease_profile_invalid_cursor",
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         ) from exc
-    if offset < 0:
+    if offset < 0 or offset > _MAX_PROFILE_ITEMS_OFFSET:
         raise AppError(
             "The items cursor is invalid.",
             code="disease_profile_invalid_cursor",
