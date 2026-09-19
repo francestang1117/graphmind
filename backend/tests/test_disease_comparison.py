@@ -338,3 +338,19 @@ def test_builder_drops_evidence_from_another_document_or_analysis_run():
         question.document_id != "doc-1"
         for question in preview.discussion_questions
     )
+
+
+def test_builder_marks_long_evidence_quotes_as_truncated_prefixes():
+    record = _input("doc-long-quote")
+    long_quote = "A" * 6_000
+    record["analyses"][0]["evidence"][0]["quote"] = long_quote
+
+    preview = build_comparison_preview(
+        concept_id="mesh:D000795",
+        inputs=[record, _input("doc-2")],
+    )
+
+    evidence = preview.documents[0].methods.population.evidence[0]
+    assert len(evidence.quote) == 5_000
+    assert evidence.quote == long_quote[:5_000]
+    assert evidence.quote_truncated is True

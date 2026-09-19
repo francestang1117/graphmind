@@ -24,6 +24,7 @@ _FINDING_SECTIONS = ("key_findings", "limitations")
 _REFERENCE_SECTIONS = {"references", "bibliography"}
 _MAX_FINDINGS = 10
 _MAX_QUESTIONS = 3
+_MAX_QUOTE_CHARS = 5000
 _NOT_REPORTED = {
     "en": "The selected analysis evidence did not report this field.",
     "zh": "所选分析证据未报告此字段。",
@@ -329,19 +330,21 @@ def _sources_for_ids(
         section_type = str(item.get("section_type") or "unknown").strip().lower()
         if section_type in _REFERENCE_SECTIONS:
             continue
-        quote = str(item.get("quote") or item.get("quoted_text") or "").strip()
-        if not quote:
+        raw_quote = str(item.get("quote") or item.get("quoted_text") or "").strip()
+        if not raw_quote:
             continue
+        quote_truncated = len(raw_quote) > _MAX_QUOTE_CHARS
         result.append(
             ComparisonEvidence(
                 document_id=document_id,
                 analysis_run_id=run_id,
                 evidence_id=evidence_id,
-                quote=quote,
+                quote=raw_quote[:_MAX_QUOTE_CHARS],
                 section_type=str(item.get("section_type") or "unknown"),
                 section_title=str(item.get("section_title") or ""),
                 page_start=_page_number(item.get("page_start")),
                 page_end=_page_number(item.get("page_end")),
+                quote_truncated=quote_truncated,
             )
         )
         if len(result) >= 5:

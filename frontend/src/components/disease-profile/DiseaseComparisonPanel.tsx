@@ -144,6 +144,11 @@ function ComparisonSourceDrawer({
           <span>Run {evidence.analysis_run_id}</span>
         </div>
         <blockquote className="disease-comparison-drawer-quote">{evidence.quote}</blockquote>
+        {evidence.quote_truncated && (
+          <p className="disease-comparison-quote-warning">
+            Excerpt shortened for preview. Open the source document to read the full passage.
+          </p>
+        )}
         <div className="disease-comparison-evidence-nav" aria-label="Comparison evidence navigation">
           <button
             type="button"

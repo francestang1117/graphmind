@@ -419,6 +419,7 @@ export interface ComparisonEvidence {
   section_title: string;
   page_start?: number | null;
   page_end?: number | null;
+  quote_truncated: boolean;
 }
 
 export interface ComparisonMethod {

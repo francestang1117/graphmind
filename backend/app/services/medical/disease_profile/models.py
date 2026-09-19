@@ -235,6 +235,7 @@ class ComparisonEvidence(_StrictModel):
     section_title: str = ""
     page_start: int | None = Field(default=None, ge=1)
     page_end: int | None = Field(default=None, ge=1)
+    quote_truncated: bool = False
 
 
 class ComparisonMethod(_StrictModel):

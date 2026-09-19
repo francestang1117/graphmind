@@ -13,6 +13,7 @@ const evidence: ComparisonEvidence = {
   section_title: "Methods",
   page_start: 7,
   page_end: 7,
+  quote_truncated: false,
 };
 
 const secondEvidence: ComparisonEvidence = {
@@ -21,6 +22,7 @@ const secondEvidence: ComparisonEvidence = {
   quote: "The follow-up assessment was reported on the next page.",
   page_start: 8,
   page_end: 8,
+  quote_truncated: true,
 };
 
 const supportedMethod: ComparisonMethod = {
@@ -142,6 +144,7 @@ describe("DiseaseComparisonPanel", () => {
     expect(drawer).toHaveTextContent("The follow-up assessment was reported on the next page.");
     expect(drawer).toHaveTextContent("Evidence EVIDENCE-2");
     expect(drawer).toHaveTextContent("Evidence 2 / 2");
+    expect(drawer).toHaveTextContent("Excerpt shortened for preview");
     expect(screen.getByRole("button", { name: "Next evidence" })).toBeDisabled();
 
     await user.click(screen.getByRole("button", { name: "Previous evidence" }));
