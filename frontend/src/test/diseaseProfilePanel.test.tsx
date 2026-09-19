@@ -6,6 +6,7 @@ import type { UnassignedDiseaseDocument } from "../services/api";
 
 const hooks = vi.hoisted(() => ({
   useDiseaseProfiles: vi.fn(),
+  useDiseaseProfileExternalSourceDocuments: vi.fn(),
   useDiseaseProfileItems: vi.fn(),
   useDiseaseConceptSearch: vi.fn(),
 }));
@@ -126,13 +127,31 @@ function configure({
   profiles = [summary],
   selectedConceptId = "mesh:D000795",
   unassigned = [],
+  unassignedTotal = unassigned.length,
   hasMoreProfiles = false,
+  hasMoreUnassigned = false,
+  loadingMoreUnassigned = false,
+  loadMoreUnassigned = vi.fn().mockResolvedValue(undefined),
+  linkedDocuments,
+  hasMoreDocuments = false,
+  loadingMoreDocuments = false,
+  loadMoreDocuments = vi.fn().mockResolvedValue(undefined),
+  documentsQuery,
   detailValue = detail,
 }: {
   profiles?: typeof summary[];
   selectedConceptId?: string | null;
   unassigned?: UnassignedDiseaseDocument[];
+  unassignedTotal?: number;
   hasMoreProfiles?: boolean;
+  hasMoreUnassigned?: boolean;
+  loadingMoreUnassigned?: boolean;
+  loadMoreUnassigned?: () => Promise<unknown>;
+  linkedDocuments?: typeof detail.documents;
+  hasMoreDocuments?: boolean;
+  loadingMoreDocuments?: boolean;
+  loadMoreDocuments?: () => Promise<unknown>;
+  documentsQuery?: { error: unknown; refetch: () => Promise<unknown> };
   detailValue?: typeof detail;
 } = {}) {
   const linkDocument = vi.fn().mockResolvedValue(undefined);
@@ -148,13 +167,31 @@ function configure({
     detail: detailValue,
     detailQuery: { isLoading: false, error: null, refetch: vi.fn() },
     unassigned,
+    unassignedTotal,
+    hasMoreUnassigned,
+    loadingMoreUnassigned,
+    loadMoreUnassigned,
     unassignedQuery: { isLoading: false, error: null, refetch: vi.fn() },
+    linkedDocuments,
+    hasMoreDocuments,
+    loadingMoreDocuments,
+    loadMoreDocuments,
+    documentsQuery: documentsQuery ?? { error: null, refetch: vi.fn() },
     linkDocument,
     linking: false,
     unlinkDocument,
     unlinking: false,
   });
   hooks.useDiseaseProfileItems.mockReturnValue({ data: undefined, isLoading: false });
+  hooks.useDiseaseProfileExternalSourceDocuments.mockReturnValue({
+    data: { pages: [] },
+    isLoading: false,
+    isFetchingNextPage: false,
+    hasNextPage: false,
+    error: null,
+    fetchNextPage: vi.fn(),
+    refetch: vi.fn(),
+  });
   hooks.useDiseaseConceptSearch.mockReturnValue({
     data: {
       items: [{
@@ -266,6 +303,64 @@ describe("DiseaseProfilePanel", () => {
 
     expect(loadMoreProfiles).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: /Fabry Disease/ })).toBeInTheDocument();
+  });
+
+  it("loads more linked source documents without replacing the profile", async () => {
+    const user = userEvent.setup();
+    const loadMoreDocuments = vi.fn().mockResolvedValue(undefined);
+    const linkedDocuments = [
+      ...detail.documents,
+      {
+        document_id: "document-2",
+        title: "second-fabry-study.pdf",
+        document_kind: "guideline",
+        language: "en",
+        document_date: "2026-02-01",
+        parsed_source_hash: "parsed-2",
+        source_status: "current" as const,
+        warnings: [],
+      },
+    ];
+    configure({
+      detailValue: { ...detail, document_count: 2 },
+      linkedDocuments,
+      hasMoreDocuments: true,
+      loadMoreDocuments,
+    });
+
+    render(<DiseaseProfilePanel workspaceId="workspace-1" onOpenVisitPrep={vi.fn()} />);
+
+    expect(screen.getByText("second-fabry-study.pdf")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Load more linked documents" }));
+
+    expect(loadMoreDocuments).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads more unassigned documents and keeps the total count", async () => {
+    const user = userEvent.setup();
+    const loadMoreUnassigned = vi.fn().mockResolvedValue(undefined);
+    configure({
+      unassigned: [{
+        document_id: "document-2",
+        title: "unassigned.pdf",
+        document_kind: "research_paper",
+        language: "en",
+        document_date: "",
+        medical_confidence: 0.9,
+        classifier_version: "medical-rules-v1",
+        warnings: [],
+      }],
+      unassignedTotal: 21,
+      hasMoreUnassigned: true,
+      loadMoreUnassigned,
+    });
+
+    render(<DiseaseProfilePanel workspaceId="workspace-1" onOpenVisitPrep={vi.fn()} />);
+
+    expect(screen.getByText("21")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Load more documents" }));
+
+    expect(loadMoreUnassigned).toHaveBeenCalledTimes(1);
   });
 
   it("appends a single section page even when the API has no next cursor", async () => {

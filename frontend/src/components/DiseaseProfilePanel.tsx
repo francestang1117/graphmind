@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import {
+  useDiseaseProfileExternalSourceDocuments,
   useDiseaseProfileItems,
   useDiseaseProfiles,
 } from "../hooks/useDiseaseProfiles";
@@ -73,12 +74,19 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     sectionCursors[activeSection] ?? null,
     Boolean(expandedSection),
   );
+  const externalDocumentsQuery = useDiseaseProfileExternalSourceDocuments(
+    workspaceId,
+    effectiveConceptId,
+    sourceItem,
+  );
 
   const selectedProfile = profiles.detail;
   const selectedProfileSectionMap = useMemo(
     () => new Map((selectedProfile?.sections ?? []).map((section) => [section.section, section])),
     [selectedProfile?.sections],
   );
+  const linkedDocuments = profiles.linkedDocuments ?? selectedProfile?.documents ?? [];
+  const documentsQuery = profiles.documentsQuery;
 
   const toggleSection = (section: SectionName) => {
     setActionError("");
@@ -152,7 +160,15 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     );
   }
 
-  const loadError = profiles.listQuery.error || profiles.unassignedQuery.error;
+  const loadError = profiles.listQuery.error
+    || profiles.unassignedQuery.error
+    || documentsQuery?.error;
+  const relatedDocuments = Array.from(
+    new Map(
+      (externalDocumentsQuery.data?.pages.flatMap((page) => page.items) ?? [])
+        .map((document) => [document.document_id, document]),
+    ).values(),
+  );
   return (
     <div className="disease-profiles-panel">
       <aside className="disease-profiles-sidebar">
@@ -171,9 +187,15 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
         />
         <UnassignedDocuments
           documents={profiles.unassigned}
+          total={profiles.unassignedTotal ?? profiles.unassigned.length}
           loading={profiles.unassignedQuery.isLoading}
+          loadingMore={profiles.loadingMoreUnassigned}
+          hasMore={profiles.hasMoreUnassigned}
+          error={profiles.unassignedQuery.error}
           linking={profiles.linking}
           onLink={linkDocument}
+          onLoadMore={() => { void profiles.loadMoreUnassigned?.(); }}
+          onRetry={() => { void profiles.unassignedQuery.refetch(); }}
         />
       </aside>
 
@@ -186,7 +208,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
           <div className="disease-profile-inline-error" role="alert">
             <AlertCircle size={16} />
             <span>Could not load all disease profile data.</span>
-            <button type="button" onClick={() => { void profiles.listQuery.refetch(); void profiles.unassignedQuery.refetch(); void profiles.detailQuery.refetch(); }}>
+            <button type="button" onClick={() => { void profiles.listQuery.refetch(); void profiles.unassignedQuery.refetch(); void profiles.detailQuery.refetch(); void documentsQuery?.refetch(); }}>
               <RefreshCw size={14} /> Retry
             </button>
           </div>
@@ -206,10 +228,10 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
             {selectedProfile.warnings.map((warning) => <div className="disease-profile-warning" key={warning}><AlertCircle size={14} /> {warning}</div>)}
             <DiseaseProfileStats stats={selectedProfile.stats} />
             <section className="disease-profile-documents">
-              <div className="disease-profile-subheading"><div><span className="disease-profile-eyebrow">Linked sources</span><h2>{selectedProfile.documents.length} documents in this profile</h2></div></div>
+              <div className="disease-profile-subheading"><div><span className="disease-profile-eyebrow">Linked sources</span><h2>{selectedProfile.document_count} documents in this profile</h2></div></div>
               <p className="disease-profile-document-policy">Each document has one primary disease. Remove the current link to return it to Needs review before assigning another disease.</p>
               <div className="disease-profile-document-list">
-                {selectedProfile.documents.map((document) => (
+                {linkedDocuments.map((document) => (
                   <div className="disease-profile-document-row" key={document.document_id}>
                     <div><strong>{document.title}</strong><span>{document.document_kind} · {document.source_status}{document.document_date ? ` · ${document.document_date}` : ""}</span></div>
                     <button type="button" className="disease-icon-button" aria-label={`Remove ${document.title} from profile`} title="Remove document from profile" onClick={() => { void unlinkDocument(document.document_id); }} disabled={profiles.unlinking}>
@@ -218,6 +240,25 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
                   </div>
                 ))}
               </div>
+              {documentsQuery?.error && (
+                <div className="disease-profile-inline-error" role="alert">
+                  <AlertCircle size={14} />
+                  <span>Could not load more linked documents.</span>
+                  <button type="button" onClick={() => { void documentsQuery?.refetch(); }}>
+                    <RefreshCw size={14} /> Retry
+                  </button>
+                </div>
+              )}
+              {profiles.hasMoreDocuments && (
+                <button
+                  type="button"
+                  className="disease-profile-load-more"
+                  onClick={() => { void profiles.loadMoreDocuments?.(); }}
+                  disabled={profiles.loadingMoreDocuments}
+                >
+                  {profiles.loadingMoreDocuments ? "Loading..." : "Load more linked documents"}
+                </button>
+              )}
             </section>
             <div className="disease-profile-sections">
               {SECTION_ORDER.map((section) => {
@@ -238,6 +279,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
                     expanded={expandedSection === section}
                     loading={expandedSection === section && sectionItemsQuery.isLoading}
                     hasMore={hasMore}
+                    truncated={Boolean(page?.truncated)}
                     onToggle={() => toggleSection(section)}
                     onLoadMore={loadMore}
                     onOpenSource={setSourceItem}
@@ -250,7 +292,19 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
           <div className="disease-profile-empty-page compact"><BookOpen size={28} /><h2>Profile not available</h2><p>The profile may have changed or been removed.</p></div>
         )}
       </main>
-      {sourceItem && <DiseaseSourceDrawer item={sourceItem} onClose={() => setSourceItem(null)} />}
+      {sourceItem && (
+        <DiseaseSourceDrawer
+          item={sourceItem}
+          onClose={() => setSourceItem(null)}
+          relatedDocuments={relatedDocuments}
+          relatedDocumentsLoading={externalDocumentsQuery.isLoading}
+          relatedDocumentsError={externalDocumentsQuery.error}
+          relatedDocumentsHasMore={Boolean(externalDocumentsQuery.hasNextPage)}
+          relatedDocumentsLoadingMore={externalDocumentsQuery.isFetchingNextPage}
+          onLoadMoreRelatedDocuments={() => { void externalDocumentsQuery.fetchNextPage(); }}
+          onRetryRelatedDocuments={() => { void externalDocumentsQuery.refetch(); }}
+        />
+      )}
     </div>
   );
 }

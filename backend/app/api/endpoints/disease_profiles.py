@@ -14,6 +14,7 @@ from app.core.errors import AppError
 from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 from app.services.medical.disease_profile.models import (
     DiseaseConceptSearchView,
+    DiseaseProfileDocumentsView,
     DiseaseProfileDetail,
     DiseaseProfileItemsView,
     DiseaseProfileListView,
@@ -131,17 +132,25 @@ async def search_disease_concepts(
 )
 async def list_unassigned_disease_documents(
     workspace_id: str = Query(min_length=1, max_length=64),
+    limit: int = Query(default=20, ge=1, le=50),
+    cursor: str | None = Query(default=None, max_length=512),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> UnassignedDocumentListView:
     scope = _scope(user, workspace_id)
     _require_storage()
+    cursor_value = _decode_cursor(cursor, kind="documents") if cursor else None
     try:
-        items = disease_profile_service.list_unassigned_documents(
-            user_id=_user_id(user), workspace_id=scope
+        payload = disease_profile_service.list_unassigned_documents(
+            user_id=_user_id(user),
+            workspace_id=scope,
+            limit=limit,
+            cursor_document_id=cursor_value,
         )
     except DiseaseProfileError as exc:
         raise _api_error(exc) from exc
-    return UnassignedDocumentListView(items=items)
+    if payload.get("next_cursor"):
+        payload["next_cursor"] = _encode_cursor(str(payload["next_cursor"]))
+    return UnassignedDocumentListView.model_validate(payload)
 
 
 @router.get(
@@ -214,7 +223,82 @@ async def get_disease_profile_items(
         section=payload["section"],
         items=payload["items"],
         next_cursor=next_cursor,
+        truncated=bool(payload.get("truncated")),
     )
+
+
+@router.get(
+    "/disease-profiles/{concept_id}/documents",
+    response_model=DiseaseProfileDocumentsView,
+)
+async def list_disease_profile_documents(
+    concept_id: str,
+    workspace_id: str = Query(min_length=1, max_length=64),
+    limit: int = Query(default=20, ge=1, le=50),
+    cursor: str | None = Query(default=None, max_length=512),
+    user: UserRecord = Depends(current_user_or_dev),
+) -> DiseaseProfileDocumentsView:
+    scope = _scope(user, workspace_id)
+    _require_storage()
+    cursor_value = _decode_cursor(cursor, kind="documents") if cursor else None
+    try:
+        payload = disease_profile_service.list_profile_documents(
+            user_id=_user_id(user),
+            workspace_id=scope,
+            concept_id=concept_id,
+            limit=limit,
+            cursor_document_id=cursor_value,
+        )
+    except DiseaseProfileError as exc:
+        raise _api_error(exc) from exc
+    if payload is None:
+        raise AppError(
+            "The disease profile was not found in this research project.",
+            code="disease_profile_not_found",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    if payload.get("next_cursor"):
+        payload["next_cursor"] = _encode_cursor(str(payload["next_cursor"]))
+    return DiseaseProfileDocumentsView.model_validate(payload)
+
+
+@router.get(
+    "/disease-profiles/{concept_id}/external-sources",
+    response_model=DiseaseProfileDocumentsView,
+)
+async def list_disease_profile_external_source_documents(
+    concept_id: str,
+    source: str = Query(min_length=1, max_length=64),
+    external_id: str = Query(min_length=1, max_length=160),
+    workspace_id: str = Query(min_length=1, max_length=64),
+    limit: int = Query(default=20, ge=1, le=50),
+    cursor: str | None = Query(default=None, max_length=512),
+    user: UserRecord = Depends(current_user_or_dev),
+) -> DiseaseProfileDocumentsView:
+    scope = _scope(user, workspace_id)
+    _require_storage()
+    cursor_value = _decode_cursor(cursor, kind="documents") if cursor else None
+    try:
+        payload = disease_profile_service.list_external_source_documents(
+            user_id=_user_id(user),
+            workspace_id=scope,
+            concept_id=concept_id,
+            source=source,
+            external_id=external_id,
+            limit=limit,
+            cursor_document_id=cursor_value,
+        )
+    except DiseaseProfileError as exc:
+        raise _api_error(exc) from exc
+    if payload is None:
+        raise AppError(
+            "The external source was not found in this research project.",
+            code="disease_profile_source_not_found",
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+    if payload.get("next_cursor"):
+        payload["next_cursor"] = _encode_cursor(str(payload["next_cursor"]))
+    return DiseaseProfileDocumentsView.model_validate(payload)
 
 
 @router.get(
@@ -241,6 +325,10 @@ async def get_disease_profile(
             "The disease profile was not found in this research project.",
             code="disease_profile_not_found",
             status_code=status.HTTP_404_NOT_FOUND,
+        )
+    if payload.get("documents_next_cursor"):
+        payload["documents_next_cursor"] = _encode_cursor(
+            str(payload["documents_next_cursor"])
         )
     return DiseaseProfileDetail.model_validate(payload)
 

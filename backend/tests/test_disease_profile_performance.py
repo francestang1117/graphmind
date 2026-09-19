@@ -2,10 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 
 from app.core.database import SessionLocal
-from app.models.persistence import DocumentDiseaseLinkRecord, DocumentRecord
+from app.models.persistence import (
+    DocumentDiseaseLinkRecord,
+    DocumentRecord,
+    LiteratureArticleRecord,
+    LiteratureEvidenceMatchRecord,
+    LiteratureMatchRunRecord,
+    LiteratureSearchRunRecord,
+    MedicalAnalysisResultRecord,
+    MedicalAnalysisRunRecord,
+    MedicalDocumentProfileRecord,
+)
 from app.services.medical.disease_profile.aggregator import DiseaseProfileAggregator
 from app.services.medical.disease_profile.repository import (
     DiseaseProfileRepository,
@@ -387,9 +398,277 @@ def test_section_read_uses_only_its_declared_input_tables():
         "section": "external_studies",
         "items": [],
         "total": 0,
+        "truncated": False,
     }
     options = captured["include"]
     assert options.analyses is True
     assert options.evidence is False
     assert options.literature_matches is True
     assert options.clinician_questions is False
+
+
+def test_repository_pages_linked_and_unassigned_documents_with_stable_ids():
+    suffix = uuid.uuid4().hex
+    user_id = f"source-user-{suffix}"
+    workspace_id = f"source-workspace-{suffix}"
+    concept_id = "mesh:SOURCE-001"
+    linked_ids = [f"linked-{suffix}-{index:03d}" for index in range(101)]
+    unassigned_ids = [f"unassigned-{suffix}-{index:03d}" for index in range(101)]
+
+    try:
+        with SessionLocal() as db:
+            for document_id in linked_ids + unassigned_ids:
+                db.add(_document(document_id, user_id, workspace_id))
+            db.flush()
+            for index, document_id in enumerate(linked_ids):
+                db.add(
+                    DocumentDiseaseLinkRecord(
+                        id=f"source-link-{suffix}-{index}",
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        document_id=document_id,
+                        concept_id=concept_id,
+                        preferred_name_en="Source Disease",
+                        preferred_name_zh="来源疾病",
+                        matched_alias="Source Disease",
+                        ontology_version="test-v1",
+                        link_source="manual_selection",
+                    )
+                )
+            for index, document_id in enumerate(unassigned_ids):
+                db.add(
+                    MedicalDocumentProfileRecord(
+                        id=f"source-profile-{suffix}-{index}",
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        document_id=document_id,
+                        document_kind="research_paper",
+                        language="en",
+                        confidence=0.9,
+                        classifier_version="test-v1",
+                    )
+                )
+            db.commit()
+
+
+
+        repository = DiseaseProfileRepository()
+        linked_first = repository.list_profile_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            limit=50,
+        )
+        assert linked_first is not None
+        assert len(linked_first["items"]) == 50
+        assert linked_first["next_cursor"] == linked_ids[49]
+        linked_second = repository.list_profile_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            limit=50,
+            after_document_id=linked_first["next_cursor"],
+        )
+        assert linked_second is not None
+        assert len(linked_second["items"]) == 50
+        assert linked_second["next_cursor"] == linked_ids[99]
+        linked_last = repository.list_profile_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            limit=50,
+            after_document_id=linked_second["next_cursor"],
+        )
+        assert linked_last is not None
+        assert [item["document_id"] for item in linked_last["items"]] == [linked_ids[100]]
+        assert linked_last["next_cursor"] is None
+
+        unassigned_first = repository.list_unassigned_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            limit=50,
+        )
+        assert unassigned_first["total"] == 101
+        assert len(unassigned_first["items"]) == 50
+        assert unassigned_first["next_cursor"] == unassigned_ids[49]
+        unassigned_second = repository.list_unassigned_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            limit=50,
+            after_document_id=unassigned_first["next_cursor"],
+        )
+        assert len(unassigned_second["items"]) == 50
+        assert unassigned_second["next_cursor"] == unassigned_ids[99]
+        unassigned_last = repository.list_unassigned_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            limit=50,
+            after_document_id=unassigned_second["next_cursor"],
+        )
+        assert [item["document_id"] for item in unassigned_last["items"]] == [unassigned_ids[100]]
+        assert unassigned_last["next_cursor"] is None
+    finally:
+        with SessionLocal() as db:
+            db.query(DocumentDiseaseLinkRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(MedicalDocumentProfileRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(DocumentRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.commit()
+
+
+def test_external_source_page_requires_current_valid_analysis_and_scope():
+    suffix = uuid.uuid4().hex
+    user_id = f"external-user-{suffix}"
+    workspace_id = f"external-workspace-{suffix}"
+    concept_id = "mesh:EXTERNAL-001"
+    document_id = f"external-document-{suffix}"
+    run_id = f"external-analysis-{suffix}"
+    search_id = f"external-search-{suffix}"
+    match_run_id = f"external-match-{suffix}"
+    article_id = f"external-article-{suffix}"
+
+    try:
+        with SessionLocal() as db:
+            document = _document(document_id, user_id, workspace_id)
+            db.add(document)
+            db.flush()
+            db.add(
+                DocumentDiseaseLinkRecord(
+                    id=f"external-link-{suffix}",
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=document_id,
+                    concept_id=concept_id,
+                    preferred_name_en="External Disease",
+                    preferred_name_zh="外部疾病",
+                    matched_alias="External Disease",
+                    ontology_version="test-v1",
+                    link_source="manual_selection",
+                )
+            )
+            db.add(
+                MedicalAnalysisRunRecord(
+                    id=run_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=document_id,
+                    requested_by=user_id,
+                    status="succeeded",
+                    source_hash=document.file_hash,
+                    parsed_source_hash=document.parsed_source_hash,
+                    analysis_key=f"analysis-key-{suffix}",
+                    is_current=True,
+                )
+            )
+            db.flush()
+            db.add(
+                MedicalAnalysisResultRecord(
+                    run_id=run_id,
+                    report_json="{}",
+                    validation_status="validated",
+                )
+            )
+            db.add(
+                LiteratureSearchRunRecord(
+                    id=search_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=document_id,
+                    normalized_query="external disease",
+                    query_hash=f"query-{suffix}",
+                    status="succeeded",
+                    detected_concepts_json=json.dumps([
+                        {"concept_id": concept_id, "source": "local_ontology"}
+                    ]),
+                )
+            )
+            db.add(
+                LiteratureArticleRecord(
+                    id=article_id,
+                    source="pubmed",
+                    external_id=f"PMID-{suffix}",
+                    title="A current external study",
+                    source_url="https://pubmed.ncbi.nlm.nih.gov/1",
+                )
+            )
+            db.flush()
+            db.add(
+                LiteratureMatchRunRecord(
+                    id=match_run_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=document_id,
+                    analysis_run_id=run_id,
+                    search_run_id=search_id,
+                    matcher_version="test-v1",
+                    input_fingerprint=f"fingerprint-{suffix}",
+                    status="completed",
+                )
+            )
+            db.flush()
+            db.add(
+                LiteratureEvidenceMatchRecord(
+                    id=f"external-evidence-{suffix}",
+                    match_run_id=match_run_id,
+                    finding_id="finding-1",
+                    finding_type="finding",
+                    finding_text_snapshot="A finding",
+                    article_id=article_id,
+                    match_specificity="condition_only",
+                )
+            )
+            db.commit()
+
+        page = DiseaseProfileRepository().list_external_source_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            source="PUBMED",
+            external_id=f"PMID-{suffix}",
+            limit=20,
+        )
+
+        assert page is not None
+        assert [item["document_id"] for item in page["items"]] == [document_id]
+        assert page["next_cursor"] is None
+        assert DiseaseProfileRepository().list_external_source_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id="mesh:OTHER-001",
+            source="pubmed",
+            external_id=f"PMID-{suffix}",
+            limit=20,
+        ) is None
+        assert DiseaseProfileRepository().list_external_source_documents(
+            user_id=f"other-user-{suffix}",
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            source="pubmed",
+            external_id=f"PMID-{suffix}",
+            limit=20,
+        ) is None
+    finally:
+        with SessionLocal() as db:
+            db.query(LiteratureEvidenceMatchRecord).filter_by(match_run_id=match_run_id).delete(synchronize_session=False)
+            db.query(LiteratureMatchRunRecord).filter_by(id=match_run_id).delete(synchronize_session=False)
+            db.query(LiteratureSearchRunRecord).filter_by(id=search_id).delete(synchronize_session=False)
+            db.query(LiteratureArticleRecord).filter_by(id=article_id).delete(synchronize_session=False)
+            db.query(MedicalAnalysisResultRecord).filter_by(run_id=run_id).delete(synchronize_session=False)
+            db.query(MedicalAnalysisRunRecord).filter_by(id=run_id).delete(synchronize_session=False)
+            db.query(DocumentDiseaseLinkRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(DocumentRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.commit()

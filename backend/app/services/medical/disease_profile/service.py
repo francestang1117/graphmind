@@ -212,6 +212,14 @@ class DiseaseProfileService:
             inputs=records,
             preview_limit=5,
         )
+        document_page = self.repository.list_profile_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            limit=20,
+        )
+        payload["documents"] = (document_page or {}).get("items", [])
+        payload["documents_next_cursor"] = (document_page or {}).get("next_cursor")
         preview_sections = payload.get("sections") or {}
         section_counts = payload.get("section_counts") or {}
         payload.pop("_all_sections", None)
@@ -265,10 +273,13 @@ class DiseaseProfileService:
         items = list(all_sections.get(section) or [])
         page_limit = max(1, min(int(limit), 50))
         start = max(0, int(offset))
+        page_items = items[start : start + page_limit]
+        next_offset = start + len(page_items)
         return {
             "section": section,
-            "items": items[start : start + page_limit],
+            "items": page_items,
             "total": int((payload.get("section_counts") or {}).get(section, len(items))),
+            "truncated": bool(next_offset > _MAX_PROFILE_ITEMS_OFFSET and next_offset < len(items)),
         }
 
     def list_unassigned_documents(
@@ -276,10 +287,52 @@ class DiseaseProfileService:
         *,
         user_id: str,
         workspace_id: str,
-    ) -> list[dict[str, Any]]:
+        limit: int = 20,
+        cursor_document_id: str | None = None,
+    ) -> dict[str, Any]:
         return self.repository.list_unassigned_documents(
             user_id=user_id,
             workspace_id=workspace_id,
+            limit=limit,
+            after_document_id=cursor_document_id,
+        )
+
+    def list_profile_documents(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        concept_id: str,
+        limit: int = 20,
+        cursor_document_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self.repository.list_profile_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            limit=limit,
+            after_document_id=cursor_document_id,
+        )
+
+    def list_external_source_documents(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        concept_id: str,
+        source: str,
+        external_id: str,
+        limit: int = 20,
+        cursor_document_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self.repository.list_external_source_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            source=source,
+            external_id=external_id,
+            limit=limit,
+            after_document_id=cursor_document_id,
         )
 
     def _aggregate(

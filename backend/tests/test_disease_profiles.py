@@ -162,6 +162,30 @@ def test_aggregator_keeps_multiple_documents_and_deduplicates_external_articles(
     assert payload["saved_question_count"] == 2
 
 
+def test_aggregator_bounds_external_article_document_preview_and_counts_all_sources():
+    records = [
+        _record(
+            f"external-doc-{index}",
+            title=f"External source {index}",
+            alias="Fabry Disease",
+            run_id=f"external-run-{index}",
+            article_id="PMID-SHARED",
+        )
+        for index in range(101)
+    ]
+
+    payload = DiseaseProfileAggregator().aggregate(
+        concept_id="mesh:D000795",
+        inputs=records,
+    )
+    article = payload["sections"]["external_studies"][0]
+
+    assert article["related_document_count"] == 101
+    assert len(article["document_ids"]) == 20
+    assert len(article["document_titles"]) == 20
+    assert article["related_documents_truncated"] is True
+
+
 def test_aggregator_excludes_stale_analysis_and_never_keeps_not_reported_value():
     record = _record("doc-stale", title="Stale paper", alias="Fabry Disease", run_id="run-stale", valid=False)
     record["analyses"][0]["report"]["study_methods"]["sample_size"] = {

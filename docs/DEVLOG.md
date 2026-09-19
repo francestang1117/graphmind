@@ -1953,3 +1953,32 @@ batch loading, section input selection, summary/detail output compatibility,
 bounded item cursors, and frontend profile-page loading. The performance work
 does not add AI calls, external searches, new medical conclusions, caching, or
 multi-disease content ownership.
+
+## 2026-09 - V2 PR16: Disease Profile Source Pagination
+
+PR16 bounds the source-document surface inside a disease profile. Profile detail
+responses now include the first 20 linked documents and an opaque document-ID
+cursor; later pages are fetched with scope-checked keyset queries. Unassigned
+classified documents use the same bounded pagination with a total count, and
+the frontend keeps loaded pages while offering retry and load-more states.
+
+External article cards retain only a bounded preview of linked document IDs and
+titles, while reporting the unique related-document count and whether the
+preview was truncated. A scoped source-document endpoint resolves the full
+related-document list only when the article is tied to the selected disease,
+workspace, and a current validated analysis.
+
+Section item responses now expose a `truncated` flag when the existing 10,000
+offset safety boundary is reached, so the UI does not imply that all items were
+loaded. Cursor pages use stable document IDs, deduplicate frontend additions,
+and reset when the selected profile or section changes. The implementation does
+not claim to make large section aggregation database-paginated; that remains a
+separate performance task.
+
+Regression coverage includes 101 linked and unassigned documents, 101 related
+documents for an external article, scope and current-analysis checks, terminal
+cursor behavior, section truncation, source retry/load-more UI, and existing
+workspace and medical-evaluation gates. The local backend suite is `587 passed,
+5 skipped`; the frontend suite is `44 passed`, with lint and production build
+passing. These checks are engineering regression tests, not clinically expert-
+validated quality judgments.

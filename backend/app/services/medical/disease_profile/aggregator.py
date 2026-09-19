@@ -29,6 +29,7 @@ _FLAGGED_ARTICLE_STATUSES = {
 }
 _WITHDRAWN_ARTICLE_STATUSES = {"retracted", "retraction_notice"}
 _REFERENCE_SECTIONS = {"references", "bibliography"}
+_EXTERNAL_DOCUMENT_PREVIEW_LIMIT = 20
 
 
 class DiseaseProfileAggregator:
@@ -515,6 +516,9 @@ class DiseaseProfileAggregator:
                         "section": "external_studies",
                         "document_ids": [document_id] if document_id else [],
                         "document_titles": [document.get("title", "")] if document_id else [],
+                        "related_document_count": 1 if document_id else 0,
+                        "related_documents_truncated": False,
+                        "_related_document_ids": {document_id} if document_id else set(),
                         "document_title": document.get("title", ""),
                         "document_kind": document.get("document_kind", ""),
                         "document_date": document.get("document_date", ""),
@@ -549,11 +553,17 @@ class DiseaseProfileAggregator:
                     }
                     by_key[key] = current
                 else:
-                    if document_id and document_id not in current["document_ids"]:
-                        current["document_ids"].append(document_id)
-                    title = str(document.get("title") or "")
-                    if title and title not in current["document_titles"]:
-                        current["document_titles"].append(title)
+                    related_ids = current["_related_document_ids"]
+                    if document_id and document_id not in related_ids:
+                        related_ids.add(document_id)
+                        current["related_document_count"] += 1
+                        if len(current["document_ids"]) < _EXTERNAL_DOCUMENT_PREVIEW_LIMIT:
+                            current["document_ids"].append(document_id)
+                        else:
+                            current["related_documents_truncated"] = True
+                        title = str(document.get("title") or "")
+                        if title and len(current["document_titles"]) < _EXTERNAL_DOCUMENT_PREVIEW_LIMIT:
+                            current["document_titles"].append(title)
                     current["flagged"] = bool(current["flagged"] or flagged)
                     if _article_status_priority(status) > _article_status_priority(
                         current["retraction_status"]
@@ -576,6 +586,9 @@ class DiseaseProfileAggregator:
                     warning = "This external article has a correction notice."
                     if warning not in current["warnings"]:
                         current["warnings"].append(warning)
+        for item in by_key.values():
+            item.pop("_related_document_ids", None)
+
         article_count = sum(
             1
             for item in by_key.values()
