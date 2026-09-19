@@ -17,6 +17,7 @@ from app.models.persistence import (
 from app.services.medical.disease_profile.aggregator import DiseaseProfileAggregator
 from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 from app.services.medical.disease_profile.repository import DiseaseProfileRepository
+from app.services.medical.disease_profile.service import DiseaseProfileService
 
 
 def _evidence(evidence_id: str, *, section_type: str = "results") -> dict:
@@ -439,6 +440,30 @@ def test_repository_loads_only_selected_scoped_comparison_inputs():
             "EVIDENCE-0",
         ]
         assert all("open_filename" in record["document"] for record in records)
+
+        preview = DiseaseProfileService(
+            repository=DiseaseProfileRepository(),
+        ).preview_comparison(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            documents=[
+                {
+                    "document_id": document_ids[2],
+                    "expected_parsed_source_hash": f"parsed-{document_ids[2]}",
+                },
+                {
+                    "document_id": document_ids[0],
+                    "expected_parsed_source_hash": f"parsed-{document_ids[0]}",
+                },
+            ],
+            language="en",
+        )
+        assert [document["document_id"] for document in preview["documents"]] == [
+            document_ids[2],
+            document_ids[0],
+        ]
+        assert all(document["open_filename"] for document in preview["documents"])
     finally:
         with SessionLocal() as db:
             db.query(MedicalAnalysisEvidenceRecord).filter(

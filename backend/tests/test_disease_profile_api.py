@@ -11,6 +11,7 @@ import pytest
 from app.api.endpoints import disease_profiles
 from app.core.errors import AppError
 from app.services.medical.disease_profile.exceptions import DiseaseProfileError
+from app.services.medical.disease_profile.models import ComparisonPreviewRequest
 
 
 def _link() -> dict:
@@ -41,6 +42,24 @@ def _summary(concept_id: str = "mesh:D000795") -> dict:
         "saved_question_count": 0,
         "last_updated_at": "2026-09-18T00:00:00+00:00",
         "section_counts": {},
+        "warnings": [],
+    }
+
+
+def _comparison_preview_payload() -> dict:
+    def document(document_id: str) -> dict:
+        return {
+            "document_id": document_id,
+            "title": f"{document_id}.pdf",
+            "open_filename": f"{document_id}.pdf",
+            "analysis_run_id": f"run-{document_id}",
+            "parsed_source_hash": f"parsed-{document_id}",
+        }
+
+    return {
+        "concept_id": "mesh:D000795",
+        "documents": [document("document-1"), document("document-2")],
+        "discussion_questions": [],
         "warnings": [],
     }
 
@@ -144,6 +163,118 @@ def test_list_profiles_encodes_the_next_cursor(monkeypatch):
         "workspace_id": "workspace-1",
         "limit": 20,
         "cursor_concept_id": None,
+    }
+
+
+def test_comparison_preview_api_forwards_scope_and_returns_strict_payload(monkeypatch):
+    _patch_scope(monkeypatch)
+    captured = {}
+
+    def preview_comparison(**kwargs):
+        captured.update(kwargs)
+        return _comparison_preview_payload()
+
+    monkeypatch.setattr(
+        disease_profiles.disease_profile_service,
+        "preview_comparison",
+        preview_comparison,
+    )
+    body = ComparisonPreviewRequest(
+        documents=[
+            {
+                "document_id": "document-1",
+                "expected_parsed_source_hash": "parsed-document-1",
+            },
+            {
+                "document_id": "document-2",
+                "expected_parsed_source_hash": "parsed-document-2",
+            },
+        ],
+        language="zh",
+    )
+
+    response = asyncio.run(
+        disease_profiles.preview_disease_profile_comparison(
+            "mesh:D000795",
+            body,
+            workspace_id="workspace-1",
+            user=SimpleNamespace(id="user-1"),
+        )
+    )
+
+    assert response.concept_id == "mesh:D000795"
+    assert [item.document_id for item in response.documents] == [
+        "document-1",
+        "document-2",
+    ]
+    assert captured == {
+        "user_id": "user-1",
+        "workspace_id": "workspace-1",
+        "concept_id": "mesh:D000795",
+        "documents": [
+            {
+                "document_id": "document-1",
+                "expected_parsed_source_hash": "parsed-document-1",
+            },
+            {
+                "document_id": "document-2",
+                "expected_parsed_source_hash": "parsed-document-2",
+            },
+        ],
+        "language": "zh",
+    }
+
+
+@pytest.mark.parametrize(
+    ("code", "status_code"),
+    [
+        ("comparison_invalid_selection", 422),
+        ("comparison_source_not_found", 404),
+        ("comparison_source_changed", 409),
+        ("comparison_storage_unavailable", 503),
+    ],
+)
+def test_comparison_preview_api_preserves_service_error_mapping(
+    monkeypatch,
+    code: str,
+    status_code: int,
+):
+    _patch_scope(monkeypatch)
+
+    def preview_comparison(**_kwargs):
+        raise DiseaseProfileError(
+            "comparison failed",
+            code=code,
+            status_code=status_code,
+        )
+
+    monkeypatch.setattr(
+        disease_profiles.disease_profile_service,
+        "preview_comparison",
+        preview_comparison,
+    )
+    body = ComparisonPreviewRequest(
+        documents=[_link_selection("document-1"), _link_selection("document-2")],
+    )
+
+    with pytest.raises(AppError) as error:
+        asyncio.run(
+            disease_profiles.preview_disease_profile_comparison(
+                "mesh:D000795",
+                body,
+                workspace_id="workspace-1",
+                user=SimpleNamespace(id="user-1"),
+            )
+        )
+
+    assert error.value.code == code
+    assert error.value.status_code == status_code
+
+
+def _link_selection(document_id: str) -> dict[str, str]:
+    return {
+        "document_id": document_id,
+        "expected_parsed_source_hash": f"parsed-{document_id}",
     }
 
 
