@@ -7,7 +7,13 @@ import uuid
 import pytest
 
 from app.core.database import SessionLocal
-from app.models.persistence import DocumentDiseaseLinkRecord, DocumentRecord
+from app.models.persistence import (
+    DocumentDiseaseLinkRecord,
+    DocumentRecord,
+    MedicalAnalysisEvidenceRecord,
+    MedicalAnalysisResultRecord,
+    MedicalAnalysisRunRecord,
+)
 from app.services.medical.disease_profile.aggregator import DiseaseProfileAggregator
 from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 from app.services.medical.disease_profile.repository import DiseaseProfileRepository
@@ -329,3 +335,127 @@ def test_repository_links_are_idempotent_and_scope_checked():
         assert db.query(DocumentDiseaseLinkRecord).filter_by(document_id=document_id).count() == 0
         db.query(DocumentRecord).filter_by(id=document_id).delete()
         db.commit()
+
+
+def test_repository_loads_only_selected_scoped_comparison_inputs():
+    suffix = uuid.uuid4().hex
+    user_id = f"comparison-user-{suffix}"
+    workspace_id = f"comparison-workspace-{suffix}"
+    concept_id = "mesh:D000795"
+    document_ids = [f"comparison-document-{suffix}-{index}" for index in range(3)]
+    run_ids = [f"comparison-run-{suffix}-{index}" for index in range(3)]
+
+    try:
+        with SessionLocal() as db:
+            for index, (document_id, run_id) in enumerate(zip(document_ids, run_ids)):
+                db.add(
+                    DocumentRecord(
+                        id=document_id,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        filename=f"stored-{document_id}.pdf",
+                        stored_filename=f"stored-{document_id}.pdf",
+                        original_filename=f"paper-{index}.pdf",
+                        file_extension="pdf",
+                        file_type="pdf",
+                        mime_type="application/pdf",
+                        file_hash=f"file-{document_id}",
+                        file_path=f"/tmp/{document_id}.pdf",
+                        file_size=10,
+                        status="completed",
+                        document_kind="research_paper",
+                        language="en",
+                        parsed_source_hash=f"parsed-{document_id}",
+                    )
+                )
+                db.flush()
+                db.add(
+                    DocumentDiseaseLinkRecord(
+                        id=f"comparison-link-{suffix}-{index}",
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        document_id=document_id,
+                        concept_id=concept_id,
+                        preferred_name_en="Fabry Disease",
+                        preferred_name_zh="法布雷病",
+                        matched_alias="Fabry Disease",
+                        ontology_version="test-v1",
+                        link_source="manual_selection",
+                    )
+                )
+                db.add(
+                    MedicalAnalysisRunRecord(
+                        id=run_id,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        document_id=document_id,
+                        requested_by=user_id,
+                        status="succeeded",
+                        source_hash=f"file-{document_id}",
+                        parsed_source_hash=f"parsed-{document_id}",
+                        analysis_key=f"comparison-key-{document_id}",
+                        is_current=True,
+                    )
+                )
+                db.flush()
+                db.add(
+                    MedicalAnalysisResultRecord(
+                        run_id=run_id,
+                        report_json="{}",
+                        validation_status="validated",
+                    )
+                )
+                db.flush()
+                db.add(
+                    MedicalAnalysisEvidenceRecord(
+                        id=f"comparison-evidence-{suffix}-{index}",
+                        evidence_id=f"EVIDENCE-{index}",
+                        run_id=run_id,
+                        finding_id=f"finding-{index}",
+                        chunk_id=f"chunk-{index}",
+                        section_type="results",
+                        section_title="Results",
+                        quoted_text=f"Evidence from {document_id}.",
+                        page_start=2,
+                        page_end=2,
+                    )
+                )
+            db.commit()
+
+        records = DiseaseProfileRepository().load_comparison_inputs(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            document_ids=[document_ids[2], document_ids[0]],
+        )
+
+        assert [record["document"]["document_id"] for record in records] == [
+            document_ids[2],
+            document_ids[0],
+        ]
+        assert all(record["analyses"][0]["valid"] for record in records)
+        assert [record["analyses"][0]["evidence"][0]["evidence_id"] for record in records] == [
+            "EVIDENCE-2",
+            "EVIDENCE-0",
+        ]
+        assert all("open_filename" in record["document"] for record in records)
+    finally:
+        with SessionLocal() as db:
+            db.query(MedicalAnalysisEvidenceRecord).filter(
+                MedicalAnalysisEvidenceRecord.run_id.in_(run_ids)
+            ).delete(synchronize_session=False)
+            db.query(MedicalAnalysisResultRecord).filter(
+                MedicalAnalysisResultRecord.run_id.in_(run_ids)
+            ).delete(synchronize_session=False)
+            db.query(MedicalAnalysisRunRecord).filter(
+                MedicalAnalysisRunRecord.id.in_(run_ids)
+            ).delete(synchronize_session=False)
+            db.query(DocumentDiseaseLinkRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(DocumentRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.commit()

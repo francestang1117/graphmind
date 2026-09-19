@@ -385,6 +385,7 @@ class DiseaseProfileRepository:
         concept_ids: Sequence[str] | None = None,
         include: ProfileInputOptions | None = None,
         concept_id: str | None = None,
+        document_ids: Sequence[str] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         """Batch-load selected profile inputs without an N+1 query path.
 
@@ -398,23 +399,31 @@ class DiseaseProfileRepository:
         selected_concepts = list(dict.fromkeys(str(value) for value in concept_ids if value))
         if not selected_concepts:
             return {}
+        selected_documents = list(
+            dict.fromkeys(str(value) for value in (document_ids or []) if value)
+        )
         options = include or ProfileInputOptions()
         try:
             with self.session_factory() as db:
+                link_filters = [
+                    DocumentDiseaseLinkRecord.user_id == user_id,
+                    DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                    DocumentRecord.user_id == user_id,
+                    DocumentRecord.workspace_id == workspace_id,
+                    DocumentRecord.deleted_at.is_(None),
+                    DocumentDiseaseLinkRecord.concept_id.in_(selected_concepts),
+                ]
+                if selected_documents:
+                    link_filters.append(
+                        DocumentDiseaseLinkRecord.document_id.in_(selected_documents)
+                    )
                 link_query = (
                     select(DocumentDiseaseLinkRecord, DocumentRecord)
                     .join(
                         DocumentRecord,
                         DocumentRecord.id == DocumentDiseaseLinkRecord.document_id,
                     )
-                    .where(
-                        DocumentDiseaseLinkRecord.user_id == user_id,
-                        DocumentDiseaseLinkRecord.workspace_id == workspace_id,
-                        DocumentRecord.user_id == user_id,
-                        DocumentRecord.workspace_id == workspace_id,
-                        DocumentRecord.deleted_at.is_(None),
-                        DocumentDiseaseLinkRecord.concept_id.in_(selected_concepts),
-                    )
+                    .where(*link_filters)
                     .order_by(
                         DocumentDiseaseLinkRecord.document_id,
                         DocumentDiseaseLinkRecord.created_at,
@@ -592,6 +601,47 @@ class DiseaseProfileRepository:
                 code="disease_profile_storage_unavailable",
                 status_code=503,
             ) from exc
+
+    def load_comparison_inputs(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        concept_id: str,
+        document_ids: Sequence[str],
+    ) -> list[dict[str, Any]]:
+        """Load only the selected disease-linked documents and their evidence.
+
+        The document-ID restriction is part of the link query itself. This is
+        intentionally different from loading a full profile and filtering in
+        Python: a large disease profile must not turn a five-document preview
+        into a full-workspace read.
+        """
+        selected_documents = list(dict.fromkeys(str(value) for value in document_ids if value))
+        if not selected_documents:
+            return []
+        grouped = self.load_profile_inputs(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_ids=[concept_id],
+            include=ProfileInputOptions(
+                analyses=True,
+                evidence=True,
+                literature_matches=False,
+                clinician_questions=False,
+            ),
+            document_ids=selected_documents,
+        )
+        records_by_document = {
+            str(record.get("document", {}).get("document_id")): record
+            for record in grouped.get(concept_id, [])
+            if record.get("document", {}).get("document_id")
+        }
+        return [
+            records_by_document[document_id]
+            for document_id in selected_documents
+            if document_id in records_by_document
+        ]
 
     def list_unassigned_documents(
         self,
@@ -1121,6 +1171,9 @@ def _document_dict(row: DocumentRecord) -> dict[str, Any]:
     return {
         "document_id": row.id,
         "title": (row.original_filename or row.filename or "Untitled document")[:255],
+        # This is the storage/API filename accepted by the scoped open route;
+        # never expose file_path or any other server filesystem location.
+        "open_filename": (row.filename or row.stored_filename or "")[:255],
         "document_kind": row.document_kind or "unknown",
         "language": row.language or "unknown",
         "document_date": row.document_date or "",
