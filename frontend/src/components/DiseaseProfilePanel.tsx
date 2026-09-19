@@ -26,6 +26,7 @@ import DiseaseProfileList from "./disease-profile/DiseaseProfileList";
 import DiseaseProfileSection from "./disease-profile/DiseaseProfileSection";
 import DiseaseProfileStats from "./disease-profile/DiseaseProfileStats";
 import DiseaseComparisonPanel from "./disease-profile/DiseaseComparisonPanel";
+import { getComparisonMessages } from "./disease-profile/comparisonMessages";
 import DiseaseSourceDrawer from "./disease-profile/DiseaseSourceDrawer";
 import UnassignedDocuments from "./disease-profile/UnassignedDocuments";
 
@@ -108,6 +109,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     preview: ComparisonPreview;
   } | null>(null);
   const [comparisonLanguage, setComparisonLanguage] = useState<ComparisonLanguage>("en");
+  const comparisonMessages = getComparisonMessages(comparisonLanguage);
   const profiles = useDiseaseProfiles(workspaceId, selectedConceptId);
   const effectiveConceptId = profiles.selectedConceptId;
   const comparisonMutation = useDiseaseComparisonPreview(workspaceId, effectiveConceptId);
@@ -381,11 +383,11 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
               <p className="disease-profile-document-policy">Each document has one primary disease. Remove the current link to return it to Needs review before assigning another disease.</p>
               <div className="disease-profile-comparison-toolbar">
                 <div>
-                  <span className="disease-profile-eyebrow">Compare sources</span>
-                  <strong>{selectedDocumentIds.length}/5 selected</strong>
+                  <span className="disease-profile-eyebrow">{comparisonMessages.compareEyebrow}</span>
+                  <strong>{comparisonMessages.selectedCount(selectedDocumentIds.length)}</strong>
                 </div>
                 <label>
-                  Output language
+                  {comparisonMessages.languageLabel}
                   <select
                     value={comparisonLanguage}
                     onChange={(event) => {
@@ -405,7 +407,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
                   onClick={() => { void compareSelectedDocuments(); }}
                   disabled={selectedDocumentIds.length < 2 || comparisonMutation.isPending}
                 >
-                  {comparisonMutation.isPending ? "Comparing..." : "Compare selected documents"}
+                  {comparisonMutation.isPending ? comparisonMessages.comparing : comparisonMessages.compare}
                 </button>
               </div>
               <div className="disease-profile-document-list">
@@ -455,6 +457,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
               <DiseaseComparisonPanel
                 preview={comparisonResult.preview}
                 workspaceId={workspaceId}
+                language={comparisonLanguage}
               />
             )}
             <div className="disease-profile-sections">

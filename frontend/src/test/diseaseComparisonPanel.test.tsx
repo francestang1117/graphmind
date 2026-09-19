@@ -153,4 +153,32 @@ describe("DiseaseComparisonPanel", () => {
     await user.click(screen.getByRole("button", { name: "Close comparison evidence" }));
     expect(screen.queryByRole("dialog", { name: "Comparison evidence source" })).not.toBeInTheDocument();
   });
+
+  it("localizes fixed comparison labels without translating source evidence", async () => {
+    const user = userEvent.setup();
+    const localizedPreview = preview();
+    localizedPreview.documents[0].methods.comparator = {
+      value: "",
+      support_status: "source_unavailable",
+      evidence: [],
+      warnings: [],
+    };
+
+    render(
+      <DiseaseComparisonPanel
+        preview={localizedPreview}
+        workspaceId="workspace-1"
+        language="zh"
+      />,
+    );
+
+    expect(screen.getAllByText("研究方法").length).toBeGreaterThan(0);
+    expect(screen.getByText(/覆盖不完整/)).toBeInTheDocument();
+    expect(screen.getAllByText("来源不可用").length).toBeGreaterThan(0);
+    expect(screen.getByText("本次对照没有纳入部分来源章节。")).toBeInTheDocument();
+    expect(screen.queryByText("comparison_coverage_partial")).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole("button", { name: "查看出处（2）" })[0]);
+    expect(screen.getByText("Adults with the condition were followed for 12 weeks.")).toBeInTheDocument();
+  });
 });

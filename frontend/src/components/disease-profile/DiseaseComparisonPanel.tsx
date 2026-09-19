@@ -5,42 +5,36 @@ import type {
   ComparisonDocument,
   ComparisonEvidence,
   ComparisonFinding,
-  ComparisonMethod,
+  ComparisonLanguage,
   ComparisonPreview,
 } from "../../services/api";
+import {
+  getComparisonMessages,
+  type ComparisonMessages,
+  type ComparisonMethodKey,
+} from "./comparisonMessages";
 
 interface Props {
   preview: ComparisonPreview;
   workspaceId: string;
+  language?: ComparisonLanguage;
 }
 
-const METHOD_LABELS: Array<[keyof ComparisonDocument["methods"], string]> = [
-  ["design", "Study design"],
-  ["population", "Population"],
-  ["human_animal_in_vitro", "Human / animal / in vitro"],
-  ["sample_size", "Sample size"],
-  ["comparator", "Comparator"],
+const METHOD_FIELDS: ComparisonMethodKey[] = [
+  "design",
+  "population",
+  "human_animal_in_vitro",
+  "sample_size",
+  "comparator",
 ];
-
-function supportLabel(method: ComparisonMethod) {
-  if (method.support_status === "not_reported") return "Not reported";
-  if (method.support_status === "source_unavailable") return "Source unavailable";
-  if (method.support_status === "partially_supported") return "Partially supported";
-  if (method.support_status === "uncertain") return "Uncertain";
-  return "Supported";
-}
-
-function coverageLabel(document: ComparisonDocument) {
-  if (document.coverage_status === "complete") return "Coverage complete";
-  if (document.coverage_status === "partial") return "Coverage partial";
-  return "Coverage unknown";
-}
 
 function EvidenceButton({
   evidence,
+  label,
   onOpen,
 }: {
   evidence: ComparisonEvidence[];
+  label: string;
   onOpen: (items: ComparisonEvidence[]) => void;
 }) {
   if (!evidence.length) return null;
@@ -51,7 +45,7 @@ function EvidenceButton({
       onClick={() => onOpen(evidence)}
     >
       <FileSearch size={13} />
-      View evidence ({evidence.length})
+      {label}
     </button>
   );
 }
@@ -59,10 +53,14 @@ function EvidenceButton({
 function FindingList({
   title,
   items,
+  emptyLabel,
+  evidenceLabel,
   onOpenEvidence,
 }: {
   title: string;
   items: ComparisonFinding[];
+  emptyLabel: string;
+  evidenceLabel: (count: number) => string;
   onOpenEvidence: (items: ComparisonEvidence[]) => void;
 }) {
   return (
@@ -71,12 +69,16 @@ function FindingList({
         <h4>{title}</h4>
         <span>{items.length}</span>
       </div>
-      {!items.length && <p className="disease-comparison-muted">No cited items available.</p>}
+      {!items.length && <p className="disease-comparison-muted">{emptyLabel}</p>}
       {items.map((item) => (
         <article className="disease-comparison-finding" key={item.id}>
           <strong>{item.statement}</strong>
           {item.explanation && <p>{item.explanation}</p>}
-          <EvidenceButton evidence={item.evidence} onOpen={onOpenEvidence} />
+          <EvidenceButton
+            evidence={item.evidence}
+            label={evidenceLabel(item.evidence.length)}
+            onOpen={onOpenEvidence}
+          />
         </article>
       ))}
     </section>
@@ -88,6 +90,7 @@ function ComparisonSourceDrawer({
   evidenceIndex,
   document,
   workspaceId,
+  messages,
   onClose,
   onChangeEvidence,
 }: {
@@ -95,6 +98,7 @@ function ComparisonSourceDrawer({
   evidenceIndex: number;
   document: ComparisonDocument | undefined;
   workspaceId: string;
+  messages: ComparisonMessages;
   onClose: () => void;
   onChangeEvidence: (index: number) => void;
 }) {
@@ -114,17 +118,17 @@ function ComparisonSourceDrawer({
         className="disease-source-drawer"
         role="dialog"
         aria-modal="true"
-        aria-label="Comparison evidence source"
+        aria-label={messages.evidenceSource}
       >
         <div className="disease-source-heading">
           <div>
-            <span className="disease-profile-eyebrow">Comparison evidence</span>
+            <span className="disease-profile-eyebrow">{messages.evidenceSource}</span>
             <h3>{document?.title || evidence.document_id}</h3>
           </div>
           <button
             type="button"
             className="disease-icon-button"
-            aria-label="Close comparison evidence"
+            aria-label={messages.closeEvidence}
             onClick={onClose}
           >
             <X size={18} />
@@ -133,39 +137,34 @@ function ComparisonSourceDrawer({
         <div className="disease-source-meta">
           <span>{evidence.section_title || evidence.section_type}</span>
           {evidence.page_start && (
-            <span>
-              Page {evidence.page_start}
-              {evidence.page_end && evidence.page_end !== evidence.page_start
-                ? `-${evidence.page_end}`
-                : ""}
-            </span>
+            <span>{messages.page(evidence.page_start, evidence.page_end)}</span>
           )}
-          <span>Evidence {evidence.evidence_id}</span>
-          <span>Run {evidence.analysis_run_id}</span>
+          <span>{messages.evidenceId(evidence.evidence_id)}</span>
+          <span>{messages.runId(evidence.analysis_run_id)}</span>
         </div>
         <blockquote className="disease-comparison-drawer-quote">{evidence.quote}</blockquote>
         {evidence.quote_truncated && (
           <p className="disease-comparison-quote-warning">
-            Excerpt shortened for preview. Open the source document to read the full passage.
+            {messages.excerptWarning}
           </p>
         )}
-        <div className="disease-comparison-evidence-nav" aria-label="Comparison evidence navigation">
+        <div className="disease-comparison-evidence-nav" aria-label={messages.evidenceNavigation}>
           <button
             type="button"
             className="disease-icon-button"
-            aria-label="Previous evidence"
-            title="Previous evidence"
+            aria-label={messages.previousEvidence}
+            title={messages.previousEvidence}
             disabled={evidenceIndex === 0}
             onClick={() => onChangeEvidence(evidenceIndex - 1)}
           >
             <ChevronLeft size={16} />
           </button>
-          <span>Evidence {evidenceIndex + 1} / {evidenceItems.length}</span>
+          <span>{messages.evidencePosition(evidenceIndex + 1, evidenceItems.length)}</span>
           <button
             type="button"
             className="disease-icon-button"
-            aria-label="Next evidence"
-            title="Next evidence"
+            aria-label={messages.nextEvidence}
+            title={messages.nextEvidence}
             disabled={evidenceIndex >= evidenceItems.length - 1}
             onClick={() => onChangeEvidence(evidenceIndex + 1)}
           >
@@ -179,7 +178,7 @@ function ComparisonSourceDrawer({
             target="_blank"
             rel="noreferrer noopener"
           >
-            Open source document <ExternalLink size={13} />
+            {messages.openSource} <ExternalLink size={13} />
           </a>
         )}
       </aside>
@@ -187,7 +186,8 @@ function ComparisonSourceDrawer({
   );
 }
 
-export default function DiseaseComparisonPanel({ preview, workspaceId }: Props) {
+export default function DiseaseComparisonPanel({ preview, workspaceId, language = "en" }: Props) {
+  const messages = getComparisonMessages(language);
   const [selectedEvidence, setSelectedEvidence] = useState<{
     items: ComparisonEvidence[];
     index: number;
@@ -202,17 +202,18 @@ export default function DiseaseComparisonPanel({ preview, workspaceId }: Props) 
     : undefined;
 
   return (
-    <section className="disease-comparison-panel" aria-label="Document comparison preview">
+    <section className="disease-comparison-panel" aria-label={messages.title}>
       <div className="disease-comparison-heading">
         <div>
-          <span className="disease-profile-eyebrow">Evidence comparison</span>
-          <h2>Compare selected sources</h2>
-          <p>Methods, reported findings, and limitations are shown per document. No overall ranking is generated.</p>
+          <span className="disease-profile-eyebrow">{messages.eyebrow}</span>
+          <h2>{messages.title}</h2>
+          <p>{messages.description}</p>
         </div>
-        <span className="disease-comparison-count">{preview.documents.length} sources</span>
+        <span className="disease-comparison-count">{messages.sourceCount(preview.documents.length)}</span>
       </div>
+      <p className="disease-comparison-language-notice">{messages.languageNotice}</p>
       {preview.warnings.map((warning) => (
-        <p className="disease-profile-warning" key={warning}>{warning}</p>
+        <p className="disease-profile-warning" key={warning}>{messages.warning(warning)}</p>
       ))}
       <div className="disease-comparison-document-grid">
         {preview.documents.map((document) => (
@@ -237,22 +238,29 @@ export default function DiseaseComparisonPanel({ preview, workspaceId }: Props) 
               </a>
             </header>
             <p className={`disease-comparison-coverage ${document.coverage_status}`}>
-              {coverageLabel(document)}
+              {messages.coverageStatus[document.coverage_status]}
               {document.coverage.total_chunks > 0
-                ? ` · ${document.coverage.selected_chunks}/${document.coverage.total_chunks} chunks`
+                ? ` · ${messages.chunks(document.coverage.selected_chunks, document.coverage.total_chunks)}`
                 : ""}
             </p>
             <section className="disease-comparison-methods">
-              <div className="disease-comparison-section-heading"><h4>Study methods</h4></div>
-              {METHOD_LABELS.map(([field, label]) => {
+              <div className="disease-comparison-section-heading"><h4>{messages.methods}</h4></div>
+              {METHOD_FIELDS.map((field) => {
                 const method = document.methods[field];
                 return (
                   <div className="disease-comparison-method" key={field}>
-                    <span>{label}</span>
-                    <strong>{method.value || "Not reported in source analysis."}</strong>
-                    <small>{supportLabel(method)}</small>
+                    <span>{messages.methodLabels[field]}</span>
+                    <strong>
+                      {method.value || (
+                        method.support_status === "source_unavailable"
+                          ? messages.sourceUnavailableValue
+                          : messages.notReportedValue
+                      )}
+                    </strong>
+                    <small>{messages.supportStatus[method.support_status]}</small>
                     <EvidenceButton
                       evidence={method.evidence}
+                      label={messages.viewEvidence(method.evidence.length)}
                       onOpen={(items) => setSelectedEvidence({ items, index: 0 })}
                     />
                   </div>
@@ -260,23 +268,27 @@ export default function DiseaseComparisonPanel({ preview, workspaceId }: Props) 
               })}
             </section>
             <FindingList
-              title="Reported findings"
+              title={messages.findings}
               items={document.findings}
+              emptyLabel={messages.noCitedItems}
+              evidenceLabel={messages.viewEvidence}
               onOpenEvidence={(items) => setSelectedEvidence({ items, index: 0 })}
             />
             {document.findings_truncated && (
               <p className="disease-comparison-truncation">
-                Showing {document.findings.length} of {document.findings_total} findings. Open the single-document report for the remaining items.
+                {messages.findingsTruncated(document.findings.length, document.findings_total)}
               </p>
             )}
             <FindingList
-              title="Limitations"
+              title={messages.limitations}
               items={document.limitations}
+              emptyLabel={messages.noCitedItems}
+              evidenceLabel={messages.viewEvidence}
               onOpenEvidence={(items) => setSelectedEvidence({ items, index: 0 })}
             />
             {document.limitations_truncated && (
               <p className="disease-comparison-truncation">
-                Showing {document.limitations.length} of {document.limitations_total} limitations. Open the single-document report for the remaining items.
+                {messages.limitationsTruncated(document.limitations.length, document.limitations_total)}
               </p>
             )}
           </article>
@@ -284,13 +296,14 @@ export default function DiseaseComparisonPanel({ preview, workspaceId }: Props) 
       </div>
       {preview.discussion_questions.length > 0 && (
         <section className="disease-comparison-questions">
-          <div className="disease-comparison-section-heading"><h3>Questions to discuss with a clinician</h3></div>
+          <div className="disease-comparison-section-heading"><h3>{messages.questions}</h3></div>
           {preview.discussion_questions.map((item) => (
             <article key={item.id}>
               <strong>{item.question}</strong>
               <p>{item.rationale}</p>
               <EvidenceButton
                 evidence={item.evidence}
+                label={messages.viewEvidence(item.evidence.length)}
                 onOpen={(items) => setSelectedEvidence({ items, index: 0 })}
               />
             </article>
@@ -303,6 +316,7 @@ export default function DiseaseComparisonPanel({ preview, workspaceId }: Props) 
           evidenceIndex={selectedEvidence.index}
           document={selectedDocument}
           workspaceId={workspaceId}
+          messages={messages}
           onClose={() => setSelectedEvidence(null)}
           onChangeEvidence={(index) => setSelectedEvidence((current) => (
             current ? { ...current, index } : current
