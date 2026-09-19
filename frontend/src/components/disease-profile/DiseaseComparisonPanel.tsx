@@ -1,4 +1,4 @@
-import { ExternalLink, FileSearch, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ExternalLink, FileSearch, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { getDocumentOpenUrl } from "../../services/api";
 import type {
@@ -41,14 +41,14 @@ function EvidenceButton({
   onOpen,
 }: {
   evidence: ComparisonEvidence[];
-  onOpen: (item: ComparisonEvidence) => void;
+  onOpen: (items: ComparisonEvidence[]) => void;
 }) {
   if (!evidence.length) return null;
   return (
     <button
       type="button"
       className="disease-comparison-evidence-button"
-      onClick={() => onOpen(evidence[0])}
+      onClick={() => onOpen(evidence)}
     >
       <FileSearch size={13} />
       View evidence ({evidence.length})
@@ -63,7 +63,7 @@ function FindingList({
 }: {
   title: string;
   items: ComparisonFinding[];
-  onOpenEvidence: (item: ComparisonEvidence) => void;
+  onOpenEvidence: (items: ComparisonEvidence[]) => void;
 }) {
   return (
     <section className="disease-comparison-subsection">
@@ -84,16 +84,21 @@ function FindingList({
 }
 
 function ComparisonSourceDrawer({
-  evidence,
+  evidenceItems,
+  evidenceIndex,
   document,
   workspaceId,
   onClose,
+  onChangeEvidence,
 }: {
-  evidence: ComparisonEvidence;
+  evidenceItems: ComparisonEvidence[];
+  evidenceIndex: number;
   document: ComparisonDocument | undefined;
   workspaceId: string;
   onClose: () => void;
+  onChangeEvidence: (index: number) => void;
 }) {
+  const evidence = evidenceItems[evidenceIndex];
   const openUrl = document
     ? getDocumentOpenUrl(document.open_filename, workspaceId)
     : "";
@@ -136,8 +141,32 @@ function ComparisonSourceDrawer({
             </span>
           )}
           <span>Evidence {evidence.evidence_id}</span>
+          <span>Run {evidence.analysis_run_id}</span>
         </div>
         <blockquote className="disease-comparison-drawer-quote">{evidence.quote}</blockquote>
+        <div className="disease-comparison-evidence-nav" aria-label="Comparison evidence navigation">
+          <button
+            type="button"
+            className="disease-icon-button"
+            aria-label="Previous evidence"
+            title="Previous evidence"
+            disabled={evidenceIndex === 0}
+            onClick={() => onChangeEvidence(evidenceIndex - 1)}
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <span>Evidence {evidenceIndex + 1} / {evidenceItems.length}</span>
+          <button
+            type="button"
+            className="disease-icon-button"
+            aria-label="Next evidence"
+            title="Next evidence"
+            disabled={evidenceIndex >= evidenceItems.length - 1}
+            onClick={() => onChangeEvidence(evidenceIndex + 1)}
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
         {openUrl && (
           <a
             className="disease-comparison-open-source"
@@ -154,13 +183,17 @@ function ComparisonSourceDrawer({
 }
 
 export default function DiseaseComparisonPanel({ preview, workspaceId }: Props) {
-  const [selectedEvidence, setSelectedEvidence] = useState<ComparisonEvidence | null>(null);
+  const [selectedEvidence, setSelectedEvidence] = useState<{
+    items: ComparisonEvidence[];
+    index: number;
+  } | null>(null);
   const documentsById = useMemo(
     () => new Map(preview.documents.map((document) => [document.document_id, document])),
     [preview.documents],
   );
-  const selectedDocument = selectedEvidence
-    ? documentsById.get(selectedEvidence.document_id)
+  const activeEvidence = selectedEvidence?.items[selectedEvidence.index];
+  const selectedDocument = activeEvidence
+    ? documentsById.get(activeEvidence.document_id)
     : undefined;
 
   return (
@@ -213,18 +246,29 @@ export default function DiseaseComparisonPanel({ preview, workspaceId }: Props) 
                     <span>{label}</span>
                     <strong>{method.value || "Not reported in source analysis."}</strong>
                     <small>{supportLabel(method)}</small>
-                    <EvidenceButton evidence={method.evidence} onOpen={setSelectedEvidence} />
+                    <EvidenceButton
+                      evidence={method.evidence}
+                      onOpen={(items) => setSelectedEvidence({ items, index: 0 })}
+                    />
                   </div>
                 );
               })}
             </section>
-            <FindingList title="Reported findings" items={document.findings} onOpenEvidence={setSelectedEvidence} />
+            <FindingList
+              title="Reported findings"
+              items={document.findings}
+              onOpenEvidence={(items) => setSelectedEvidence({ items, index: 0 })}
+            />
             {document.findings_truncated && (
               <p className="disease-comparison-truncation">
                 Showing {document.findings.length} of {document.findings_total} findings. Open the single-document report for the remaining items.
               </p>
             )}
-            <FindingList title="Limitations" items={document.limitations} onOpenEvidence={setSelectedEvidence} />
+            <FindingList
+              title="Limitations"
+              items={document.limitations}
+              onOpenEvidence={(items) => setSelectedEvidence({ items, index: 0 })}
+            />
             {document.limitations_truncated && (
               <p className="disease-comparison-truncation">
                 Showing {document.limitations.length} of {document.limitations_total} limitations. Open the single-document report for the remaining items.
@@ -240,17 +284,24 @@ export default function DiseaseComparisonPanel({ preview, workspaceId }: Props) 
             <article key={item.id}>
               <strong>{item.question}</strong>
               <p>{item.rationale}</p>
-              <EvidenceButton evidence={item.evidence} onOpen={setSelectedEvidence} />
+              <EvidenceButton
+                evidence={item.evidence}
+                onOpen={(items) => setSelectedEvidence({ items, index: 0 })}
+              />
             </article>
           ))}
         </section>
       )}
-      {selectedEvidence && (
+      {selectedEvidence && activeEvidence && (
         <ComparisonSourceDrawer
-          evidence={selectedEvidence}
+          evidenceItems={selectedEvidence.items}
+          evidenceIndex={selectedEvidence.index}
           document={selectedDocument}
           workspaceId={workspaceId}
           onClose={() => setSelectedEvidence(null)}
+          onChangeEvidence={(index) => setSelectedEvidence((current) => (
+            current ? { ...current, index } : current
+          ))}
         />
       )}
     </section>

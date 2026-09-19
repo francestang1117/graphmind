@@ -15,10 +15,18 @@ const evidence: ComparisonEvidence = {
   page_end: 7,
 };
 
+const secondEvidence: ComparisonEvidence = {
+  ...evidence,
+  evidence_id: "EVIDENCE-2",
+  quote: "The follow-up assessment was reported on the next page.",
+  page_start: 8,
+  page_end: 8,
+};
+
 const supportedMethod: ComparisonMethod = {
   value: "Human participants",
   support_status: "supported",
-  evidence: [evidence],
+  evidence: [evidence, secondEvidence],
   warnings: [],
 };
 
@@ -116,16 +124,28 @@ describe("DiseaseComparisonPanel", () => {
     expect(screen.getAllByText("Not reported").length).toBeGreaterThan(0);
     expect(screen.getByText(/Showing 10 of 12 findings/)).toBeInTheDocument();
 
-    await user.click(screen.getAllByRole("button", { name: "View evidence (1)" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "View evidence (2)" })[0]);
 
     const drawer = screen.getByRole("dialog", { name: "Comparison evidence source" });
     expect(drawer).toHaveTextContent("Fabry cohort study.pdf");
     expect(drawer).toHaveTextContent("Page 7");
+    expect(drawer).toHaveTextContent("Run run-1");
     expect(drawer).toHaveTextContent("Adults with the condition were followed for 12 weeks.");
+    expect(drawer).toHaveTextContent("Evidence 1 / 2");
     expect(screen.getByRole("link", { name: /Open source document/ })).toHaveAttribute(
       "href",
       expect.stringContaining("stored-document-1.pdf"),
     );
+
+    await user.click(screen.getByRole("button", { name: "Next evidence" }));
+    expect(drawer).toHaveTextContent("Page 8");
+    expect(drawer).toHaveTextContent("The follow-up assessment was reported on the next page.");
+    expect(drawer).toHaveTextContent("Evidence EVIDENCE-2");
+    expect(drawer).toHaveTextContent("Evidence 2 / 2");
+    expect(screen.getByRole("button", { name: "Next evidence" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Previous evidence" }));
+    expect(drawer).toHaveTextContent("Page 7");
 
     await user.click(screen.getByRole("button", { name: "Close comparison evidence" }));
     expect(screen.queryByRole("dialog", { name: "Comparison evidence source" })).not.toBeInTheDocument();
