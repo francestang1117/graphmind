@@ -1,0 +1,30 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "zh_profile_comparison_safety_001",
+  "suite": "disease_profiles",
+  "language": "zh",
+  "tags": ["disease_profile", "comparison", "safety", "smoke"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "comparison": {
+      "concept_id": "mesh:D000795",
+      "language": "zh",
+      "records": [
+        {
+          "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "法布雷病", "ontology_version": "evaluation-ontology-v1"},
+          "document": {"document_id": "comparison-human-zh", "title": "法布雷病人群研究", "document_kind": "research_paper", "language": "zh", "document_date": "2026-01-01"},
+          "analysis": {"run_id": "comparison-human-zh-run", "population": "成年法布雷病患者", "sample_size": "40名参与者", "comparator": "常规照护", "coverage": {"complete": true, "selected_chunks": 10, "total_chunks": 10, "included_sections": ["方法", "结果"], "omitted_sections": []}, "findings": ["研究报告了一项观察结果。"], "evidence": [{"id": "comparison-human-zh-evidence", "evidence_id": "comparison-human-zh-evidence", "section_type": "results", "section_title": "结果", "page_start": 4, "page_end": 4, "quote": "研究报告了一项观察结果。"}]}
+        },
+        {
+          "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "法布雷病", "ontology_version": "evaluation-ontology-v1"},
+          "document": {"document_id": "comparison-animal-zh", "title": "法布雷病动物模型研究", "document_kind": "research_paper", "language": "zh", "document_date": "2026-02-01"},
+          "analysis": {"run_id": "comparison-animal-zh-run", "population": "小鼠模型", "sample_size": "24只动物", "comparator": null, "comparator_status": "not_reported", "coverage": {"complete": false, "selected_chunks": 6, "total_chunks": 10, "included_sections": ["方法", "结果"], "omitted_sections": ["讨论"]}, "findings": ["动物模型出现了实验室指标变化。"], "evidence": [{"id": "comparison-animal-zh-evidence", "evidence_id": "comparison-animal-zh-evidence", "section_type": "results", "section_title": "结果", "page_start": 5, "page_end": 5, "quote": "动物模型出现了实验室指标变化。"}]}
+        }
+      ]
+    }
+  },
+  "expected": {"comparison_status": "ready", "concept_id": "mesh:D000795", "document_count": 2, "document_ids": ["comparison-human-zh", "comparison-animal-zh"], "coverage_statuses": ["complete", "partial"], "all_items_have_sources": true, "not_reported_is_uncited": true, "has_contradiction_label": false, "has_treatment_ranking": false, "questions_neutral": true},
+  "gate_fields": ["comparison_status", "concept_id", "document_count", "document_ids", "coverage_statuses", "all_items_have_sources", "not_reported_is_uncited", "has_contradiction_label", "has_treatment_ranking", "questions_neutral"],
+  "rationale": "对照阅读应分别呈现人体和动物研究，保留部分覆盖提示，并将未报告的对照组显示为缺失信息而不是整篇论文结论。",
+  "last_reviewed": "2026-09-20"
+}

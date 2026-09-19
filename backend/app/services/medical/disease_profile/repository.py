@@ -7,8 +7,10 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 import json
 import logging
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 import uuid
+
+from pydantic import ValidationError
 
 from app.core.database import SessionLocal, db_enabled
 from app.models.persistence import (
@@ -25,6 +27,7 @@ from app.models.persistence import (
     MedicalDocumentProfileRecord,
 )
 from app.services.medical.disease_profile.exceptions import DiseaseProfileError
+from app.services.medical.ai.models import MedicalInsightReport
 
 try:
     from sqlalchemy import delete, func, select
@@ -385,6 +388,7 @@ class DiseaseProfileRepository:
         concept_ids: Sequence[str] | None = None,
         include: ProfileInputOptions | None = None,
         concept_id: str | None = None,
+        document_ids: Sequence[str] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         """Batch-load selected profile inputs without an N+1 query path.
 
@@ -398,23 +402,31 @@ class DiseaseProfileRepository:
         selected_concepts = list(dict.fromkeys(str(value) for value in concept_ids if value))
         if not selected_concepts:
             return {}
+        selected_documents = list(
+            dict.fromkeys(str(value) for value in (document_ids or []) if value)
+        )
         options = include or ProfileInputOptions()
         try:
             with self.session_factory() as db:
+                link_filters = [
+                    DocumentDiseaseLinkRecord.user_id == user_id,
+                    DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                    DocumentRecord.user_id == user_id,
+                    DocumentRecord.workspace_id == workspace_id,
+                    DocumentRecord.deleted_at.is_(None),
+                    DocumentDiseaseLinkRecord.concept_id.in_(selected_concepts),
+                ]
+                if selected_documents:
+                    link_filters.append(
+                        DocumentDiseaseLinkRecord.document_id.in_(selected_documents)
+                    )
                 link_query = (
                     select(DocumentDiseaseLinkRecord, DocumentRecord)
                     .join(
                         DocumentRecord,
                         DocumentRecord.id == DocumentDiseaseLinkRecord.document_id,
                     )
-                    .where(
-                        DocumentDiseaseLinkRecord.user_id == user_id,
-                        DocumentDiseaseLinkRecord.workspace_id == workspace_id,
-                        DocumentRecord.user_id == user_id,
-                        DocumentRecord.workspace_id == workspace_id,
-                        DocumentRecord.deleted_at.is_(None),
-                        DocumentDiseaseLinkRecord.concept_id.in_(selected_concepts),
-                    )
+                    .where(*link_filters)
                     .order_by(
                         DocumentDiseaseLinkRecord.document_id,
                         DocumentDiseaseLinkRecord.created_at,
@@ -587,6 +599,146 @@ class DiseaseProfileRepository:
             raise
         except SQLAlchemyError as exc:
             log.warning("Could not load disease profile inputs")
+            raise DiseaseProfileError(
+                "Disease profile data is temporarily unavailable.",
+                code="disease_profile_storage_unavailable",
+                status_code=503,
+            ) from exc
+
+    def load_comparison_inputs(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        concept_id: str,
+        document_ids: Sequence[str],
+    ) -> list[dict[str, Any]]:
+        """Load selected documents and exactly one current validated run each.
+
+        Comparison reads use a dedicated query path instead of the general
+        profile loader. The latter intentionally exposes history for profile
+        status and expiry views; a comparison must never mix that history with
+        the current report and its evidence.
+        """
+        selected_documents = list(dict.fromkeys(str(value) for value in document_ids if value))
+        if not selected_documents:
+            return []
+        self._require_available()
+        try:
+            with self.session_factory() as db:
+                link_rows = db.execute(
+                    select(DocumentDiseaseLinkRecord, DocumentRecord)
+                    .join(
+                        DocumentRecord,
+                        DocumentRecord.id == DocumentDiseaseLinkRecord.document_id,
+                    )
+                    .where(
+                        DocumentDiseaseLinkRecord.user_id == user_id,
+                        DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                        DocumentDiseaseLinkRecord.concept_id == concept_id,
+                        DocumentDiseaseLinkRecord.document_id.in_(selected_documents),
+                        DocumentRecord.user_id == user_id,
+                        DocumentRecord.workspace_id == workspace_id,
+                        DocumentRecord.deleted_at.is_(None),
+                    )
+                    .order_by(
+                        DocumentDiseaseLinkRecord.document_id,
+                        DocumentDiseaseLinkRecord.created_at,
+                        DocumentDiseaseLinkRecord.id,
+                    )
+                ).all()
+                documents: dict[str, dict[str, Any]] = {}
+                for _link, document in link_rows:
+                    documents.setdefault(document.id, _document_dict(document))
+                if not documents:
+                    return []
+
+                current_rows = db.execute(
+                    select(MedicalAnalysisRunRecord, MedicalAnalysisResultRecord)
+                    .join(
+                        MedicalAnalysisResultRecord,
+                        MedicalAnalysisResultRecord.run_id == MedicalAnalysisRunRecord.id,
+                    )
+                    .join(
+                        DocumentRecord,
+                        DocumentRecord.id == MedicalAnalysisRunRecord.document_id,
+                    )
+                    .where(
+                        MedicalAnalysisRunRecord.user_id == user_id,
+                        MedicalAnalysisRunRecord.workspace_id == workspace_id,
+                        MedicalAnalysisRunRecord.document_id.in_(list(documents)),
+                        MedicalAnalysisRunRecord.status == "succeeded",
+                        MedicalAnalysisRunRecord.is_current.is_(True),
+                        MedicalAnalysisRunRecord.source_hash == DocumentRecord.file_hash,
+                        MedicalAnalysisRunRecord.parsed_source_hash == DocumentRecord.parsed_source_hash,
+                        DocumentRecord.parsed_source_hash.is_not(None),
+                        DocumentRecord.parsed_source_hash != "",
+                        MedicalAnalysisResultRecord.validation_status == "validated",
+                    )
+                    .order_by(
+                        MedicalAnalysisRunRecord.document_id,
+                        MedicalAnalysisRunRecord.created_at.desc(),
+                        MedicalAnalysisRunRecord.id,
+                    )
+                ).all()
+                runs_by_document: dict[str, tuple[Any, Any]] = {}
+                for run, result in current_rows:
+                    if run.document_id in runs_by_document:
+                        raise DiseaseProfileError(
+                            "A selected document has multiple current analyses.",
+                            code="comparison_source_changed",
+                            status_code=409,
+                        )
+                    runs_by_document[run.document_id] = (run, result)
+
+                missing_runs = set(documents) - set(runs_by_document)
+                if missing_runs:
+                    raise DiseaseProfileError(
+                        "A selected document no longer has a current validated analysis.",
+                        code="comparison_source_changed",
+                        status_code=409,
+                    )
+
+                evidence_by_run = self._load_evidence(
+                    db,
+                    [run.id for run, _result in runs_by_document.values()],
+                )
+                records_by_document: dict[str, dict[str, Any]] = {}
+                for document_id, document in documents.items():
+                    run, result = runs_by_document[document_id]
+                    report = _normalize_comparison_report(
+                        result.report_json,
+                        row_schema_version=run.schema_version,
+                    )
+                    if report is None:
+                        raise DiseaseProfileError(
+                            "A selected document has an invalid analysis report.",
+                            code="comparison_report_invalid",
+                            status_code=409,
+                        )
+                    records_by_document[document_id] = {
+                        "link": {},
+                        "document": document,
+                        "analyses": [{
+                            "run": _analysis_run_dict(run, result),
+                            "report": report,
+                            "evidence": evidence_by_run.get(run.id, []),
+                            "valid": True,
+                            "source_current": True,
+                            "warnings": [],
+                        }],
+                        "matches": [],
+                        "questions": [],
+                    }
+                return [
+                    records_by_document[document_id]
+                    for document_id in selected_documents
+                    if document_id in records_by_document
+                ]
+        except DiseaseProfileError:
+            raise
+        except SQLAlchemyError as exc:
+            log.warning("Could not load comparison inputs")
             raise DiseaseProfileError(
                 "Disease profile data is temporarily unavailable.",
                 code="disease_profile_storage_unavailable",
@@ -1121,6 +1273,9 @@ def _document_dict(row: DocumentRecord) -> dict[str, Any]:
     return {
         "document_id": row.id,
         "title": (row.original_filename or row.filename or "Untitled document")[:255],
+        # This is the storage/API filename accepted by the scoped open route;
+        # never expose file_path or any other server filesystem location.
+        "open_filename": (row.filename or row.stored_filename or "")[:255],
         "document_kind": row.document_kind or "unknown",
         "language": row.language or "unknown",
         "document_date": row.document_date or "",
@@ -1221,6 +1376,41 @@ def _loads_json(value: str | None, default: Any) -> Any:
         return json.loads(value or "")
     except (TypeError, json.JSONDecodeError):
         return default
+
+
+def _normalize_comparison_report(
+    report_json: str | None,
+    *,
+    row_schema_version: str | None,
+) -> dict[str, Any] | None:
+    """Validate a saved report while preserving raw coverage provenance."""
+    raw = _loads_json(report_json, None)
+    if not isinstance(raw, Mapping):
+        return None
+    raw_schema_version = str(raw.get("schema_version") or "").strip()
+    stored_schema_version = str(row_schema_version or "").strip()
+    if raw_schema_version and stored_schema_version and raw_schema_version != stored_schema_version:
+        return None
+    candidate_schema_version = raw_schema_version or stored_schema_version
+    if candidate_schema_version and candidate_schema_version not in {"medical-insights-v2", "medical-insights-v3"}:
+        return None
+    try:
+        report = MedicalInsightReport.model_validate(dict(raw))
+    except (ValidationError, TypeError, ValueError):
+        return None
+    effective_schema_version = candidate_schema_version or report.schema_version
+    if effective_schema_version not in {"medical-insights-v2", "medical-insights-v3"}:
+        return None
+    normalized = report.model_dump()
+    normalized["schema_version"] = effective_schema_version
+    # Pydantic supplies a complete coverage default for old reports. That is
+    # useful for ordinary AI validation, but comparison must not turn a
+    # missing raw field into a claim of complete source coverage.
+    if "coverage" not in raw:
+        normalized.pop("coverage", None)
+    elif isinstance(raw.get("coverage"), Mapping):
+        normalized["coverage"] = dict(raw["coverage"])
+    return normalized
 
 
 def _string_list(value: Any, limit: int) -> list[str]:

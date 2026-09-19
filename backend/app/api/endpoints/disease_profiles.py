@@ -13,6 +13,8 @@ from app.api.workspace_scope import normalize_workspace_id, resolve_workspace_id
 from app.core.errors import AppError
 from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 from app.services.medical.disease_profile.models import (
+    ComparisonPreview,
+    ComparisonPreviewRequest,
     DiseaseConceptSearchView,
     DiseaseProfileDocumentsView,
     DiseaseProfileDetail,
@@ -299,6 +301,32 @@ async def list_disease_profile_external_source_documents(
     if payload.get("next_cursor"):
         payload["next_cursor"] = _encode_cursor(str(payload["next_cursor"]))
     return DiseaseProfileDocumentsView.model_validate(payload)
+
+
+@router.post(
+    "/disease-profiles/{concept_id}/comparison-preview",
+    response_model=ComparisonPreview,
+)
+async def preview_disease_profile_comparison(
+    concept_id: str,
+    body: ComparisonPreviewRequest,
+    workspace_id: str = Query(min_length=1, max_length=64),
+    user: UserRecord = Depends(current_user_or_dev),
+) -> ComparisonPreview:
+    """Build a bounded comparison from the selected current source analyses."""
+    scope = _scope(user, workspace_id)
+    _require_storage()
+    try:
+        payload = disease_profile_service.preview_comparison(
+            user_id=_user_id(user),
+            workspace_id=scope,
+            concept_id=concept_id,
+            documents=[item.model_dump() for item in body.documents],
+            language=body.language,
+        )
+    except DiseaseProfileError as exc:
+        raise _api_error(exc) from exc
+    return ComparisonPreview.model_validate(payload)
 
 
 @router.get(

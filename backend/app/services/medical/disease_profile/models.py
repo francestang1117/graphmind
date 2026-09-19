@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 ProfileSection = Literal[
@@ -22,6 +22,15 @@ ProfileSection = Literal[
 
 LinkSource = Literal["manual_selection", "confirmed_search"]
 ProfileSourceStatus = Literal["current", "outdated", "unavailable"]
+ComparisonCoverageStatus = Literal["complete", "partial", "unknown"]
+ComparisonSupportStatus = Literal[
+    "supported",
+    "partially_supported",
+    "not_reported",
+    "uncertain",
+    "source_unavailable",
+]
+ComparisonLanguage = Literal["en", "zh", "ja"]
 
 
 class _StrictModel(BaseModel):
@@ -189,6 +198,115 @@ class DiseaseProfileItemsView(_StrictModel):
 class DiseaseProfileDocumentsView(_StrictModel):
     items: list[DiseaseProfileDocument] = Field(default_factory=list, max_length=50)
     next_cursor: str | None = None
+
+
+class ComparisonDocumentSelection(_StrictModel):
+    """One user-selected source and the parse version seen by the client."""
+
+    document_id: str = Field(min_length=1, max_length=255)
+    expected_parsed_source_hash: str = Field(min_length=1, max_length=128)
+
+
+class ComparisonPreviewRequest(_StrictModel):
+    """Strict input contract for a bounded, read-only comparison preview."""
+
+    documents: list[ComparisonDocumentSelection] = Field(
+        min_length=2,
+        max_length=5,
+    )
+    language: ComparisonLanguage = "en"
+
+    @model_validator(mode="after")
+    def validate_unique_documents(self) -> Self:
+        document_ids = [item.document_id for item in self.documents]
+        if len(document_ids) != len(set(document_ids)):
+            raise ValueError("comparison documents must be unique")
+        return self
+
+
+class ComparisonEvidence(_StrictModel):
+    """A quote tied to one analysis run and one selected document."""
+
+    document_id: str = Field(min_length=1, max_length=255)
+    analysis_run_id: str = Field(min_length=1, max_length=64)
+    evidence_id: str = Field(min_length=1, max_length=128)
+    quote: str = Field(min_length=1, max_length=5000)
+    section_type: str = "unknown"
+    section_title: str = ""
+    page_start: int | None = Field(default=None, ge=1)
+    page_end: int | None = Field(default=None, ge=1)
+    quote_truncated: bool = False
+
+
+class ComparisonMethod(_StrictModel):
+    """One of the five fixed method fields shown by the comparison UI."""
+
+    value: str = ""
+    support_status: ComparisonSupportStatus = "not_reported"
+    evidence: list[ComparisonEvidence] = Field(default_factory=list, max_length=5)
+    warnings: list[str] = Field(default_factory=list, max_length=10)
+
+
+class ComparisonMethods(_StrictModel):
+    design: ComparisonMethod = Field(default_factory=ComparisonMethod)
+    population: ComparisonMethod = Field(default_factory=ComparisonMethod)
+    human_animal_in_vitro: ComparisonMethod = Field(default_factory=ComparisonMethod)
+    sample_size: ComparisonMethod = Field(default_factory=ComparisonMethod)
+    comparator: ComparisonMethod = Field(default_factory=ComparisonMethod)
+
+
+class ComparisonCoverage(_StrictModel):
+    status: ComparisonCoverageStatus = "unknown"
+    selected_chunks: int = Field(default=0, ge=0)
+    total_chunks: int = Field(default=0, ge=0)
+    included_sections: list[str] = Field(default_factory=list, max_length=100)
+    omitted_sections: list[str] = Field(default_factory=list, max_length=100)
+
+
+class ComparisonFinding(_StrictModel):
+    id: str = Field(min_length=1, max_length=200)
+    statement: str = Field(min_length=1, max_length=5000)
+    explanation: str = ""
+    evidence: list[ComparisonEvidence] = Field(default_factory=list, max_length=5)
+    warnings: list[str] = Field(default_factory=list, max_length=10)
+
+
+class ComparisonQuestion(_StrictModel):
+    id: str = Field(min_length=1, max_length=100)
+    question: str = Field(min_length=1, max_length=500)
+    rationale: str = ""
+    document_id: str = Field(min_length=1, max_length=255)
+    evidence: list[ComparisonEvidence] = Field(default_factory=list, max_length=5)
+
+
+class ComparisonDocument(_StrictModel):
+    """One document's bounded, evidence-preserving comparison view."""
+
+    document_id: str = Field(min_length=1, max_length=255)
+    title: str
+    document_kind: str = "unknown"
+    document_date: str = ""
+    open_filename: str = Field(min_length=1, max_length=255)
+    analysis_run_id: str = Field(min_length=1, max_length=64)
+    parsed_source_hash: str = Field(min_length=1, max_length=128)
+    coverage_status: ComparisonCoverageStatus = "unknown"
+    coverage: ComparisonCoverage = Field(default_factory=ComparisonCoverage)
+    methods: ComparisonMethods = Field(default_factory=ComparisonMethods)
+    findings: list[ComparisonFinding] = Field(default_factory=list, max_length=10)
+    findings_total: int = Field(default=0, ge=0)
+    findings_truncated: bool = False
+    limitations: list[ComparisonFinding] = Field(default_factory=list, max_length=10)
+    limitations_total: int = Field(default=0, ge=0)
+    limitations_truncated: bool = False
+
+
+class ComparisonPreview(_StrictModel):
+    """Read-only comparison response in the exact requested document order."""
+
+    concept_id: str = Field(min_length=1, max_length=255)
+    documents: list[ComparisonDocument] = Field(min_length=2, max_length=5)
+    discussion_questions: list[ComparisonQuestion] = Field(default_factory=list, max_length=3)
+    warnings: list[str] = Field(default_factory=list, max_length=20)
 
 
 class UnassignedDocumentView(_StrictModel):

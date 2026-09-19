@@ -72,6 +72,45 @@ def _input_record(concept_id: str, document_id: str) -> dict:
     }
 
 
+def _comparison_record(document_id: str) -> dict:
+    evidence_id = f"comparison-evidence-{document_id}"
+    return {
+        "document": {
+            "document_id": document_id,
+            "title": f"{document_id}.pdf",
+            "open_filename": f"stored-{document_id}.pdf",
+            "document_kind": "research_paper",
+            "document_date": "2026-01-01",
+            "parsed_source_hash": f"parsed-{document_id}",
+        },
+        "analyses": [{
+            "run": {
+                "run_id": f"run-{document_id}",
+                "parsed_source_hash": f"parsed-{document_id}",
+            },
+            "report": {
+                "study_methods": {
+                    "population": {
+                        "value": "Adults",
+                        "support_status": "supported",
+                        "evidence_ids": [evidence_id],
+                    },
+                },
+            },
+            "evidence": [{
+                "id": evidence_id,
+                "evidence_id": evidence_id,
+                "section_type": "methods",
+                "section_title": "Methods",
+                "quote": "Adults were included.",
+                "page_start": 1,
+                "page_end": 1,
+            }],
+            "valid": True,
+        }],
+    }
+
+
 def test_repository_pages_concepts_before_loading_profile_inputs():
     suffix = uuid.uuid4().hex
     user_id = f"perf-user-{suffix}"
@@ -372,6 +411,33 @@ def test_service_loads_only_the_current_concept_page():
         "after_concept_id": "mesh:before",
     }
     assert captured["inputs"]["concept_ids"] == ["mesh:A", "mesh:B"]
+
+
+def test_comparison_service_keeps_selection_at_five_documents():
+    captured: dict[str, object] = {}
+    document_ids = [f"comparison-doc-{index}" for index in range(5)]
+
+    class Repository:
+        def load_comparison_inputs(self, **kwargs):
+            captured.update(kwargs)
+            return [_comparison_record(document_id) for document_id in kwargs["document_ids"]]
+
+    preview = DiseaseProfileService(repository=Repository()).preview_comparison(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        concept_id="mesh:D000795",
+        documents=[
+            {
+                "document_id": document_id,
+                "expected_parsed_source_hash": f"parsed-{document_id}",
+            }
+            for document_id in document_ids
+        ],
+        language="en",
+    )
+
+    assert captured["document_ids"] == document_ids
+    assert len(preview["documents"]) == 5
 
 
 def test_section_read_uses_only_its_declared_input_tables():

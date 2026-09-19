@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
 
 from app.core.database import SessionLocal
-from app.models.persistence import DocumentDiseaseLinkRecord, DocumentRecord
+from app.models.persistence import (
+    DocumentDiseaseLinkRecord,
+    DocumentRecord,
+    MedicalAnalysisEvidenceRecord,
+    MedicalAnalysisResultRecord,
+    MedicalAnalysisRunRecord,
+)
 from app.services.medical.disease_profile.aggregator import DiseaseProfileAggregator
 from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 from app.services.medical.disease_profile.repository import DiseaseProfileRepository
+from app.services.medical.disease_profile.service import DiseaseProfileService
 
 
 def _evidence(evidence_id: str, *, section_type: str = "results") -> dict:
@@ -25,6 +33,47 @@ def _evidence(evidence_id: str, *, section_type: str = "results") -> dict:
         "page_end": 2,
         "quote": "The source reports a measured outcome.",
     }
+
+
+def _comparison_report_json(
+    evidence_id: str,
+    *,
+    schema_version: str = "medical-insights-v3",
+    include_coverage: bool = True,
+) -> str:
+    payload = {
+        "schema_version": schema_version,
+        "document_kind": "research_paper",
+        "language": "en",
+        "overview": {
+            "title": "Comparison source",
+            "summary": "A saved report used by the comparison read path.",
+            "evidence_ids": [evidence_id],
+        },
+        "study_methods": {
+            "population": {
+                "value": "Adults",
+                "support_status": "supported",
+                "evidence_ids": [evidence_id],
+            },
+        },
+        "key_findings": [{
+            "id": "finding-1",
+            "statement": "The source reported an outcome.",
+            "plain_explanation": "The comparison keeps this statement attached to its source.",
+            "evidence_ids": [evidence_id],
+        }],
+        "limitations": [],
+    }
+    if include_coverage:
+        payload["coverage"] = {
+            "complete": True,
+            "selected_chunks": 2,
+            "total_chunks": 2,
+            "included_sections": ["methods", "results"],
+            "omitted_sections": [],
+        }
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _record(
@@ -329,3 +378,229 @@ def test_repository_links_are_idempotent_and_scope_checked():
         assert db.query(DocumentDiseaseLinkRecord).filter_by(document_id=document_id).count() == 0
         db.query(DocumentRecord).filter_by(id=document_id).delete()
         db.commit()
+
+
+def test_repository_loads_only_selected_scoped_comparison_inputs():
+    suffix = uuid.uuid4().hex
+    user_id = f"comparison-user-{suffix}"
+    workspace_id = f"comparison-workspace-{suffix}"
+    concept_id = "mesh:D000795"
+    document_ids = [f"comparison-document-{suffix}-{index}" for index in range(3)]
+    run_ids = [f"comparison-run-{suffix}-{index}" for index in range(3)]
+    history_run_ids: list[str] = []
+
+    try:
+        with SessionLocal() as db:
+            for index, (document_id, run_id) in enumerate(zip(document_ids, run_ids)):
+                db.add(
+                    DocumentRecord(
+                        id=document_id,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        filename=f"stored-{document_id}.pdf",
+                        stored_filename=f"stored-{document_id}.pdf",
+                        original_filename=f"paper-{index}.pdf",
+                        file_extension="pdf",
+                        file_type="pdf",
+                        mime_type="application/pdf",
+                        file_hash=f"file-{document_id}",
+                        file_path=f"/tmp/{document_id}.pdf",
+                        file_size=10,
+                        status="completed",
+                        document_kind="research_paper",
+                        language="en",
+                        parsed_source_hash=f"parsed-{document_id}",
+                    )
+                )
+                db.flush()
+                db.add(
+                    DocumentDiseaseLinkRecord(
+                        id=f"comparison-link-{suffix}-{index}",
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        document_id=document_id,
+                        concept_id=concept_id,
+                        preferred_name_en="Fabry Disease",
+                        preferred_name_zh="法布雷病",
+                        matched_alias="Fabry Disease",
+                        ontology_version="test-v1",
+                        link_source="manual_selection",
+                    )
+                )
+                db.add(
+                        MedicalAnalysisRunRecord(
+                        id=run_id,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                        document_id=document_id,
+                        requested_by=user_id,
+                        status="succeeded",
+                        source_hash=f"file-{document_id}",
+                        parsed_source_hash=f"parsed-{document_id}",
+                        analysis_key=f"comparison-key-{document_id}",
+                        is_current=True,
+                    )
+                )
+                db.flush()
+                db.add(
+                    MedicalAnalysisResultRecord(
+                        run_id=run_id,
+                        report_json=_comparison_report_json(f"EVIDENCE-{index}"),
+                        validation_status="validated",
+                    )
+                )
+                db.flush()
+                db.add(
+                    MedicalAnalysisEvidenceRecord(
+                        id=f"comparison-evidence-{suffix}-{index}",
+                        evidence_id=f"EVIDENCE-{index}",
+                        run_id=run_id,
+                        finding_id=f"finding-{index}",
+                        chunk_id=f"chunk-{index}",
+                        section_type="results",
+                        section_title="Results",
+                        quoted_text=f"Evidence from {document_id}.",
+                        page_start=2,
+                        page_end=2,
+                    )
+                )
+                if index == 0:
+                    for history_index in range(100):
+                        history_run_id = f"comparison-history-{suffix}-{history_index}"
+                        history_run_ids.append(history_run_id)
+                        db.add(
+                            MedicalAnalysisRunRecord(
+                                id=history_run_id,
+                                user_id=user_id,
+                                workspace_id=workspace_id,
+                                document_id=document_id,
+                                requested_by=user_id,
+                                status="succeeded",
+                                source_hash=f"file-{document_id}",
+                                parsed_source_hash=f"parsed-{document_id}",
+                                analysis_key=f"comparison-history-key-{history_index}",
+                                is_current=False,
+                            )
+                        )
+                        db.flush()
+                        db.add(
+                            MedicalAnalysisResultRecord(
+                                run_id=history_run_id,
+                                report_json="{}",
+                                validation_status="validated",
+                            )
+                        )
+            db.commit()
+
+        records = DiseaseProfileRepository().load_comparison_inputs(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            document_ids=[document_ids[2], document_ids[0]],
+        )
+
+        assert [record["document"]["document_id"] for record in records] == [
+            document_ids[2],
+            document_ids[0],
+        ]
+        assert all(len(record["analyses"]) == 1 for record in records)
+        assert all(record["analyses"][0]["valid"] for record in records)
+        assert [record["analyses"][0]["evidence"][0]["evidence_id"] for record in records] == [
+            "EVIDENCE-2",
+            "EVIDENCE-0",
+        ]
+        assert all("open_filename" in record["document"] for record in records)
+
+        preview = DiseaseProfileService(
+            repository=DiseaseProfileRepository(),
+        ).preview_comparison(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            documents=[
+                {
+                    "document_id": document_ids[2],
+                    "expected_parsed_source_hash": f"parsed-{document_ids[2]}",
+                },
+                {
+                    "document_id": document_ids[0],
+                    "expected_parsed_source_hash": f"parsed-{document_ids[0]}",
+                },
+            ],
+            language="en",
+        )
+        assert [document["document_id"] for document in preview["documents"]] == [
+            document_ids[2],
+            document_ids[0],
+        ]
+        assert all(document["open_filename"] for document in preview["documents"])
+
+        with SessionLocal() as db:
+            run = db.get(MedicalAnalysisRunRecord, run_ids[0])
+            result = db.get(MedicalAnalysisResultRecord, run_ids[0])
+            assert run is not None
+            assert result is not None
+            run.schema_version = "medical-insights-v2"
+            result.report_json = _comparison_report_json(
+                "EVIDENCE-0",
+                schema_version="medical-insights-v2",
+            )
+            db.commit()
+        legacy_report = DiseaseProfileRepository().load_comparison_inputs(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            document_ids=[document_ids[0]],
+        )
+        assert legacy_report[0]["analyses"][0]["report"]["schema_version"] == "medical-insights-v2"
+
+        with SessionLocal() as db:
+            result = db.get(MedicalAnalysisResultRecord, run_ids[0])
+            assert result is not None
+            result.report_json = _comparison_report_json(
+                "EVIDENCE-0",
+                schema_version="medical-insights-v2",
+                include_coverage=False,
+            )
+            db.commit()
+        missing_coverage = DiseaseProfileRepository().load_comparison_inputs(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            document_ids=[document_ids[0]],
+        )
+        assert "coverage" not in missing_coverage[0]["analyses"][0]["report"]
+
+        with SessionLocal() as db:
+            result = db.get(MedicalAnalysisResultRecord, run_ids[0])
+            assert result is not None
+            result.report_json = "{}"
+            db.commit()
+        with pytest.raises(DiseaseProfileError) as error:
+            DiseaseProfileRepository().load_comparison_inputs(
+                user_id=user_id,
+                workspace_id=workspace_id,
+                concept_id=concept_id,
+                document_ids=[document_ids[0]],
+            )
+        assert error.value.code == "comparison_report_invalid"
+    finally:
+        with SessionLocal() as db:
+            db.query(MedicalAnalysisEvidenceRecord).filter(
+                MedicalAnalysisEvidenceRecord.run_id.in_(run_ids + history_run_ids)
+            ).delete(synchronize_session=False)
+            db.query(MedicalAnalysisResultRecord).filter(
+                MedicalAnalysisResultRecord.run_id.in_(run_ids + history_run_ids)
+            ).delete(synchronize_session=False)
+            db.query(MedicalAnalysisRunRecord).filter(
+                MedicalAnalysisRunRecord.id.in_(run_ids + history_run_ids)
+            ).delete(synchronize_session=False)
+            db.query(DocumentDiseaseLinkRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(DocumentRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.commit()
