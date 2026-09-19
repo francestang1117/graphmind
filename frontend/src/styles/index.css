@@ -365,6 +365,7 @@
 .disease-comparison-finding strong { color: var(--text); font-size: 10px; line-height: 1.45; }
 .disease-comparison-finding p, .disease-comparison-questions p { margin: 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
 .disease-comparison-muted { margin: 0; color: var(--soft); font-size: 9px; }
+.disease-comparison-truncation { margin: 8px 0 0; padding: 7px; border-radius: 5px; background: rgba(246, 180, 75, 0.08); color: var(--amber); font-size: 9px; line-height: 1.45; }
 .disease-comparison-questions { margin-top: 14px; padding-top: 4px; border-top: 1px solid var(--line); }
 .disease-comparison-questions article { display: grid; gap: 5px; padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, 0.07); }
 .disease-comparison-questions strong { color: var(--text); font-size: 10px; line-height: 1.45; }

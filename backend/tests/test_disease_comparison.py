@@ -317,3 +317,24 @@ def test_builder_does_not_create_questions_without_source_evidence():
     )
 
     assert all(question.document_id != "doc-1" for question in preview.discussion_questions)
+
+
+def test_builder_drops_evidence_from_another_document_or_analysis_run():
+    record = _input("doc-1")
+    record["analyses"][0]["evidence"][0].update({
+        "document_id": "doc-2",
+        "analysis_run_id": "run-doc-2",
+    })
+
+    preview = build_comparison_preview(
+        concept_id="mesh:D000795",
+        inputs=[record, _input("doc-2")],
+    )
+
+    document = preview.documents[0]
+    assert all(method["evidence"] == [] for method in document.methods.model_dump().values())
+    assert document.findings == []
+    assert all(
+        question.document_id != "doc-1"
+        for question in preview.discussion_questions
+    )

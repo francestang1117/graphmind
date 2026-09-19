@@ -320,6 +320,12 @@ def _sources_for_ids(
         item = evidence.get(evidence_id)
         if not item:
             continue
+        source_document_id = item.get("document_id")
+        source_run_id = item.get("analysis_run_id") or item.get("run_id")
+        if source_document_id and str(source_document_id) != document_id:
+            continue
+        if source_run_id and str(source_run_id) != run_id:
+            continue
         section_type = str(item.get("section_type") or "unknown").strip().lower()
         if section_type in _REFERENCE_SECTIONS:
             continue

@@ -1,0 +1,30 @@
+{
+  "schema_version": "medical-eval-v1",
+  "case_id": "en_profile_comparison_safety_001",
+  "suite": "disease_profiles",
+  "language": "en",
+  "tags": ["disease_profile", "comparison", "safety", "smoke"],
+  "review_status": "engineering_reviewed",
+  "input": {
+    "comparison": {
+      "concept_id": "mesh:D000795",
+      "language": "en",
+      "records": [
+        {
+          "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry Disease", "ontology_version": "evaluation-ontology-v1"},
+          "document": {"document_id": "comparison-human-en", "title": "Human cohort study", "document_kind": "research_paper", "language": "en", "document_date": "2026-01-01"},
+          "analysis": {"run_id": "comparison-human-en-run", "population": "Adults with Fabry disease", "sample_size": "40 participants", "comparator": "Usual care", "coverage": {"complete": true, "selected_chunks": 10, "total_chunks": 10, "included_sections": ["methods", "results"], "omitted_sections": []}, "findings": ["The cohort reported a measured outcome."], "evidence": [{"id": "comparison-human-en-evidence", "evidence_id": "comparison-human-en-evidence", "section_type": "results", "section_title": "Results", "page_start": 4, "page_end": 4, "quote": "The cohort reported a measured outcome."}]}
+        },
+        {
+          "link": {"concept_id": "mesh:D000795", "preferred_name_en": "Fabry Disease", "preferred_name_zh": "法布雷病", "matched_alias": "Fabry disease", "ontology_version": "evaluation-ontology-v1"},
+          "document": {"document_id": "comparison-animal-en", "title": "Animal model study", "document_kind": "research_paper", "language": "en", "document_date": "2026-02-01"},
+          "analysis": {"run_id": "comparison-animal-en-run", "population": "A mouse model", "sample_size": "24 animals", "comparator": null, "comparator_status": "not_reported", "coverage": {"complete": false, "selected_chunks": 6, "total_chunks": 10, "included_sections": ["methods", "results"], "omitted_sections": ["discussion"]}, "findings": ["The animal model showed a laboratory change."], "evidence": [{"id": "comparison-animal-en-evidence", "evidence_id": "comparison-animal-en-evidence", "section_type": "results", "section_title": "Results", "page_start": 5, "page_end": 5, "quote": "The animal model showed a laboratory change."}]}
+        }
+      ]
+    }
+  },
+  "expected": {"comparison_status": "ready", "concept_id": "mesh:D000795", "document_count": 2, "document_ids": ["comparison-human-en", "comparison-animal-en"], "coverage_statuses": ["complete", "partial"], "all_items_have_sources": true, "not_reported_is_uncited": true, "has_contradiction_label": false, "has_treatment_ranking": false, "questions_neutral": true},
+  "gate_fields": ["comparison_status", "concept_id", "document_count", "document_ids", "coverage_statuses", "all_items_have_sources", "not_reported_is_uncited", "has_contradiction_label", "has_treatment_ranking", "questions_neutral"],
+  "rationale": "A comparison keeps human and animal studies separate, preserves partial coverage, and never turns a missing comparator into a whole-paper conclusion.",
+  "last_reviewed": "2026-09-20"
+}

@@ -219,7 +219,17 @@ export default function DiseaseComparisonPanel({ preview, workspaceId }: Props) 
               })}
             </section>
             <FindingList title="Reported findings" items={document.findings} onOpenEvidence={setSelectedEvidence} />
+            {document.findings_truncated && (
+              <p className="disease-comparison-truncation">
+                Showing {document.findings.length} of {document.findings_total} findings. Open the single-document report for the remaining items.
+              </p>
+            )}
             <FindingList title="Limitations" items={document.limitations} onOpenEvidence={setSelectedEvidence} />
+            {document.limitations_truncated && (
+              <p className="disease-comparison-truncation">
+                Showing {document.limitations.length} of {document.limitations_total} limitations. Open the single-document report for the remaining items.
+              </p>
+            )}
           </article>
         ))}
       </div>
