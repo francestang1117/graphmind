@@ -1982,3 +1982,11 @@ workspace and medical-evaluation gates. The local backend suite is `587 passed,
 5 skipped`; the frontend suite is `44 passed`, with lint and production build
 passing. These checks are engineering regression tests, not clinically expert-
 validated quality judgments.
+
+Follow-up hardening keeps internal document fields such as file hashes and
+modification timestamps out of the strict public document model. External
+source pages now require a non-empty parsed-source hash and a JSON object report,
+scan past invalid candidates before filling a page, and return an empty page for
+an existing source after its final cursor instead of misreporting a 404. The
+repository and API regressions cover strict response validation, malformed or
+empty reports, terminal cursors, and valid documents following invalid ones.

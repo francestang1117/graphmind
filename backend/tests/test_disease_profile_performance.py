@@ -18,6 +18,7 @@ from app.models.persistence import (
     MedicalDocumentProfileRecord,
 )
 from app.services.medical.disease_profile.aggregator import DiseaseProfileAggregator
+from app.services.medical.disease_profile.models import DiseaseProfileDetail
 from app.services.medical.disease_profile.repository import (
     DiseaseProfileRepository,
     ProfileInputOptions,
@@ -482,6 +483,23 @@ def test_repository_pages_linked_and_unassigned_documents_with_stable_ids():
         assert linked_last is not None
         assert [item["document_id"] for item in linked_last["items"]] == [linked_ids[100]]
         assert linked_last["next_cursor"] is None
+        linked_empty = repository.list_profile_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            limit=50,
+            after_document_id=linked_ids[100],
+        )
+        assert linked_empty == {"items": [], "next_cursor": None}
+
+        detail = DiseaseProfileService().get_profile(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+        )
+        assert detail is not None
+        DiseaseProfileDetail.model_validate(detail)
+        assert len(detail["documents"]) == 20
 
         unassigned_first = repository.list_unassigned_documents(
             user_id=user_id,
@@ -529,10 +547,14 @@ def test_external_source_page_requires_current_valid_analysis_and_scope():
     user_id = f"external-user-{suffix}"
     workspace_id = f"external-workspace-{suffix}"
     concept_id = "mesh:EXTERNAL-001"
-    document_id = f"external-document-{suffix}"
+    document_id = f"external-document-{suffix}-valid"
+    invalid_document_id = f"external-document-{suffix}-invalid"
     run_id = f"external-analysis-{suffix}"
+    invalid_run_id = f"external-analysis-{suffix}-invalid"
     search_id = f"external-search-{suffix}"
+    invalid_search_id = f"external-search-{suffix}-invalid"
     match_run_id = f"external-match-{suffix}"
+    invalid_match_run_id = f"external-match-{suffix}-invalid"
     article_id = f"external-article-{suffix}"
 
     try:
@@ -625,6 +647,85 @@ def test_external_source_page_requires_current_valid_analysis_and_scope():
                     match_specificity="condition_only",
                 )
             )
+            invalid_document = _document(invalid_document_id, user_id, workspace_id)
+            db.add(invalid_document)
+            db.flush()
+            db.add(
+                DocumentDiseaseLinkRecord(
+                    id=f"external-link-{suffix}-invalid",
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=invalid_document_id,
+                    concept_id=concept_id,
+                    preferred_name_en="External Disease",
+                    preferred_name_zh="外部疾病",
+                    matched_alias="External Disease",
+                    ontology_version="test-v1",
+                    link_source="manual_selection",
+                )
+            )
+            db.add(
+                MedicalAnalysisRunRecord(
+                    id=invalid_run_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=invalid_document_id,
+                    requested_by=user_id,
+                    status="succeeded",
+                    source_hash=invalid_document.file_hash,
+                    parsed_source_hash=invalid_document.parsed_source_hash,
+                    analysis_key=f"analysis-key-{suffix}-invalid",
+                    is_current=True,
+                )
+            )
+            db.flush()
+            db.add(
+                MedicalAnalysisResultRecord(
+                    run_id=invalid_run_id,
+                    report_json="[]",
+                    validation_status="validated",
+                )
+            )
+            db.add(
+                LiteratureSearchRunRecord(
+                    id=invalid_search_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=invalid_document_id,
+                    normalized_query="external disease",
+                    query_hash=f"query-{suffix}-invalid",
+                    status="succeeded",
+                    detected_concepts_json=json.dumps([
+                        {"concept_id": concept_id, "source": "local_ontology"}
+                    ]),
+                )
+            )
+            db.flush()
+            db.add(
+                LiteratureMatchRunRecord(
+                    id=invalid_match_run_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=invalid_document_id,
+                    analysis_run_id=invalid_run_id,
+                    search_run_id=invalid_search_id,
+                    matcher_version="test-v1",
+                    input_fingerprint=f"fingerprint-{suffix}-invalid",
+                    status="completed",
+                )
+            )
+            db.flush()
+            db.add(
+                LiteratureEvidenceMatchRecord(
+                    id=f"external-evidence-{suffix}-invalid",
+                    match_run_id=invalid_match_run_id,
+                    finding_id="finding-invalid",
+                    finding_type="finding",
+                    finding_text_snapshot="An invalid report",
+                    article_id=article_id,
+                    match_specificity="condition_only",
+                )
+            )
             db.commit()
 
         page = DiseaseProfileRepository().list_external_source_documents(
@@ -639,6 +740,41 @@ def test_external_source_page_requires_current_valid_analysis_and_scope():
         assert page is not None
         assert [item["document_id"] for item in page["items"]] == [document_id]
         assert page["next_cursor"] is None
+        assert DiseaseProfileRepository().list_external_source_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            source="pubmed",
+            external_id=f"PMID-{suffix}",
+            limit=1,
+            after_document_id=document_id,
+        ) == {"items": [], "next_cursor": None}
+
+        with SessionLocal() as db:
+            db.query(MedicalAnalysisResultRecord).filter_by(run_id=run_id).one().report_json = "[]"
+            db.commit()
+        assert DiseaseProfileRepository().list_external_source_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            source="pubmed",
+            external_id=f"PMID-{suffix}",
+            limit=20,
+        ) == {"items": [], "next_cursor": None}
+
+        with SessionLocal() as db:
+            result = db.query(MedicalAnalysisResultRecord).filter_by(run_id=run_id).one()
+            result.report_json = "{}"
+            db.query(DocumentRecord).filter_by(id=document_id).one().parsed_source_hash = ""
+            db.commit()
+        assert DiseaseProfileRepository().list_external_source_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            source="pubmed",
+            external_id=f"PMID-{suffix}",
+            limit=20,
+        ) == {"items": [], "next_cursor": None}
         assert DiseaseProfileRepository().list_external_source_documents(
             user_id=user_id,
             workspace_id=workspace_id,
@@ -657,11 +793,16 @@ def test_external_source_page_requires_current_valid_analysis_and_scope():
         ) is None
     finally:
         with SessionLocal() as db:
+            db.query(LiteratureEvidenceMatchRecord).filter_by(match_run_id=invalid_match_run_id).delete(synchronize_session=False)
             db.query(LiteratureEvidenceMatchRecord).filter_by(match_run_id=match_run_id).delete(synchronize_session=False)
+            db.query(LiteratureMatchRunRecord).filter_by(id=invalid_match_run_id).delete(synchronize_session=False)
             db.query(LiteratureMatchRunRecord).filter_by(id=match_run_id).delete(synchronize_session=False)
+            db.query(LiteratureSearchRunRecord).filter_by(id=invalid_search_id).delete(synchronize_session=False)
             db.query(LiteratureSearchRunRecord).filter_by(id=search_id).delete(synchronize_session=False)
             db.query(LiteratureArticleRecord).filter_by(id=article_id).delete(synchronize_session=False)
+            db.query(MedicalAnalysisResultRecord).filter_by(run_id=invalid_run_id).delete(synchronize_session=False)
             db.query(MedicalAnalysisResultRecord).filter_by(run_id=run_id).delete(synchronize_session=False)
+            db.query(MedicalAnalysisRunRecord).filter_by(id=invalid_run_id).delete(synchronize_session=False)
             db.query(MedicalAnalysisRunRecord).filter_by(id=run_id).delete(synchronize_session=False)
             db.query(DocumentDiseaseLinkRecord).filter_by(
                 user_id=user_id,

@@ -714,7 +714,27 @@ class DiseaseProfileRepository:
                     statement = statement.where(DocumentRecord.id > after_document_id)
                 rows = db.execute(statement).all()
                 if not rows:
-                    return None
+                    profile_exists = db.scalar(
+                        select(DocumentDiseaseLinkRecord.id)
+                        .join(
+                            DocumentRecord,
+                            DocumentRecord.id == DocumentDiseaseLinkRecord.document_id,
+                        )
+                        .where(
+                            DocumentDiseaseLinkRecord.user_id == user_id,
+                            DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                            DocumentDiseaseLinkRecord.concept_id == concept_id,
+                            DocumentRecord.user_id == user_id,
+                            DocumentRecord.workspace_id == workspace_id,
+                            DocumentRecord.deleted_at.is_(None),
+                        )
+                        .limit(1)
+                    )
+                    return (
+                        {"items": [], "next_cursor": None}
+                        if profile_exists
+                        else None
+                    )
                 page_rows = rows[:page_size]
                 items = self._document_views_for_rows(
                     db,
@@ -765,8 +785,8 @@ class DiseaseProfileRepository:
             with self.session_factory() as db:
                 current_run = aliased(MedicalAnalysisRunRecord)
                 current_result = aliased(MedicalAnalysisResultRecord)
-                statement = (
-                    select(DocumentRecord.id)
+                candidate_statement = (
+                    select(DocumentRecord.id, current_result.report_json)
                     .join(
                         DocumentDiseaseLinkRecord,
                         DocumentDiseaseLinkRecord.document_id == DocumentRecord.id,
@@ -815,18 +835,88 @@ class DiseaseProfileRepository:
                         current_run.source_hash == DocumentRecord.file_hash,
                         current_run.parsed_source_hash == DocumentRecord.parsed_source_hash,
                         DocumentRecord.parsed_source_hash.is_not(None),
+                        DocumentRecord.parsed_source_hash != "",
                         current_result.validation_status == "validated",
                     )
                     .distinct()
-                    .order_by(DocumentRecord.id)
-                    .limit(page_size + 1)
                 )
-                if after_document_id:
-                    statement = statement.where(DocumentRecord.id > after_document_id)
-                id_rows = db.execute(statement).all()
-                if not id_rows:
-                    return None
-                page_ids = [str(row[0]) for row in id_rows[:page_size]]
+                # A valid page is based on the same report-object rule used by
+                # load_profile_inputs(), not just the SQL status columns. Scan
+                # bounded keyset batches so malformed or empty reports do not
+                # consume page slots or hide later valid documents.
+                scan_size = max(page_size + 1, 50)
+                scan_after = after_document_id
+                valid_ids: list[str] = []
+                seen_ids: set[str] = set()
+                while len(valid_ids) <= page_size:
+                    statement = candidate_statement
+                    if scan_after:
+                        statement = statement.where(DocumentRecord.id > scan_after)
+                    statement = statement.order_by(DocumentRecord.id).limit(scan_size)
+                    candidate_rows = db.execute(statement).all()
+                    if not candidate_rows:
+                        break
+                    for document_id, report_json in candidate_rows:
+                        document_id = str(document_id)
+                        if document_id in seen_ids:
+                            continue
+                        seen_ids.add(document_id)
+                        if isinstance(_loads_json(report_json, None), dict):
+                            valid_ids.append(document_id)
+                            if len(valid_ids) > page_size:
+                                break
+                    scan_after = str(candidate_rows[-1][0])
+                    if len(valid_ids) > page_size or len(candidate_rows) < scan_size:
+                        break
+
+                if not valid_ids:
+                    source_exists = db.scalar(
+                        select(DocumentRecord.id)
+                        .join(
+                            DocumentDiseaseLinkRecord,
+                            DocumentDiseaseLinkRecord.document_id == DocumentRecord.id,
+                        )
+                        .join(
+                            LiteratureMatchRunRecord,
+                            LiteratureMatchRunRecord.document_id == DocumentRecord.id,
+                        )
+                        .join(
+                            LiteratureSearchRunRecord,
+                            LiteratureSearchRunRecord.id == LiteratureMatchRunRecord.search_run_id,
+                        )
+                        .join(
+                            LiteratureEvidenceMatchRecord,
+                            LiteratureEvidenceMatchRecord.match_run_id == LiteratureMatchRunRecord.id,
+                        )
+                        .join(
+                            LiteratureArticleRecord,
+                            LiteratureArticleRecord.id == LiteratureEvidenceMatchRecord.article_id,
+                        )
+                        .where(
+                            DocumentDiseaseLinkRecord.user_id == user_id,
+                            DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                            DocumentDiseaseLinkRecord.concept_id == concept_id,
+                            DocumentRecord.user_id == user_id,
+                            DocumentRecord.workspace_id == workspace_id,
+                            DocumentRecord.deleted_at.is_(None),
+                            LiteratureMatchRunRecord.user_id == user_id,
+                            LiteratureMatchRunRecord.workspace_id == workspace_id,
+                            LiteratureMatchRunRecord.status == "completed",
+                            LiteratureSearchRunRecord.user_id == user_id,
+                            LiteratureSearchRunRecord.workspace_id == workspace_id,
+                            LiteratureSearchRunRecord.status == "succeeded",
+                            LiteratureArticleRecord.source == normalized_source,
+                            LiteratureArticleRecord.external_id == normalized_external_id,
+                        )
+                        .limit(1)
+                    )
+                    return (
+                        {"items": [], "next_cursor": None}
+                        if source_exists
+                        else None
+                    )
+
+                page_ids = valid_ids[:page_size]
                 link_rows = db.execute(
                     select(DocumentDiseaseLinkRecord, DocumentRecord)
                     .join(
@@ -854,7 +944,7 @@ class DiseaseProfileRepository:
                     ),
                     "next_cursor": (
                         page_ids[-1]
-                        if len(id_rows) > page_size and page_ids
+                        if len(valid_ids) > page_size and page_ids
                         else None
                     ),
                 }
@@ -926,9 +1016,15 @@ class DiseaseProfileRepository:
                 source_status = "outdated"
             else:
                 source_status = "unavailable"
+            document_view = documents[document.id]
             result.append(
                 {
-                    **documents[document.id],
+                    "document_id": document_view["document_id"],
+                    "title": document_view["title"],
+                    "document_kind": document_view["document_kind"],
+                    "language": document_view["language"],
+                    "document_date": document_view["document_date"],
+                    "parsed_source_hash": document_view["parsed_source_hash"],
                     "source_status": source_status,
                     "warnings": _unique_strings(
                         warning

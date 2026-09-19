@@ -358,6 +358,8 @@ def test_external_source_documents_api_forwards_scope_and_cursor(monkeypatch):
 
     def list_external_source_documents(**kwargs):
         captured.update(kwargs)
+        if kwargs["cursor_document_id"] == "document-1":
+            return {"items": [], "next_cursor": None}
         return {
             "items": [{"document_id": "document-1", "title": "paper.pdf"}],
             "next_cursor": "document-1",
@@ -391,6 +393,20 @@ def test_external_source_documents_api_forwards_scope_and_cursor(monkeypatch):
         "limit": 20,
         "cursor_document_id": None,
     }
+
+    empty_response = asyncio.run(
+        disease_profiles.list_disease_profile_external_source_documents(
+            "mesh:D000795",
+            source="pubmed",
+            external_id="12345",
+            workspace_id="workspace-1",
+            limit=20,
+            cursor=response.next_cursor,
+            user=SimpleNamespace(id="user-1"),
+        )
+    )
+    assert empty_response.items == []
+    assert empty_response.next_cursor is None
 
 
 def test_delete_link_returns_no_content_and_forwards_scope(monkeypatch):
