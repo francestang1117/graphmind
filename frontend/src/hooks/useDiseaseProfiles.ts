@@ -3,9 +3,13 @@ import {
   createDiseaseLink,
   deleteDiseaseLink,
   getDiseaseProfile,
+  getDiseaseProfileDocuments,
+  getDiseaseProfileExternalSourceDocuments,
   getDiseaseProfileItems,
   listDiseaseProfiles,
   listUnassignedDiseaseDocuments,
+  type DiseaseProfileItem,
+  type DiseaseProfileDocumentsPage,
   searchDiseaseConcepts,
   type DiseaseProfileSection,
 } from "../services/api";
@@ -39,10 +43,47 @@ export function useDiseaseProfiles(
     enabled: Boolean(workspaceId && selectedConceptId),
     refetchOnWindowFocus: false,
   });
-  const unassignedQuery = useQuery({
+  const unassignedQuery = useInfiniteQuery({
     queryKey: unassignedKey,
-    queryFn: () => listUnassignedDiseaseDocuments(workspaceId as string),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => listUnassignedDiseaseDocuments(workspaceId as string, {
+      limit: 20,
+      cursor: pageParam,
+    }),
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: Boolean(workspaceId),
+    refetchOnWindowFocus: false,
+  });
+  const initialDocumentPage: DiseaseProfileDocumentsPage | null = detailQuery.data
+    ? {
+        items: detailQuery.data.documents,
+        next_cursor: detailQuery.data.documents_next_cursor ?? null,
+      }
+    : null;
+  const detailDocumentKey = initialDocumentPage
+    ? JSON.stringify(initialDocumentPage.items.map((item) => ({
+        document_id: item.document_id,
+        title: item.title,
+        document_date: item.document_date,
+        parsed_source_hash: item.parsed_source_hash,
+        source_status: item.source_status,
+      })))
+    : "none";
+  const linkedDocumentsQuery = useInfiniteQuery({
+    queryKey: [...detailKey, "documents", detailDocumentKey, initialDocumentPage?.next_cursor ?? null],
+    initialPageParam: "__detail__",
+    queryFn: ({ pageParam }) => {
+      if (pageParam === "__detail__") {
+        return Promise.resolve(initialDocumentPage as DiseaseProfileDocumentsPage);
+      }
+      return getDiseaseProfileDocuments(
+        selectedConceptId as string,
+        workspaceId as string,
+        { limit: 20, cursor: pageParam },
+      );
+    },
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    enabled: Boolean(workspaceId && selectedConceptId && initialDocumentPage),
     refetchOnWindowFocus: false,
   });
 
@@ -50,6 +91,12 @@ export function useDiseaseProfiles(
     void queryClient.invalidateQueries({ queryKey: listKey });
     void queryClient.invalidateQueries({ queryKey: detailKey });
     void queryClient.invalidateQueries({ queryKey: unassignedKey });
+    void queryClient.invalidateQueries({
+      queryKey: ["disease-profile-items", workspaceKey],
+    });
+    void queryClient.invalidateQueries({
+      queryKey: ["disease-profile-external-source-documents", workspaceKey],
+    });
   };
 
   const linkMutation = useMutation({
@@ -78,8 +125,21 @@ export function useDiseaseProfiles(
     listQuery,
     detail: detailQuery.data ?? null,
     detailQuery,
-    unassigned: unassignedQuery.data?.items ?? [],
+    unassigned: dedupeDocuments(
+      unassignedQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    ),
+    unassignedTotal: unassignedQuery.data?.pages[0]?.total ?? 0,
     unassignedQuery,
+    hasMoreUnassigned: Boolean(unassignedQuery.hasNextPage),
+    loadMoreUnassigned: unassignedQuery.fetchNextPage,
+    loadingMoreUnassigned: unassignedQuery.isFetchingNextPage,
+    linkedDocuments: dedupeDocuments(
+      linkedDocumentsQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    ),
+    documentsQuery: linkedDocumentsQuery,
+    hasMoreDocuments: Boolean(linkedDocumentsQuery.hasNextPage),
+    loadMoreDocuments: linkedDocumentsQuery.fetchNextPage,
+    loadingMoreDocuments: linkedDocumentsQuery.isFetchingNextPage,
     linkDocument: linkMutation.mutateAsync,
     linking: linkMutation.isPending,
     linkError: linkMutation.error,
@@ -87,6 +147,10 @@ export function useDiseaseProfiles(
     unlinking: unlinkMutation.isPending,
     unlinkError: unlinkMutation.error,
   };
+}
+
+function dedupeDocuments<T extends { document_id: string }>(items: T[]): T[] {
+  return Array.from(new Map(items.map((item) => [item.document_id, item])).values());
 }
 
 export function useDiseaseConceptSearch(
@@ -117,6 +181,35 @@ export function useDiseaseProfileItems(
       { limit: 20, cursor },
     ),
     enabled: enabled && Boolean(workspaceId && conceptId),
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useDiseaseProfileExternalSourceDocuments(
+  workspaceId: string | null | undefined,
+  conceptId: string | null | undefined,
+  item: DiseaseProfileItem | null,
+) {
+  const source = item?.item_type === "article" ? item.source : "";
+  const externalId = item?.item_type === "article" ? item.external_id : "";
+  return useInfiniteQuery({
+    queryKey: [
+      "disease-profile-external-source-documents",
+      workspaceId ?? "none",
+      conceptId ?? "none",
+      source,
+      externalId,
+    ],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) => getDiseaseProfileExternalSourceDocuments(
+      conceptId as string,
+      workspaceId as string,
+      source,
+      externalId,
+      { limit: 20, cursor: pageParam },
+    ),
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    enabled: Boolean(workspaceId && conceptId && source && externalId),
     refetchOnWindowFocus: false,
   });
 }

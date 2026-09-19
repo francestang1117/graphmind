@@ -281,6 +281,8 @@ export interface DiseaseProfileItem {
   document_ids: string[];
   document_title: string;
   document_titles: string[];
+  related_document_count: number;
+  related_documents_truncated: boolean;
   document_kind: string;
   document_date: string;
   analysis_run_id?: string | null;
@@ -364,6 +366,7 @@ export interface DiseaseProfileSummary {
 export interface DiseaseProfileDetail extends DiseaseProfileSummary {
   stats: DiseaseProfileStats;
   documents: DiseaseProfileDocument[];
+  documents_next_cursor?: string | null;
   sections: Array<{
     section: DiseaseProfileSection;
     count: number;
@@ -379,6 +382,12 @@ export interface DiseaseProfileList {
 export interface DiseaseProfileItems {
   section: DiseaseProfileSection;
   items: DiseaseProfileItem[];
+  next_cursor?: string | null;
+  truncated?: boolean;
+}
+
+export interface DiseaseProfileDocumentsPage {
+  items: DiseaseProfileDocument[];
   next_cursor?: string | null;
 }
 
@@ -407,6 +416,8 @@ export interface UnassignedDiseaseDocument {
 
 export interface UnassignedDiseaseDocumentList {
   items: UnassignedDiseaseDocument[];
+  total: number;
+  next_cursor?: string | null;
 }
 
 export type ClinicianQuestionStatus = "saved" | "asked" | "answered" | "dismissed";
@@ -1048,6 +1059,46 @@ export const getDiseaseProfile = (
     )
     .then((r) => r.data);
 
+export const getDiseaseProfileDocuments = (
+  conceptId: string,
+  workspaceId: string,
+  options: { limit?: number; cursor?: string | null } = {},
+): Promise<DiseaseProfileDocumentsPage> =>
+  http
+    .get<DiseaseProfileDocumentsPage>(
+      `/disease-profiles/${encodeURIComponent(conceptId)}/documents`,
+      {
+        params: {
+          workspace_id: workspaceId,
+          limit: options.limit,
+          cursor: options.cursor,
+        },
+      },
+    )
+    .then((r) => r.data);
+
+export const getDiseaseProfileExternalSourceDocuments = (
+  conceptId: string,
+  workspaceId: string,
+  source: string,
+  externalId: string,
+  options: { limit?: number; cursor?: string | null } = {},
+): Promise<DiseaseProfileDocumentsPage> =>
+  http
+    .get<DiseaseProfileDocumentsPage>(
+      `/disease-profiles/${encodeURIComponent(conceptId)}/external-sources`,
+      {
+        params: {
+          workspace_id: workspaceId,
+          source,
+          external_id: externalId,
+          limit: options.limit,
+          cursor: options.cursor,
+        },
+      },
+    )
+    .then((r) => r.data);
+
 export const getDiseaseProfileItems = (
   conceptId: string,
   section: DiseaseProfileSection,
@@ -1070,10 +1121,15 @@ export const getDiseaseProfileItems = (
 
 export const listUnassignedDiseaseDocuments = (
   workspaceId: string,
+  options: { limit?: number; cursor?: string | null } = {},
 ): Promise<UnassignedDiseaseDocumentList> =>
   http
     .get<UnassignedDiseaseDocumentList>("/disease-profiles/unassigned-documents", {
-      params: { workspace_id: workspaceId },
+      params: {
+        workspace_id: workspaceId,
+        limit: options.limit,
+        cursor: options.cursor,
+      },
     })
     .then((r) => r.data);
 

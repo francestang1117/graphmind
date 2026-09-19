@@ -74,9 +74,11 @@ class DiseaseProfileItem(_StrictModel):
     item_type: Literal["finding", "attribute", "term", "question", "article"]
     section: ProfileSection
     document_id: str | None = None
-    document_ids: list[str] = Field(default_factory=list, max_length=100)
+    document_ids: list[str] = Field(default_factory=list, max_length=20)
     document_title: str = ""
-    document_titles: list[str] = Field(default_factory=list, max_length=100)
+    document_titles: list[str] = Field(default_factory=list, max_length=20)
+    related_document_count: int = Field(default=0, ge=0)
+    related_documents_truncated: bool = False
     document_kind: str = ""
     document_date: str = ""
     analysis_run_id: str | None = None
@@ -167,7 +169,8 @@ class DiseaseProfileDocument(_StrictModel):
 
 class DiseaseProfileDetail(DiseaseProfileSummary):
     stats: DiseaseProfileStats
-    documents: list[DiseaseProfileDocument] = Field(default_factory=list, max_length=100)
+    documents: list[DiseaseProfileDocument] = Field(default_factory=list, max_length=20)
+    documents_next_cursor: str | None = None
     sections: list[DiseaseProfileSection] = Field(default_factory=list)
 
 
@@ -179,6 +182,12 @@ class DiseaseProfileListView(_StrictModel):
 class DiseaseProfileItemsView(_StrictModel):
     section: ProfileSection
     items: list[DiseaseProfileItem]
+    next_cursor: str | None = None
+    truncated: bool = False
+
+
+class DiseaseProfileDocumentsView(_StrictModel):
+    items: list[DiseaseProfileDocument] = Field(default_factory=list, max_length=50)
     next_cursor: str | None = None
 
 
@@ -206,4 +215,6 @@ class DiseaseConceptSearchView(_StrictModel):
 
 
 class UnassignedDocumentListView(_StrictModel):
-    items: list[UnassignedDocumentView]
+    items: list[UnassignedDocumentView] = Field(default_factory=list, max_length=50)
+    total: int = Field(default=0, ge=0)
+    next_cursor: str | None = None

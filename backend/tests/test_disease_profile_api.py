@@ -239,6 +239,176 @@ def test_profile_items_does_not_emit_cursor_past_maximum(monkeypatch):
     assert response.next_cursor is None
 
 
+def test_profile_items_exposes_truncated_boundary(monkeypatch):
+    _patch_scope(monkeypatch)
+    monkeypatch.setattr(
+        disease_profiles.disease_profile_service,
+        "get_items",
+        lambda **_kwargs: {
+            "section": "key_findings",
+            "items": [{"id": "item-10000", "item_type": "finding", "section": "key_findings"}],
+            "total": 10_100,
+            "truncated": True,
+        },
+    )
+
+    response = asyncio.run(
+        disease_profiles.get_disease_profile_items(
+            "mesh:D000795",
+            workspace_id="workspace-1",
+            section="key_findings",
+            limit=20,
+            cursor=disease_profiles._encode_cursor("10000"),
+            user=SimpleNamespace(id="user-1"),
+        )
+    )
+
+    assert response.truncated is True
+    assert response.next_cursor is None
+
+
+def test_profile_detail_encodes_linked_document_cursor(monkeypatch):
+    _patch_scope(monkeypatch)
+    monkeypatch.setattr(
+        disease_profiles.disease_profile_service,
+        "get_profile",
+        lambda **_kwargs: {
+            **_summary(),
+            "stats": {
+                "document_count": 21,
+                "research_paper_count": 21,
+                "guideline_count": 0,
+                "other_medical_document_count": 0,
+                "valid_analysis_count": 0,
+                "expired_analysis_count": 0,
+                "external_article_count": 0,
+                "flagged_article_count": 0,
+                "comparator_reported_count": 0,
+                "comparator_not_reported_count": 0,
+                "human_study_count": 0,
+                "animal_study_count": 0,
+                "in_vitro_study_count": 0,
+                "unknown_study_population_count": 0,
+                "sample_size_reported_count": 0,
+                "sample_size_not_reported_count": 0,
+                "unknown_date_count": 0,
+            },
+            "documents": [],
+            "documents_next_cursor": "document-020",
+            "sections": [],
+        },
+    )
+
+    response = asyncio.run(
+        disease_profiles.get_disease_profile(
+            "mesh:D000795",
+            workspace_id="workspace-1",
+            user=SimpleNamespace(id="user-1"),
+        )
+    )
+
+    assert disease_profiles._decode_cursor(response.documents_next_cursor or "", kind="documents") == "document-020"
+
+
+def test_unassigned_documents_api_forwards_page_and_encodes_cursor(monkeypatch):
+    _patch_scope(monkeypatch)
+    captured = {}
+
+    def list_unassigned_documents(**kwargs):
+        captured.update(kwargs)
+        return {
+            "items": [{
+                "document_id": "document-1",
+                "title": "paper.pdf",
+                "document_kind": "research_paper",
+                "language": "en",
+                "medical_confidence": 0.9,
+            }],
+            "total": 21,
+            "next_cursor": "document-1",
+        }
+
+    monkeypatch.setattr(
+        disease_profiles.disease_profile_service,
+        "list_unassigned_documents",
+        list_unassigned_documents,
+    )
+    response = asyncio.run(
+        disease_profiles.list_unassigned_disease_documents(
+            workspace_id="workspace-1",
+            limit=20,
+            cursor=None,
+            user=SimpleNamespace(id="user-1"),
+        )
+    )
+
+    assert response.total == 21
+    assert disease_profiles._decode_cursor(response.next_cursor or "", kind="documents") == "document-1"
+    assert captured == {
+        "user_id": "user-1",
+        "workspace_id": "workspace-1",
+        "limit": 20,
+        "cursor_document_id": None,
+    }
+
+
+def test_external_source_documents_api_forwards_scope_and_cursor(monkeypatch):
+    _patch_scope(monkeypatch)
+    captured = {}
+
+    def list_external_source_documents(**kwargs):
+        captured.update(kwargs)
+        if kwargs["cursor_document_id"] == "document-1":
+            return {"items": [], "next_cursor": None}
+        return {
+            "items": [{"document_id": "document-1", "title": "paper.pdf"}],
+            "next_cursor": "document-1",
+        }
+
+    monkeypatch.setattr(
+        disease_profiles.disease_profile_service,
+        "list_external_source_documents",
+        list_external_source_documents,
+    )
+    response = asyncio.run(
+        disease_profiles.list_disease_profile_external_source_documents(
+            "mesh:D000795",
+            source="pubmed",
+            external_id="12345",
+            workspace_id="workspace-1",
+            limit=20,
+            cursor=None,
+            user=SimpleNamespace(id="user-1"),
+        )
+    )
+
+    assert response.items[0].document_id == "document-1"
+    assert disease_profiles._decode_cursor(response.next_cursor or "", kind="documents") == "document-1"
+    assert captured == {
+        "user_id": "user-1",
+        "workspace_id": "workspace-1",
+        "concept_id": "mesh:D000795",
+        "source": "pubmed",
+        "external_id": "12345",
+        "limit": 20,
+        "cursor_document_id": None,
+    }
+
+    empty_response = asyncio.run(
+        disease_profiles.list_disease_profile_external_source_documents(
+            "mesh:D000795",
+            source="pubmed",
+            external_id="12345",
+            workspace_id="workspace-1",
+            limit=20,
+            cursor=response.next_cursor,
+            user=SimpleNamespace(id="user-1"),
+        )
+    )
+    assert empty_response.items == []
+    assert empty_response.next_cursor is None
+
+
 def test_delete_link_returns_no_content_and_forwards_scope(monkeypatch):
     _patch_scope(monkeypatch)
     captured = {}

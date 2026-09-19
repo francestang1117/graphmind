@@ -1,12 +1,29 @@
 import { ExternalLink, X } from "lucide-react";
-import type { DiseaseProfileItem } from "../../services/api";
+import type { DiseaseProfileDocument, DiseaseProfileItem } from "../../services/api";
 
 interface Props {
   item: DiseaseProfileItem;
   onClose: () => void;
+  relatedDocuments?: DiseaseProfileDocument[];
+  relatedDocumentsLoading?: boolean;
+  relatedDocumentsError?: unknown;
+  relatedDocumentsHasMore?: boolean;
+  relatedDocumentsLoadingMore?: boolean;
+  onLoadMoreRelatedDocuments?: () => void;
+  onRetryRelatedDocuments?: () => void;
 }
 
-export default function DiseaseSourceDrawer({ item, onClose }: Props) {
+export default function DiseaseSourceDrawer({
+  item,
+  onClose,
+  relatedDocuments = [],
+  relatedDocumentsLoading = false,
+  relatedDocumentsError,
+  relatedDocumentsHasMore = false,
+  relatedDocumentsLoadingMore = false,
+  onLoadMoreRelatedDocuments,
+  onRetryRelatedDocuments,
+}: Props) {
   const isExternalArticle = item.item_type === "article";
   const heading = isExternalArticle
     ? item.title || `${item.source.toUpperCase()} ${item.external_id}`
@@ -34,6 +51,41 @@ export default function DiseaseSourceDrawer({ item, onClose }: Props) {
         </div>
         {isExternalArticle && item.document_title && (
           <p className="disease-source-context">Found through {item.document_title}</p>
+        )}
+        {isExternalArticle && (
+          <section className="disease-source-related-documents">
+            <div className="disease-source-related-heading">
+              <strong>Linked research documents</strong>
+              <span>{item.related_document_count}</span>
+            </div>
+            {relatedDocumentsLoading && <p className="disease-profile-section-loading">Loading linked documents...</p>}
+            {Boolean(relatedDocumentsError) && !relatedDocumentsLoading && (
+              <div className="disease-profile-inline-error" role="alert">
+                <span>Could not load linked documents.</span>
+                <button type="button" onClick={onRetryRelatedDocuments}>Retry</button>
+              </div>
+            )}
+            {!relatedDocumentsLoading && !relatedDocumentsError && !relatedDocuments.length && (
+              <p className="disease-source-empty">No current linked document is available.</p>
+            )}
+            {relatedDocuments.map((document) => (
+              <div className="disease-source-related-document" key={document.document_id}>
+                <strong>{document.title}</strong>
+                <span>{document.document_kind} · {document.source_status}{document.document_date ? ` · ${document.document_date}` : ""}</span>
+              </div>
+            ))}
+            {relatedDocumentsHasMore && (
+              <button type="button" className="disease-profile-load-more" onClick={onLoadMoreRelatedDocuments} disabled={relatedDocumentsLoadingMore}>
+                {relatedDocumentsLoadingMore ? "Loading..." : "Load more linked documents"}
+              </button>
+            )}
+            {item.related_documents_truncated
+              && !relatedDocumentsHasMore
+              && !relatedDocumentsError
+              && relatedDocuments.length < item.related_document_count && (
+              <p className="disease-profile-warning">Some linked documents are available through the source list.</p>
+            )}
+          </section>
         )}
         {item.text && <p className="disease-source-main-text">{item.text}</p>}
         {item.explanation && <p className="disease-source-explanation">{item.explanation}</p>}

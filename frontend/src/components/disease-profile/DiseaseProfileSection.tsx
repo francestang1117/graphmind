@@ -8,6 +8,7 @@ interface Props {
   expanded: boolean;
   loading: boolean;
   hasMore: boolean;
+  truncated: boolean;
   onToggle: () => void;
   onLoadMore: () => void;
   onOpenSource: (item: DiseaseProfileItem) => void;
@@ -36,7 +37,12 @@ function itemTitle(item: DiseaseProfileItem) {
 
 function itemBody(item: DiseaseProfileItem) {
   if (item.item_type === "article") {
-    return [item.journal, item.publication_year ? String(item.publication_year) : "", item.publication_types.join(", ")].filter(Boolean).join(" · ");
+    return [
+      item.journal,
+      item.publication_year ? String(item.publication_year) : "",
+      item.publication_types.join(", "),
+      item.related_document_count ? `${item.related_document_count} linked documents` : "",
+    ].filter(Boolean).join(" · ");
   }
   if (item.item_type === "attribute") return item.value;
   if (item.item_type === "term") return item.explanation;
@@ -50,6 +56,7 @@ export default function DiseaseProfileSection({
   expanded,
   loading,
   hasMore,
+  truncated,
   onToggle,
   onLoadMore,
   onOpenSource,
@@ -83,6 +90,11 @@ export default function DiseaseProfileSection({
               </button>
             </article>
           ))}
+          {truncated && (
+            <p className="disease-profile-warning">
+              This section is larger than the supported paging window. Showing the available first 10,000 items.
+            </p>
+          )}
           {hasMore && (
             <button type="button" className="disease-profile-load-more" onClick={onLoadMore} disabled={loading}>
               {loading ? "Loading..." : "Load more"}

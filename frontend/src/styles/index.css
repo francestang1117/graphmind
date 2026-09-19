@@ -345,6 +345,12 @@
 .disease-source-quote a:hover { text-decoration: underline; }
 .disease-source-external-id { display: block; margin-bottom: 7px; color: var(--soft); font-size: 9px; }
 .disease-source-empty { color: var(--soft); font-size: 11px; }
+.disease-source-related-documents { margin: 14px 0 16px; padding: 11px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255, 255, 255, 0.025); }
+.disease-source-related-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; color: var(--muted); font-size: 11px; }
+.disease-source-related-heading span { min-width: 20px; padding: 3px 6px; border-radius: 5px; background: rgba(96, 165, 250, 0.1); color: var(--blue); text-align: center; font-size: 9px; }
+.disease-source-related-document { display: grid; gap: 3px; padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.disease-source-related-document strong { overflow: hidden; color: var(--text); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.disease-source-related-document span { color: var(--soft); font-size: 9px; }
 .disease-profile-empty-page { height: 100%; min-height: 260px; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 30px; color: var(--soft); text-align: center; }
 .disease-profile-empty-page svg { color: var(--blue); }
 .disease-profile-empty-page h2 { margin: 5px 0 0; color: var(--text); font-size: 17px; }

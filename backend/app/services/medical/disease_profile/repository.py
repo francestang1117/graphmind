@@ -28,6 +28,7 @@ from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 
 try:
     from sqlalchemy import delete, func, select
+    from sqlalchemy.orm import aliased
     from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 except ImportError:  # pragma: no cover - dependencies are installed in app/test runs
     delete = None
@@ -35,6 +36,7 @@ except ImportError:  # pragma: no cover - dependencies are installed in app/test
     select = None
     IntegrityError = Exception
     SQLAlchemyError = Exception
+    aliased = None
 
 
 log = logging.getLogger(__name__)
@@ -596,9 +598,12 @@ class DiseaseProfileRepository:
         *,
         user_id: str,
         workspace_id: str,
-    ) -> list[dict[str, Any]]:
-        """Return classified live documents that have no disease link."""
+        limit: int = 20,
+        after_document_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return one bounded page of classified documents without a link."""
         self._require_available()
+        page_size = max(1, min(int(limit), 50))
         try:
             with self.session_factory() as db:
                 linked = select(DocumentDiseaseLinkRecord.document_id).where(
@@ -606,24 +611,45 @@ class DiseaseProfileRepository:
                     DocumentDiseaseLinkRecord.workspace_id == workspace_id,
                     DocumentDiseaseLinkRecord.document_id == DocumentRecord.id,
                 )
-                rows = db.execute(
+                base_filters = [
+                    DocumentRecord.user_id == user_id,
+                    DocumentRecord.workspace_id == workspace_id,
+                    DocumentRecord.deleted_at.is_(None),
+                    MedicalDocumentProfileRecord.user_id == user_id,
+                    MedicalDocumentProfileRecord.workspace_id == workspace_id,
+                    MedicalDocumentProfileRecord.document_kind != "unknown",
+                    ~linked.exists(),
+                ]
+                statement = (
                     select(DocumentRecord, MedicalDocumentProfileRecord)
                     .join(
                         MedicalDocumentProfileRecord,
                         MedicalDocumentProfileRecord.document_id == DocumentRecord.id,
                     )
-                    .where(
-                        DocumentRecord.user_id == user_id,
-                        DocumentRecord.workspace_id == workspace_id,
-                        DocumentRecord.deleted_at.is_(None),
-                        MedicalDocumentProfileRecord.user_id == user_id,
-                        MedicalDocumentProfileRecord.workspace_id == workspace_id,
-                        MedicalDocumentProfileRecord.document_kind != "unknown",
-                        ~linked.exists(),
+                    .where(*base_filters)
+                    # The document id is the opaque, stable keyset cursor. A
+                    # mutable modified_at sort would make pages overlap when
+                    # a document is edited between requests.
+                    .order_by(DocumentRecord.id)
+                    .limit(page_size + 1)
+                )
+                if after_document_id:
+                    statement = statement.where(DocumentRecord.id > after_document_id)
+                rows = db.execute(statement).all()
+                page_rows = rows[:page_size]
+                total = int(
+                    db.scalar(
+                        select(func.count(DocumentRecord.id))
+                        .select_from(DocumentRecord)
+                        .join(
+                            MedicalDocumentProfileRecord,
+                            MedicalDocumentProfileRecord.document_id == DocumentRecord.id,
+                        )
+                        .where(*base_filters)
                     )
-                    .order_by(DocumentRecord.modified_at.desc(), DocumentRecord.id),
-                ).all()
-                return [
+                    or 0
+                )
+                items = [
                     {
                         "document_id": document.id,
                         "title": (document.original_filename or document.filename or "Untitled document")[:255],
@@ -634,8 +660,17 @@ class DiseaseProfileRepository:
                         "classifier_version": profile.classifier_version,
                         "warnings": _string_list(_loads_json(profile.warnings_json, []), 20),
                     }
-                    for document, profile in rows
+                    for document, profile in page_rows
                 ]
+                return {
+                    "items": items,
+                    "total": total,
+                    "next_cursor": (
+                        str(page_rows[-1][0].id)
+                        if len(rows) > page_size and page_rows
+                        else None
+                    ),
+                }
         except SQLAlchemyError as exc:
             log.warning("Could not list unassigned disease documents")
             raise DiseaseProfileError(
@@ -643,6 +678,362 @@ class DiseaseProfileRepository:
                 code="disease_profile_storage_unavailable",
                 status_code=503,
             ) from exc
+
+    def list_profile_documents(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        concept_id: str,
+        limit: int = 20,
+        after_document_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Page the live source documents linked to one disease profile."""
+        self._require_available()
+        page_size = max(1, min(int(limit), 50))
+        try:
+            with self.session_factory() as db:
+                statement = (
+                    select(DocumentDiseaseLinkRecord, DocumentRecord)
+                    .join(
+                        DocumentRecord,
+                        DocumentRecord.id == DocumentDiseaseLinkRecord.document_id,
+                    )
+                    .where(
+                        DocumentDiseaseLinkRecord.user_id == user_id,
+                        DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                        DocumentDiseaseLinkRecord.concept_id == concept_id,
+                        DocumentRecord.user_id == user_id,
+                        DocumentRecord.workspace_id == workspace_id,
+                        DocumentRecord.deleted_at.is_(None),
+                    )
+                    .order_by(DocumentRecord.id)
+                    .limit(page_size + 1)
+                )
+                if after_document_id:
+                    statement = statement.where(DocumentRecord.id > after_document_id)
+                rows = db.execute(statement).all()
+                if not rows:
+                    profile_exists = db.scalar(
+                        select(DocumentDiseaseLinkRecord.id)
+                        .join(
+                            DocumentRecord,
+                            DocumentRecord.id == DocumentDiseaseLinkRecord.document_id,
+                        )
+                        .where(
+                            DocumentDiseaseLinkRecord.user_id == user_id,
+                            DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                            DocumentDiseaseLinkRecord.concept_id == concept_id,
+                            DocumentRecord.user_id == user_id,
+                            DocumentRecord.workspace_id == workspace_id,
+                            DocumentRecord.deleted_at.is_(None),
+                        )
+                        .limit(1)
+                    )
+                    return (
+                        {"items": [], "next_cursor": None}
+                        if profile_exists
+                        else None
+                    )
+                page_rows = rows[:page_size]
+                items = self._document_views_for_rows(
+                    db,
+                    page_rows,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+                return {
+                    "items": items,
+                    "next_cursor": (
+                        str(page_rows[-1][1].id)
+                        if len(rows) > page_size and page_rows
+                        else None
+                    ),
+                }
+        except SQLAlchemyError as exc:
+            log.warning("Could not page disease profile documents")
+            raise DiseaseProfileError(
+                "Disease profile data is temporarily unavailable.",
+                code="disease_profile_storage_unavailable",
+                status_code=503,
+            ) from exc
+
+    def list_external_source_documents(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        concept_id: str,
+        source: str,
+        external_id: str,
+        limit: int = 20,
+        after_document_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Page documents that link one external article to current evidence.
+
+        The joins deliberately require a current validated analysis. This
+        prevents an article cached in another workspace, an old analysis, or
+        a stale match run from becoming a source for the selected profile.
+        """
+        self._require_available()
+        page_size = max(1, min(int(limit), 50))
+        normalized_source = source.strip().lower()
+        normalized_external_id = external_id.strip()
+        if not normalized_source or not normalized_external_id:
+            return {"items": [], "next_cursor": None}
+        try:
+            with self.session_factory() as db:
+                current_run = aliased(MedicalAnalysisRunRecord)
+                current_result = aliased(MedicalAnalysisResultRecord)
+                candidate_statement = (
+                    select(DocumentRecord.id, current_result.report_json)
+                    .join(
+                        DocumentDiseaseLinkRecord,
+                        DocumentDiseaseLinkRecord.document_id == DocumentRecord.id,
+                    )
+                    .join(
+                        LiteratureMatchRunRecord,
+                        LiteratureMatchRunRecord.document_id == DocumentRecord.id,
+                    )
+                    .join(
+                        LiteratureSearchRunRecord,
+                        LiteratureSearchRunRecord.id == LiteratureMatchRunRecord.search_run_id,
+                    )
+                    .join(
+                        LiteratureEvidenceMatchRecord,
+                        LiteratureEvidenceMatchRecord.match_run_id == LiteratureMatchRunRecord.id,
+                    )
+                    .join(
+                        LiteratureArticleRecord,
+                        LiteratureArticleRecord.id == LiteratureEvidenceMatchRecord.article_id,
+                    )
+                    .join(
+                        current_run,
+                        current_run.id == LiteratureMatchRunRecord.analysis_run_id,
+                    )
+                    .join(current_result, current_result.run_id == current_run.id)
+                    .where(
+                        DocumentDiseaseLinkRecord.user_id == user_id,
+                        DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                        DocumentDiseaseLinkRecord.concept_id == concept_id,
+                        DocumentRecord.user_id == user_id,
+                        DocumentRecord.workspace_id == workspace_id,
+                        DocumentRecord.deleted_at.is_(None),
+                        LiteratureMatchRunRecord.user_id == user_id,
+                        LiteratureMatchRunRecord.workspace_id == workspace_id,
+                        LiteratureMatchRunRecord.status == "completed",
+                        LiteratureSearchRunRecord.user_id == user_id,
+                        LiteratureSearchRunRecord.workspace_id == workspace_id,
+                        LiteratureSearchRunRecord.status == "succeeded",
+                        LiteratureArticleRecord.source == normalized_source,
+                        LiteratureArticleRecord.external_id == normalized_external_id,
+                        current_run.user_id == user_id,
+                        current_run.workspace_id == workspace_id,
+                        current_run.document_id == DocumentRecord.id,
+                        current_run.status == "succeeded",
+                        current_run.is_current.is_(True),
+                        current_run.source_hash == DocumentRecord.file_hash,
+                        current_run.parsed_source_hash == DocumentRecord.parsed_source_hash,
+                        DocumentRecord.parsed_source_hash.is_not(None),
+                        DocumentRecord.parsed_source_hash != "",
+                        current_result.validation_status == "validated",
+                    )
+                    .distinct()
+                )
+                # A valid page is based on the same report-object rule used by
+                # load_profile_inputs(), not just the SQL status columns. Scan
+                # bounded keyset batches so malformed or empty reports do not
+                # consume page slots or hide later valid documents.
+                scan_size = max(page_size + 1, 50)
+                scan_after = after_document_id
+                valid_ids: list[str] = []
+                seen_ids: set[str] = set()
+                while len(valid_ids) <= page_size:
+                    statement = candidate_statement
+                    if scan_after:
+                        statement = statement.where(DocumentRecord.id > scan_after)
+                    statement = statement.order_by(DocumentRecord.id).limit(scan_size)
+                    candidate_rows = db.execute(statement).all()
+                    if not candidate_rows:
+                        break
+                    for document_id, report_json in candidate_rows:
+                        document_id = str(document_id)
+                        if document_id in seen_ids:
+                            continue
+                        seen_ids.add(document_id)
+                        if isinstance(_loads_json(report_json, None), dict):
+                            valid_ids.append(document_id)
+                            if len(valid_ids) > page_size:
+                                break
+                    scan_after = str(candidate_rows[-1][0])
+                    if len(valid_ids) > page_size or len(candidate_rows) < scan_size:
+                        break
+
+                if not valid_ids:
+                    source_exists = db.scalar(
+                        select(DocumentRecord.id)
+                        .join(
+                            DocumentDiseaseLinkRecord,
+                            DocumentDiseaseLinkRecord.document_id == DocumentRecord.id,
+                        )
+                        .join(
+                            LiteratureMatchRunRecord,
+                            LiteratureMatchRunRecord.document_id == DocumentRecord.id,
+                        )
+                        .join(
+                            LiteratureSearchRunRecord,
+                            LiteratureSearchRunRecord.id == LiteratureMatchRunRecord.search_run_id,
+                        )
+                        .join(
+                            LiteratureEvidenceMatchRecord,
+                            LiteratureEvidenceMatchRecord.match_run_id == LiteratureMatchRunRecord.id,
+                        )
+                        .join(
+                            LiteratureArticleRecord,
+                            LiteratureArticleRecord.id == LiteratureEvidenceMatchRecord.article_id,
+                        )
+                        .where(
+                            DocumentDiseaseLinkRecord.user_id == user_id,
+                            DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                            DocumentDiseaseLinkRecord.concept_id == concept_id,
+                            DocumentRecord.user_id == user_id,
+                            DocumentRecord.workspace_id == workspace_id,
+                            DocumentRecord.deleted_at.is_(None),
+                            LiteratureMatchRunRecord.user_id == user_id,
+                            LiteratureMatchRunRecord.workspace_id == workspace_id,
+                            LiteratureMatchRunRecord.status == "completed",
+                            LiteratureSearchRunRecord.user_id == user_id,
+                            LiteratureSearchRunRecord.workspace_id == workspace_id,
+                            LiteratureSearchRunRecord.status == "succeeded",
+                            LiteratureArticleRecord.source == normalized_source,
+                            LiteratureArticleRecord.external_id == normalized_external_id,
+                        )
+                        .limit(1)
+                    )
+                    return (
+                        {"items": [], "next_cursor": None}
+                        if source_exists
+                        else None
+                    )
+
+                page_ids = valid_ids[:page_size]
+                link_rows = db.execute(
+                    select(DocumentDiseaseLinkRecord, DocumentRecord)
+                    .join(
+                        DocumentRecord,
+                        DocumentRecord.id == DocumentDiseaseLinkRecord.document_id,
+                    )
+                    .where(
+                        DocumentDiseaseLinkRecord.user_id == user_id,
+                        DocumentDiseaseLinkRecord.workspace_id == workspace_id,
+                        DocumentDiseaseLinkRecord.concept_id == concept_id,
+                        DocumentRecord.user_id == user_id,
+                        DocumentRecord.workspace_id == workspace_id,
+                        DocumentRecord.id.in_(page_ids),
+                        DocumentRecord.deleted_at.is_(None),
+                    )
+                ).all()
+                by_id = {document.id: (link, document) for link, document in link_rows}
+                ordered_rows = [by_id[document_id] for document_id in page_ids if document_id in by_id]
+                return {
+                    "items": self._document_views_for_rows(
+                        db,
+                        ordered_rows,
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                    ),
+                    "next_cursor": (
+                        page_ids[-1]
+                        if len(valid_ids) > page_size and page_ids
+                        else None
+                    ),
+                }
+        except SQLAlchemyError as exc:
+            log.warning("Could not page external source documents")
+            raise DiseaseProfileError(
+                "Disease profile data is temporarily unavailable.",
+                code="disease_profile_storage_unavailable",
+                status_code=503,
+            ) from exc
+
+    def _document_views_for_rows(
+        self,
+        db,
+        rows: Sequence[tuple[DocumentDiseaseLinkRecord, DocumentRecord]],
+        *,
+        user_id: str,
+        workspace_id: str,
+    ) -> list[dict[str, Any]]:
+        """Build bounded document views with one batched analysis lookup."""
+        documents = {document.id: _document_dict(document) for _link, document in rows}
+        document_ids = list(documents)
+        analysis_rows = db.execute(
+            select(MedicalAnalysisRunRecord, MedicalAnalysisResultRecord)
+            .outerjoin(
+                MedicalAnalysisResultRecord,
+                MedicalAnalysisResultRecord.run_id == MedicalAnalysisRunRecord.id,
+            )
+            .where(
+                MedicalAnalysisRunRecord.user_id == user_id,
+                MedicalAnalysisRunRecord.workspace_id == workspace_id,
+                MedicalAnalysisRunRecord.document_id.in_(document_ids),
+            )
+            .order_by(
+                MedicalAnalysisRunRecord.document_id,
+                MedicalAnalysisRunRecord.created_at.desc(),
+            )
+        ).all()
+        analyses_by_document: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for run, result in analysis_rows:
+            document = documents.get(run.document_id)
+            if not document:
+                continue
+            report = _loads_json(result.report_json, None) if result else None
+            source_current = is_current_valid_analysis(run, result, document)
+            report_valid = isinstance(report, dict)
+            analyses_by_document[run.document_id].append(
+                {
+                    "run": _analysis_run_dict(run, result),
+                    "valid": bool(source_current and report_valid),
+                    "warnings": [
+                        "analysis_report_unavailable"
+                    ] if source_current and not report_valid else [],
+                }
+            )
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for _link, document in rows:
+            if document.id in seen:
+                continue
+            seen.add(document.id)
+            analyses = analyses_by_document.get(document.id, [])
+            if any(item.get("valid") for item in analyses):
+                source_status = "current"
+            elif any(
+                str((item.get("run") or {}).get("status") or "") == "succeeded"
+                for item in analyses
+            ):
+                source_status = "outdated"
+            else:
+                source_status = "unavailable"
+            document_view = documents[document.id]
+            result.append(
+                {
+                    "document_id": document_view["document_id"],
+                    "title": document_view["title"],
+                    "document_kind": document_view["document_kind"],
+                    "language": document_view["language"],
+                    "document_date": document_view["document_date"],
+                    "parsed_source_hash": document_view["parsed_source_hash"],
+                    "source_status": source_status,
+                    "warnings": _unique_strings(
+                        warning
+                        for item in analyses
+                        for warning in item.get("warnings") or []
+                    )[:20],
+                }
+            )
+        return result
 
     def _load_evidence(self, db, run_ids: Iterable[str]) -> dict[str, list[dict[str, Any]]]:
         ids = list(run_ids)
@@ -844,6 +1235,17 @@ def _string_list(value: Any, limit: int) -> list[str]:
             seen.add(text)
             if len(result) >= limit:
                 break
+    return result
+
+
+def _unique_strings(value: Iterable[Any]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            result.append(text)
     return result
 
 
