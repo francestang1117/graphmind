@@ -26,7 +26,7 @@ import DiseaseProfileList from "./disease-profile/DiseaseProfileList";
 import DiseaseProfileSection from "./disease-profile/DiseaseProfileSection";
 import DiseaseProfileStats from "./disease-profile/DiseaseProfileStats";
 import DiseaseComparisonPanel from "./disease-profile/DiseaseComparisonPanel";
-import { getComparisonMessages } from "./disease-profile/comparisonMessages";
+import { getComparisonMessages, type ComparisonMessages } from "./disease-profile/comparisonMessages";
 import DiseaseSourceDrawer from "./disease-profile/DiseaseSourceDrawer";
 import UnassignedDocuments from "./disease-profile/UnassignedDocuments";
 
@@ -96,6 +96,18 @@ function errorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function documentStatusLabel(
+  document: DiseaseProfileDocument,
+  messages: ComparisonMessages,
+) {
+  if (document.warnings.includes("analysis_report_unavailable")) {
+    return messages.analysisReportUnavailable;
+  }
+  if (document.source_status === "outdated") return messages.sourceOutdated;
+  if (document.source_status === "unavailable") return messages.sourceUnavailable;
+  return messages.sourceCurrent;
+}
+
 export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Props) {
   const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<SectionName | null>(null);
@@ -126,6 +138,8 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     [comparisonContextKey],
   );
   const comparisonRequestVersion = useRef(0);
+  const refreshRequestVersion = useRef(0);
+  const refreshContextKeyRef = useRef(comparisonContextKey);
   const currentComparisonSnapshotRef = useRef<ComparisonSnapshot | null>(null);
   const rawSelectedDocumentIds = useMemo(
     () => documentSelection.contextKey === comparisonContextKey ? documentSelection.ids : [],
@@ -187,6 +201,9 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   useLayoutEffect(() => {
     currentComparisonSnapshotRef.current = currentComparisonSnapshot;
   }, [currentComparisonSnapshot]);
+  useLayoutEffect(() => {
+    refreshContextKeyRef.current = comparisonContextKey;
+  }, [comparisonContextKey]);
 
   const invalidateComparison = () => {
     comparisonRequestVersion.current += 1;
@@ -205,6 +222,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   };
 
   const selectConcept = (conceptId: string) => {
+    refreshRequestVersion.current += 1;
     invalidateComparison();
     setSelectedConceptId(conceptId);
     setExpandedSection(null);
@@ -216,6 +234,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     setActionError("");
     setProfileRefreshNotice("");
     setNeedsProfileRefresh(false);
+    setRefreshingProfile(false);
   };
 
   const toggleDocumentSelection = (documentId: string) => {
@@ -259,6 +278,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   };
 
   const compareSelectedDocuments = async () => {
+    if (needsProfileRefresh || refreshingProfile) return;
     const selectedDocuments = selectedDocumentIds.map((documentId) =>
       linkedDocuments.find((document) => document.document_id === documentId));
     if (selectedDocuments.length !== selectedDocumentIds.length) {
@@ -313,12 +333,18 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   };
 
   const refreshProfile = async () => {
+    const requestVersion = ++refreshRequestVersion.current;
+    const requestContextKey = comparisonContextKey;
     setRefreshingProfile(true);
     setActionError("");
     setProfileRefreshNotice("");
     invalidateComparison();
     try {
       await profiles.refreshCurrentProfile();
+      if (
+        requestVersion !== refreshRequestVersion.current
+        || refreshContextKeyRef.current !== requestContextKey
+      ) return;
       // The refreshed detail response only contains the first document page.
       // Clear every old selection instead of treating an unseen page as still
       // current; the user can review the refreshed list and select again.
@@ -326,9 +352,18 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
       setNeedsProfileRefresh(false);
       setProfileRefreshNotice(comparisonMessages.sourcesRefreshed);
     } catch (error) {
+      if (
+        requestVersion !== refreshRequestVersion.current
+        || refreshContextKeyRef.current !== requestContextKey
+      ) return;
       setActionError(errorMessage(error, "Could not refresh the disease profile."));
     } finally {
-      setRefreshingProfile(false);
+      if (
+        requestVersion === refreshRequestVersion.current
+        && refreshContextKeyRef.current === requestContextKey
+      ) {
+        setRefreshingProfile(false);
+      }
     }
   };
 
@@ -478,7 +513,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
                   type="button"
                   className="disease-profile-compare-button"
                   onClick={() => { void compareSelectedDocuments(); }}
-                  disabled={selectedDocumentIds.length < 2 || comparisonMutation.isPending}
+                  disabled={needsProfileRefresh || refreshingProfile || selectedDocumentIds.length < 2 || comparisonMutation.isPending}
                 >
                   {comparisonMutation.isPending ? comparisonMessages.comparing : comparisonMessages.compare}
                 </button>
@@ -499,7 +534,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
                       />
                       <div>
                         <strong>{document.title}</strong>
-                        <span>{document.document_kind} · {document.source_status}{document.document_date ? ` · ${document.document_date}` : ""}</span>
+                        <span>{document.document_kind} · {documentStatusLabel(document, comparisonMessages)}{document.document_date ? ` · ${document.document_date}` : ""}</span>
                       </div>
                     </div>
                     <button type="button" className="disease-icon-button" aria-label={`Remove ${document.title} from profile`} title="Remove document from profile" onClick={() => { void unlinkDocument(document.document_id); }} disabled={profiles.unlinking}>

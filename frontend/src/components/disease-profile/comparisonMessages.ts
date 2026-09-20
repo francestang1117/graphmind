@@ -25,6 +25,10 @@ export interface ComparisonMessages {
   refreshProfile: string;
   refreshingProfile: string;
   sourcesRefreshed: string;
+  sourceCurrent: string;
+  sourceOutdated: string;
+  sourceUnavailable: string;
+  analysisReportUnavailable: string;
   methods: string;
   findings: string;
   limitations: string;
@@ -70,6 +74,10 @@ const MESSAGES: Record<ComparisonLanguage, ComparisonMessages> = {
     refreshProfile: "Refresh sources",
     refreshingProfile: "Refreshing sources...",
     sourcesRefreshed: "Sources refreshed. Select two to five documents again.",
+    sourceCurrent: "Current analysis",
+    sourceOutdated: "Source analysis is out of date",
+    sourceUnavailable: "Source unavailable",
+    analysisReportUnavailable: "Analysis report unavailable; cannot compare",
     methods: "Study methods",
     findings: "Reported findings",
     limitations: "Limitations",
@@ -131,6 +139,10 @@ const MESSAGES: Record<ComparisonLanguage, ComparisonMessages> = {
     refreshProfile: "刷新资料",
     refreshingProfile: "正在刷新资料……",
     sourcesRefreshed: "资料已更新，请重新选择 2–5 份文档。",
+    sourceCurrent: "当前分析有效",
+    sourceOutdated: "原文分析已过期",
+    sourceUnavailable: "来源不可用",
+    analysisReportUnavailable: "分析报告不可用，暂不能用于对照",
     methods: "研究方法",
     findings: "报告的发现",
     limitations: "研究局限",
@@ -192,6 +204,10 @@ const MESSAGES: Record<ComparisonLanguage, ComparisonMessages> = {
     refreshProfile: "資料を更新",
     refreshingProfile: "資料を更新中…",
     sourcesRefreshed: "資料を更新しました。2～5件の文書を選び直してください。",
+    sourceCurrent: "現在の分析",
+    sourceOutdated: "資料の分析は古くなっています",
+    sourceUnavailable: "資料を利用できません",
+    analysisReportUnavailable: "分析レポートを利用できないため比較できません",
     methods: "研究方法",
     findings: "報告された所見",
     limitations: "研究の限界",

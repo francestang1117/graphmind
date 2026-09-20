@@ -577,6 +577,7 @@ def test_invalid_current_report_is_not_advertised_as_comparable_profile_source()
         assert documents_by_id[valid_document_id]["current_analysis_run_id"] == valid_run_id
         assert documents_by_id[invalid_document_id]["source_status"] == "outdated"
         assert documents_by_id[invalid_document_id]["current_analysis_run_id"] is None
+        assert "analysis_report_unavailable" in documents_by_id[invalid_document_id]["warnings"]
 
         grouped = repository.load_profile_inputs(
             user_id=user_id,
