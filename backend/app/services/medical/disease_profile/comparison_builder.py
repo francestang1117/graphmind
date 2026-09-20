@@ -160,7 +160,9 @@ def build_comparison_preview(
                     "question": question,
                     "rationale": rationale,
                     "document_id": document_id,
-                    "evidence": limitations[0].evidence,
+                    "evidence": limitations[0]["evidence"],
+                    "evidence_total": limitations[0]["evidence_total"],
+                    "evidence_truncated": limitations[0]["evidence_truncated"],
                 }
             )
 
@@ -205,7 +207,7 @@ def _build_methods(
             )
             continue
         value = str(raw_value.get("value") or "").strip()
-        sources = _sources_for_ids(
+        sources, evidence_total, evidence_truncated = _sources_for_ids(
             raw_value.get("evidence_ids"),
             evidence,
             document_id=document_id,
@@ -215,6 +217,8 @@ def _build_methods(
             methods[field] = ComparisonMethod(
                 value="",
                 support_status="source_unavailable",
+                evidence_total=evidence_total,
+                evidence_truncated=evidence_truncated,
                 warnings=["source_unavailable"],
             )
             continue
@@ -224,6 +228,8 @@ def _build_methods(
             value=value,
             support_status=status,
             evidence=sources,
+            evidence_total=evidence_total,
+            evidence_truncated=evidence_truncated,
         )
 
     method_question = None
@@ -239,6 +245,8 @@ def _build_methods(
                 "rationale": rationale,
                 "document_id": document_id,
                 "evidence": method.evidence,
+                "evidence_total": method.evidence_total,
+                "evidence_truncated": method.evidence_truncated,
             }
             break
     return methods, method_question
@@ -260,7 +268,7 @@ def _build_findings(
         statement = str(value.get("statement") or "").strip()
         if not statement:
             continue
-        sources = _sources_for_ids(
+        sources, evidence_total, evidence_truncated = _sources_for_ids(
             value.get("evidence_ids"),
             evidence,
             document_id=document_id,
@@ -274,6 +282,8 @@ def _build_findings(
                 "statement": statement,
                 "explanation": str(value.get("plain_explanation") or ""),
                 "evidence": sources,
+                "evidence_total": evidence_total,
+                "evidence_truncated": evidence_truncated,
                 "warnings": [],
             }
         )
@@ -311,7 +321,7 @@ def _sources_for_ids(
     *,
     document_id: str,
     run_id: str,
-) -> list[ComparisonEvidence]:
+) -> tuple[list[ComparisonEvidence], int, bool]:
     result: list[ComparisonEvidence] = []
     seen: set[str] = set()
     for evidence_id in _string_list(evidence_ids):
@@ -347,9 +357,8 @@ def _sources_for_ids(
                 quote_truncated=quote_truncated,
             )
         )
-        if len(result) >= 5:
-            break
-    return result
+    evidence_total = len(result)
+    return result[:5], evidence_total, evidence_total > 5
 
 
 def _evidence_index(items: Any) -> dict[str, dict[str, Any]]:

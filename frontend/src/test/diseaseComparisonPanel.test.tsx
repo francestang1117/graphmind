@@ -29,6 +29,8 @@ const supportedMethod: ComparisonMethod = {
   value: "Human participants",
   support_status: "supported",
   evidence: [evidence, secondEvidence],
+  evidence_total: 2,
+  evidence_truncated: false,
   warnings: [],
 };
 
@@ -36,6 +38,8 @@ const notReportedMethod: ComparisonMethod = {
   value: "The selected analysis evidence did not report this field.",
   support_status: "not_reported",
   evidence: [],
+  evidence_total: 0,
+  evidence_truncated: false,
   warnings: [],
 };
 
@@ -71,6 +75,8 @@ function preview(): ComparisonPreview {
           statement: `Reported finding ${index + 1}`,
           explanation: "A source-bound finding.",
           evidence: [evidence],
+          evidence_total: 1,
+          evidence_truncated: false,
           warnings: [],
         })),
         findings_total: 12,
@@ -161,6 +167,8 @@ describe("DiseaseComparisonPanel", () => {
       value: "",
       support_status: "source_unavailable",
       evidence: [],
+      evidence_total: 0,
+      evidence_truncated: false,
       warnings: [],
     };
 
@@ -180,5 +188,18 @@ describe("DiseaseComparisonPanel", () => {
 
     await user.click(screen.getAllByRole("button", { name: "查看出处（2）" })[0]);
     expect(screen.getByText("Adults with the condition were followed for 12 weeks.")).toBeInTheDocument();
+  });
+
+  it("discloses when valid comparison evidence is truncated", () => {
+    const truncatedPreview = preview();
+    truncatedPreview.documents[0].methods.design = {
+      ...supportedMethod,
+      evidence_total: 6,
+      evidence_truncated: true,
+    };
+
+    render(<DiseaseComparisonPanel preview={truncatedPreview} workspaceId="workspace-1" />);
+
+    expect(screen.getByText(/Showing 2 of 6 valid citations/)).toBeInTheDocument();
   });
 });

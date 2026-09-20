@@ -34,6 +34,7 @@ export interface ComparisonMessages {
   chunks: (selected: number, total: number) => string;
   findingsTruncated: (shown: number, total: number) => string;
   limitationsTruncated: (shown: number, total: number) => string;
+  evidenceTruncated: (shown: number, total: number) => string;
   warning: (code: string) => string;
   viewEvidence: (count: number) => string;
   evidenceNavigation: string;
@@ -90,6 +91,7 @@ const MESSAGES: Record<ComparisonLanguage, ComparisonMessages> = {
     chunks: (selected, total) => `${selected}/${total} chunks`,
     findingsTruncated: (shown, total) => `Showing ${shown} of ${total} findings. Open the single-document report for the remaining items.`,
     limitationsTruncated: (shown, total) => `Showing ${shown} of ${total} limitations. Open the single-document report for the remaining items.`,
+    evidenceTruncated: (shown, total) => `Showing ${shown} of ${total} valid citations; the remaining citations are not shown in this preview.`,
     warning: (code) => code === "comparison_coverage_partial"
       ? "Some source sections were not included in this comparison."
       : "Source coverage could not be confirmed for this comparison.",
@@ -146,6 +148,7 @@ const MESSAGES: Record<ComparisonLanguage, ComparisonMessages> = {
     chunks: (selected, total) => `已纳入 ${selected}/${total} 个文本块`,
     findingsTruncated: (shown, total) => `当前显示 ${shown}/${total} 条发现。其余内容请打开单篇文档报告查看。`,
     limitationsTruncated: (shown, total) => `当前显示 ${shown}/${total} 条局限。其余内容请打开单篇文档报告查看。`,
+    evidenceTruncated: (shown, total) => `当前显示 ${shown}/${total} 条有效引用；其余引用未在本次预览中显示。`,
     warning: (code) => code === "comparison_coverage_partial"
       ? "本次对照没有纳入部分来源章节。"
       : "本次对照无法确认来源覆盖范围。",
@@ -202,6 +205,7 @@ const MESSAGES: Record<ComparisonLanguage, ComparisonMessages> = {
     chunks: (selected, total) => `${selected}/${total}チャンク`,
     findingsTruncated: (shown, total) => `${shown}/${total}件の所見を表示しています。残りは単一文書のレポートで確認してください。`,
     limitationsTruncated: (shown, total) => `${shown}/${total}件の限界を表示しています。残りは単一文書のレポートで確認してください。`,
+    evidenceTruncated: (shown, total) => `${shown}/${total}件の有効な引用を表示しています。残りの引用はこのプレビューには表示されません。`,
     warning: (code) => code === "comparison_coverage_partial"
       ? "一部の出典セクションが比較に含まれていません。"
       : "この比較の出典範囲を確認できませんでした。",

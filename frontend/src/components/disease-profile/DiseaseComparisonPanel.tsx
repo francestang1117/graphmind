@@ -55,12 +55,14 @@ function FindingList({
   items,
   emptyLabel,
   evidenceLabel,
+  evidenceTruncatedLabel,
   onOpenEvidence,
 }: {
   title: string;
   items: ComparisonFinding[];
   emptyLabel: string;
   evidenceLabel: (count: number) => string;
+  evidenceTruncatedLabel: (shown: number, total: number) => string;
   onOpenEvidence: (items: ComparisonEvidence[]) => void;
 }) {
   return (
@@ -79,6 +81,11 @@ function FindingList({
             label={evidenceLabel(item.evidence.length)}
             onOpen={onOpenEvidence}
           />
+          {item.evidence_truncated && (
+            <p className="disease-comparison-evidence-truncation">
+              {evidenceTruncatedLabel(item.evidence.length, item.evidence_total)}
+            </p>
+          )}
         </article>
       ))}
     </section>
@@ -263,6 +270,11 @@ export default function DiseaseComparisonPanel({ preview, workspaceId, language 
                       label={messages.viewEvidence(method.evidence.length)}
                       onOpen={(items) => setSelectedEvidence({ items, index: 0 })}
                     />
+                    {method.evidence_truncated && (
+                      <p className="disease-comparison-evidence-truncation">
+                        {messages.evidenceTruncated(method.evidence.length, method.evidence_total)}
+                      </p>
+                    )}
                   </div>
                 );
               })}
@@ -272,6 +284,7 @@ export default function DiseaseComparisonPanel({ preview, workspaceId, language 
               items={document.findings}
               emptyLabel={messages.noCitedItems}
               evidenceLabel={messages.viewEvidence}
+              evidenceTruncatedLabel={messages.evidenceTruncated}
               onOpenEvidence={(items) => setSelectedEvidence({ items, index: 0 })}
             />
             {document.findings_truncated && (
@@ -284,6 +297,7 @@ export default function DiseaseComparisonPanel({ preview, workspaceId, language 
               items={document.limitations}
               emptyLabel={messages.noCitedItems}
               evidenceLabel={messages.viewEvidence}
+              evidenceTruncatedLabel={messages.evidenceTruncated}
               onOpenEvidence={(items) => setSelectedEvidence({ items, index: 0 })}
             />
             {document.limitations_truncated && (
@@ -306,6 +320,11 @@ export default function DiseaseComparisonPanel({ preview, workspaceId, language 
                 label={messages.viewEvidence(item.evidence.length)}
                 onOpen={(items) => setSelectedEvidence({ items, index: 0 })}
               />
+              {item.evidence_truncated && (
+                <p className="disease-comparison-evidence-truncation">
+                  {messages.evidenceTruncated(item.evidence.length, item.evidence_total)}
+                </p>
+              )}
             </article>
           ))}
         </section>

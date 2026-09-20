@@ -19,6 +19,7 @@ def _selection(document_id: str) -> dict[str, str]:
     return {
         "document_id": document_id,
         "expected_parsed_source_hash": f"parsed-{document_id}",
+        "expected_analysis_run_id": f"run-{document_id}",
     }
 
 
@@ -354,3 +355,119 @@ def test_builder_marks_long_evidence_quotes_as_truncated_prefixes():
     assert len(evidence.quote) == 5_000
     assert evidence.quote == long_quote[:5_000]
     assert evidence.quote_truncated is True
+
+
+@pytest.mark.parametrize(
+    ("evidence_count", "expected_shown", "expected_total", "expected_truncated"),
+    [
+        (4, 4, 4, False),
+        (5, 5, 5, False),
+        (6, 5, 6, True),
+    ],
+)
+def test_builder_reports_valid_evidence_count_before_preview_limit(
+    evidence_count: int,
+    expected_shown: int,
+    expected_total: int,
+    expected_truncated: bool,
+):
+    record = _input("doc-evidence-count")
+    report = record["analyses"][0]["report"]
+    evidence_items = []
+    evidence_ids = []
+    for index in range(evidence_count):
+        evidence_id = f"evidence-{index}"
+        evidence_ids.append(evidence_id)
+        evidence_items.append(
+            {
+                "id": evidence_id,
+                "evidence_id": evidence_id,
+                "section_type": "results",
+                "section_title": "Results",
+                "page_start": index + 1,
+                "page_end": index + 1,
+                "quote": f"The study reported outcome {index}.",
+            }
+        )
+    record["analyses"][0]["evidence"] = evidence_items
+    for method in report["study_methods"].values():
+        method["evidence_ids"] = evidence_ids
+    report["key_findings"][0]["evidence_ids"] = evidence_ids
+    report["limitations"] = [{
+        "id": "limitation-1",
+        "statement": "The study reported a limitation.",
+        "plain_explanation": "This limitation affects interpretation.",
+        "evidence_ids": evidence_ids,
+    }]
+
+    preview = build_comparison_preview(
+        concept_id="mesh:D000795",
+        inputs=[record, _input("doc-other")],
+    )
+
+    document = preview.documents[0]
+    method = document.methods.population
+    assert len(method.evidence) == expected_shown
+    assert method.evidence_total == expected_total
+    assert method.evidence_truncated is expected_truncated
+    assert document.findings[0].evidence_total == expected_total
+    assert document.findings[0].evidence_truncated is expected_truncated
+    questions = [
+        question
+        for question in preview.discussion_questions
+        if question.document_id == "doc-evidence-count"
+    ]
+    assert questions
+    assert all(question.evidence_total == expected_total for question in questions)
+    assert all(question.evidence_truncated is expected_truncated for question in questions)
+
+
+def test_builder_counts_only_unique_current_valid_evidence():
+    record = _input("doc-mixed-evidence")
+    evidence_items = [
+        {
+            "id": "valid-1",
+            "evidence_id": "valid-1",
+            "section_type": "results",
+            "quote": "A valid result.",
+        },
+        {
+            "id": "valid-2",
+            "evidence_id": "valid-2",
+            "section_type": "methods",
+            "quote": "A valid method.",
+        },
+        {
+            "id": "reference",
+            "evidence_id": "reference",
+            "section_type": "references",
+            "quote": "A bibliography entry.",
+        },
+        {
+            "id": "foreign-document",
+            "evidence_id": "foreign-document",
+            "document_id": "doc-other",
+            "analysis_run_id": "run-other",
+            "section_type": "results",
+            "quote": "A different document.",
+        },
+    ]
+    record["analyses"][0]["evidence"] = evidence_items
+    record["analyses"][0]["report"]["study_methods"]["population"]["evidence_ids"] = [
+        "valid-1",
+        "valid-1",
+        "valid-2",
+        "missing",
+        "reference",
+        "foreign-document",
+    ]
+
+    preview = build_comparison_preview(
+        concept_id="mesh:D000795",
+        inputs=[record, _input("doc-other")],
+    )
+
+    method = preview.documents[0].methods.population
+    assert [item.evidence_id for item in method.evidence] == ["valid-1", "valid-2"]
+    assert method.evidence_total == 2
+    assert method.evidence_truncated is False
