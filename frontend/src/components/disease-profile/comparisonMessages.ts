@@ -21,6 +21,10 @@ export interface ComparisonMessages {
   languageLabel: string;
   compare: string;
   comparing: string;
+  sourceChanged: string;
+  refreshProfile: string;
+  refreshingProfile: string;
+  partialSourcesUnavailable: string;
   methods: string;
   findings: string;
   limitations: string;
@@ -62,6 +66,10 @@ const MESSAGES: Record<ComparisonLanguage, ComparisonMessages> = {
     languageLabel: "Output language",
     compare: "Compare selected documents",
     comparing: "Comparing...",
+    sourceChanged: "The selected source data changed. Refresh the profile before comparing again.",
+    refreshProfile: "Refresh sources",
+    refreshingProfile: "Refreshing sources...",
+    partialSourcesUnavailable: "Some selected documents are no longer available for comparison.",
     methods: "Study methods",
     findings: "Reported findings",
     limitations: "Limitations",
@@ -119,6 +127,10 @@ const MESSAGES: Record<ComparisonLanguage, ComparisonMessages> = {
     languageLabel: "输出语言",
     compare: "对照所选文档",
     comparing: "正在对照……",
+    sourceChanged: "所选资料已经变化。请先刷新资料，再重新对照。",
+    refreshProfile: "刷新资料",
+    refreshingProfile: "正在刷新资料……",
+    partialSourcesUnavailable: "部分已选资料已无法继续对照。",
     methods: "研究方法",
     findings: "报告的发现",
     limitations: "研究局限",
@@ -176,6 +188,10 @@ const MESSAGES: Record<ComparisonLanguage, ComparisonMessages> = {
     languageLabel: "表示言語",
     compare: "選択した文書を比較",
     comparing: "比較中…",
+    sourceChanged: "選択した資料が変わりました。資料を更新してから再比較してください。",
+    refreshProfile: "資料を更新",
+    refreshingProfile: "資料を更新中…",
+    partialSourcesUnavailable: "選択した資料の一部は比較に利用できなくなりました。",
     methods: "研究方法",
     findings: "報告された所見",
     limitations: "研究の限界",

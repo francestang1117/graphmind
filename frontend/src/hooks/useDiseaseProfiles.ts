@@ -119,6 +119,19 @@ export function useDiseaseProfiles(
     onSuccess: invalidate,
   });
 
+  const refreshCurrentProfile = async () => {
+    if (!workspaceId || !selectedConceptId) return;
+    const [, detailResult] = await Promise.all([
+      listQuery.refetch(),
+      detailQuery.refetch(),
+    ]);
+    // The detail response is part of the linked-document query key. Invalidate
+    // the old pages so a previously loaded page cannot win over the refreshed
+    // run IDs when React Query reconciles the cache.
+    await queryClient.invalidateQueries({ queryKey: [...detailKey, "documents"] });
+    return detailResult.data ?? null;
+  };
+
   return {
     list: profiles,
     hasMoreProfiles: Boolean(listQuery.hasNextPage),
@@ -149,6 +162,7 @@ export function useDiseaseProfiles(
     unlinkDocument: unlinkMutation.mutateAsync,
     unlinking: unlinkMutation.isPending,
     unlinkError: unlinkMutation.error,
+    refreshCurrentProfile,
   };
 }
 

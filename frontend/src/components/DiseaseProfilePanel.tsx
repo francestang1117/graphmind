@@ -77,7 +77,10 @@ function errorMessage(error: unknown, fallback: string) {
       if (error.response.data?.code === "disease_link_primary_exists") {
         return "Each document has one primary disease. Remove its current link before assigning another.";
       }
-      if (error.response.data?.code === "comparison_source_changed") {
+      if (
+        error.response.data?.code === "comparison_source_changed"
+        || error.response.data?.code === "comparison_report_invalid"
+      ) {
         return "A selected source changed. Refresh the profile and select current documents again.";
       }
       return "This profile changed elsewhere. Refresh and try again.";
@@ -101,6 +104,8 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   const [completedSections, setCompletedSections] = useState<Partial<Record<SectionName, boolean>>>({});
   const [sourceItem, setSourceItem] = useState<DiseaseProfileItem | null>(null);
   const [actionError, setActionError] = useState("");
+  const [needsProfileRefresh, setNeedsProfileRefresh] = useState(false);
+  const [refreshingProfile, setRefreshingProfile] = useState(false);
   const [documentSelection, setDocumentSelection] = useState<{ contextKey: string; ids: string[] }>({
     contextKey: "",
     ids: [],
@@ -121,7 +126,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   );
   const comparisonRequestVersion = useRef(0);
   const currentComparisonSnapshotRef = useRef<ComparisonSnapshot | null>(null);
-  const selectedDocumentIds = useMemo(
+  const rawSelectedDocumentIds = useMemo(
     () => documentSelection.contextKey === comparisonContextKey ? documentSelection.ids : [],
     [comparisonContextKey, documentSelection.contextKey, documentSelection.ids],
   );
@@ -147,6 +152,17 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   const linkedDocuments = useMemo(
     () => profiles.linkedDocuments ?? selectedProfile?.documents ?? [],
     [profiles.linkedDocuments, selectedProfile?.documents],
+  );
+  const selectedDocumentIds = useMemo(
+    () => rawSelectedDocumentIds.filter((documentId) => {
+      const document = linkedDocuments.find((item) => item.document_id === documentId);
+      return Boolean(
+        document?.source_status === "current"
+        && document.parsed_source_hash
+        && document.current_analysis_run_id,
+      );
+    }),
+    [linkedDocuments, rawSelectedDocumentIds],
   );
   const documentsQuery = profiles.documentsQuery;
   const currentComparisonSnapshot = useMemo<ComparisonSnapshot>(() => ({
@@ -197,13 +213,14 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     setSourceItem(null);
     setDocumentSelection({ contextKey: "", ids: [] });
     setActionError("");
+    setNeedsProfileRefresh(false);
   };
 
   const toggleDocumentSelection = (documentId: string) => {
     setActionError("");
     invalidateComparison();
     setDocumentSelection((current) => {
-      const selected = current.contextKey === comparisonContextKey ? current.ids : [];
+      const selected = current.contextKey === comparisonContextKey ? selectedDocumentIds : [];
       return {
         contextKey: comparisonContextKey,
         ids: selected.includes(documentId)
@@ -281,7 +298,47 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     } catch (error) {
       const current = currentComparisonSnapshotRef.current;
       if (requestVersion !== comparisonRequestVersion.current || !current || !snapshotsMatch(snapshot, current)) return;
+      const code = axios.isAxiosError(error) ? error.response?.data?.code : undefined;
+      if (code === "comparison_source_changed" || code === "comparison_report_invalid") {
+        setComparisonResult(null);
+        setActionError("");
+        setNeedsProfileRefresh(true);
+        return;
+      }
       setActionError(errorMessage(error, "Could not build this comparison preview."));
+    }
+  };
+
+  const refreshProfile = async () => {
+    const selectedBeforeRefresh = selectedDocumentIds;
+    setRefreshingProfile(true);
+    setActionError("");
+    invalidateComparison();
+    try {
+      const refreshedProfile = await profiles.refreshCurrentProfile();
+      const refreshedDocuments = refreshedProfile?.documents ?? [];
+      const refreshedById = new Map(
+        [...linkedDocuments, ...refreshedDocuments].map((document) => [document.document_id, document]),
+      );
+      const removedIds = selectedBeforeRefresh.filter((documentId) => {
+        const document = refreshedById.get(documentId);
+        return !document
+          || document.source_status !== "current"
+          || !document.parsed_source_hash
+          || !document.current_analysis_run_id;
+      });
+      if (removedIds.length > 0) {
+        setDocumentSelection((current) => ({
+          contextKey: current.contextKey,
+          ids: current.ids.filter((documentId) => !removedIds.includes(documentId)),
+        }));
+        setActionError(comparisonMessages.partialSourcesUnavailable);
+      }
+      setNeedsProfileRefresh(false);
+    } catch (error) {
+      setActionError(errorMessage(error, "Could not refresh the disease profile."));
+    } finally {
+      setRefreshingProfile(false);
     }
   };
 
@@ -367,6 +424,20 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
             <span>Could not load all disease profile data.</span>
             <button type="button" onClick={() => { void profiles.listQuery.refetch(); void profiles.unassignedQuery.refetch(); void profiles.detailQuery.refetch(); void documentsQuery?.refetch(); }}>
               <RefreshCw size={14} /> Retry
+            </button>
+          </div>
+        )}
+        {needsProfileRefresh && (
+          <div className="disease-profile-inline-error" role="alert">
+            <AlertCircle size={16} />
+            <span>{comparisonMessages.sourceChanged}</span>
+            <button
+              type="button"
+              onClick={() => { void refreshProfile(); }}
+              disabled={refreshingProfile}
+            >
+              <RefreshCw size={14} />
+              {refreshingProfile ? comparisonMessages.refreshingProfile : comparisonMessages.refreshProfile}
             </button>
           </div>
         )}
