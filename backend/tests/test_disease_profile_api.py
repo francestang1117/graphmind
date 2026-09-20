@@ -446,6 +446,76 @@ def test_profile_detail_encodes_linked_document_cursor(monkeypatch):
     assert disease_profiles._decode_cursor(response.documents_next_cursor or "", kind="documents") == "document-020"
 
 
+def test_profile_detail_and_document_page_keep_analysis_source_status_consistent(monkeypatch):
+    _patch_scope(monkeypatch)
+    document = {
+        "document_id": "document-current",
+        "title": "current.pdf",
+        "document_kind": "research_paper",
+        "language": "en",
+        "document_date": "2026-01-01",
+        "parsed_source_hash": "parsed-current",
+        "current_analysis_run_id": "run-current",
+        "source_status": "current",
+        "warnings": [],
+    }
+    stats = {
+        "document_count": 1,
+        "research_paper_count": 1,
+        "guideline_count": 0,
+        "other_medical_document_count": 0,
+        "valid_analysis_count": 1,
+        "expired_analysis_count": 0,
+        "external_article_count": 0,
+        "flagged_article_count": 0,
+        "comparator_reported_count": 0,
+        "comparator_not_reported_count": 0,
+        "human_study_count": 0,
+        "animal_study_count": 0,
+        "in_vitro_study_count": 0,
+        "unknown_study_population_count": 0,
+        "sample_size_reported_count": 0,
+        "sample_size_not_reported_count": 0,
+        "unknown_date_count": 0,
+    }
+    monkeypatch.setattr(
+        disease_profiles.disease_profile_service,
+        "get_profile",
+        lambda **_kwargs: {
+            **_summary(),
+            "stats": stats,
+            "documents": [document],
+            "documents_next_cursor": None,
+            "sections": [],
+        },
+    )
+    monkeypatch.setattr(
+        disease_profiles.disease_profile_service,
+        "list_profile_documents",
+        lambda **_kwargs: {"items": [document], "next_cursor": None},
+    )
+
+    detail = asyncio.run(
+        disease_profiles.get_disease_profile(
+            "mesh:D000795",
+            workspace_id="workspace-1",
+            user=SimpleNamespace(id="user-1"),
+        )
+    )
+    page = asyncio.run(
+        disease_profiles.list_disease_profile_documents(
+            "mesh:D000795",
+            workspace_id="workspace-1",
+            limit=20,
+            cursor=None,
+            user=SimpleNamespace(id="user-1"),
+        )
+    )
+
+    assert detail.documents[0].source_status == page.items[0].source_status == "current"
+    assert detail.documents[0].current_analysis_run_id == page.items[0].current_analysis_run_id == "run-current"
+
+
 def test_unassigned_documents_api_forwards_page_and_encodes_cursor(monkeypatch):
     _patch_scope(monkeypatch)
     captured = {}

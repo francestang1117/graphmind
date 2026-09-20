@@ -23,7 +23,10 @@ from app.models.persistence import (
 )
 from app.services.medical.disease_profile.aggregator import DiseaseProfileAggregator
 from app.services.medical.disease_profile.exceptions import DiseaseProfileError
-from app.services.medical.disease_profile.repository import DiseaseProfileRepository
+from app.services.medical.disease_profile.repository import (
+    DiseaseProfileRepository,
+    ProfileInputOptions,
+)
 from app.services.medical.disease_profile.service import DiseaseProfileService
 
 
@@ -92,6 +95,7 @@ def _seed_comparison_snapshot(
     run_id: str,
     parsed_source_hash: str = "parsed-snapshot",
     evidence_id: str = "EVIDENCE-before",
+    file_hash: str = "file-snapshot",
 ) -> None:
     with sessions() as db:
         db.add(
@@ -105,7 +109,7 @@ def _seed_comparison_snapshot(
                 file_extension="pdf",
                 file_type="pdf",
                 mime_type="application/pdf",
-                file_hash="file-snapshot",
+                file_hash=file_hash,
                 file_path=f"/tmp/{document_id}.pdf",
                 file_size=10,
                 status="completed",
@@ -137,7 +141,7 @@ def _seed_comparison_snapshot(
                 document_id=document_id,
                 requested_by=user_id,
                 status="succeeded",
-                source_hash="file-snapshot",
+                source_hash=file_hash,
                 parsed_source_hash=parsed_source_hash,
                 analysis_key=f"comparison-snapshot-{run_id}",
                 is_current=True,
@@ -526,6 +530,95 @@ def test_repository_links_are_idempotent_and_scope_checked():
         assert db.query(DocumentDiseaseLinkRecord).filter_by(document_id=document_id).count() == 0
         db.query(DocumentRecord).filter_by(id=document_id).delete()
         db.commit()
+
+
+def test_invalid_current_report_is_not_advertised_as_comparable_profile_source():
+    suffix = uuid.uuid4().hex
+    user_id = f"invalid-report-user-{suffix}"
+    workspace_id = f"invalid-report-workspace-{suffix}"
+    valid_document_id = f"invalid-report-valid-document-{suffix}"
+    invalid_document_id = f"invalid-report-invalid-document-{suffix}"
+    valid_run_id = f"invalid-report-valid-run-{suffix}"
+    invalid_run_id = f"invalid-report-invalid-run-{suffix}"
+
+    try:
+        _seed_comparison_snapshot(
+            SessionLocal,
+            suffix=f"{suffix}-valid",
+            user_id=user_id,
+            workspace_id=workspace_id,
+            document_id=valid_document_id,
+            run_id=valid_run_id,
+        )
+        _seed_comparison_snapshot(
+            SessionLocal,
+            suffix=f"{suffix}-invalid",
+            user_id=user_id,
+            workspace_id=workspace_id,
+            document_id=invalid_document_id,
+            run_id=invalid_run_id,
+            file_hash=f"file-{invalid_document_id}",
+        )
+        with SessionLocal() as db:
+            invalid_result = db.get(MedicalAnalysisResultRecord, invalid_run_id)
+            assert invalid_result is not None
+            invalid_result.report_json = "{}"
+            db.commit()
+
+        repository = DiseaseProfileRepository()
+        document_page = repository.list_profile_documents(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id="mesh:D000795",
+            limit=20,
+        )
+        documents_by_id = {item["document_id"]: item for item in document_page["items"]}
+        assert documents_by_id[valid_document_id]["source_status"] == "current"
+        assert documents_by_id[valid_document_id]["current_analysis_run_id"] == valid_run_id
+        assert documents_by_id[invalid_document_id]["source_status"] == "outdated"
+        assert documents_by_id[invalid_document_id]["current_analysis_run_id"] is None
+
+        grouped = repository.load_profile_inputs(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_ids=["mesh:D000795"],
+            include=ProfileInputOptions(analyses=True, evidence=False, literature_matches=False, clinician_questions=False),
+        )
+        records_by_id = {
+            record["document"]["document_id"]: record
+            for record in grouped["mesh:D000795"]
+        }
+        assert records_by_id[valid_document_id]["analyses"][0]["valid"] is True
+        assert records_by_id[invalid_document_id]["analyses"][0]["valid"] is False
+        assert records_by_id[invalid_document_id]["analyses"][0]["report"] is None
+
+        profile = DiseaseProfileService(repository=repository).get_profile(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id="mesh:D000795",
+        )
+        assert profile is not None
+        assert profile["stats"]["valid_analysis_count"] == 1
+    finally:
+        with SessionLocal() as db:
+            db.query(MedicalAnalysisEvidenceRecord).filter(
+                MedicalAnalysisEvidenceRecord.run_id.in_([valid_run_id, invalid_run_id])
+            ).delete(synchronize_session=False)
+            db.query(MedicalAnalysisResultRecord).filter(
+                MedicalAnalysisResultRecord.run_id.in_([valid_run_id, invalid_run_id])
+            ).delete(synchronize_session=False)
+            db.query(MedicalAnalysisRunRecord).filter(
+                MedicalAnalysisRunRecord.id.in_([valid_run_id, invalid_run_id])
+            ).delete(synchronize_session=False)
+            db.query(DocumentDiseaseLinkRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.query(DocumentRecord).filter_by(
+                user_id=user_id,
+                workspace_id=workspace_id,
+            ).delete(synchronize_session=False)
+            db.commit()
 
 
 def test_repository_loads_only_selected_scoped_comparison_inputs():

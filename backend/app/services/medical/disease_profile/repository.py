@@ -483,9 +483,9 @@ class DiseaseProfileRepository:
                     document = documents.get(run.document_id)
                     if not document:
                         continue
-                    report = _loads_json(result.report_json, None) if result else None
+                    report = _validated_analysis_report(result, run)
                     source_current = is_current_valid_analysis(run, result, document)
-                    report_valid = isinstance(report, dict)
+                    report_valid = report is not None
                     warnings: list[str] = []
                     if source_current and not report_valid:
                         warnings.append("analysis_report_unavailable")
@@ -718,10 +718,7 @@ class DiseaseProfileRepository:
                         **document,
                         "current_analysis_run_id": run.id,
                     }
-                    report = _normalize_comparison_report(
-                        result.report_json,
-                        row_schema_version=run.schema_version,
-                    )
+                    report = _validated_analysis_report(result, run)
                     if report is None:
                         raise DiseaseProfileError(
                             "A selected document has an invalid analysis report.",
@@ -950,7 +947,11 @@ class DiseaseProfileRepository:
                 current_run = aliased(MedicalAnalysisRunRecord)
                 current_result = aliased(MedicalAnalysisResultRecord)
                 candidate_statement = (
-                    select(DocumentRecord.id, current_result.report_json)
+                    select(
+                        DocumentRecord.id,
+                        current_result.report_json,
+                        current_run.schema_version,
+                    )
                     .join(
                         DocumentDiseaseLinkRecord,
                         DocumentDiseaseLinkRecord.document_id == DocumentRecord.id,
@@ -1020,12 +1021,15 @@ class DiseaseProfileRepository:
                     candidate_rows = db.execute(statement).all()
                     if not candidate_rows:
                         break
-                    for document_id, report_json in candidate_rows:
+                    for document_id, report_json, schema_version in candidate_rows:
                         document_id = str(document_id)
                         if document_id in seen_ids:
                             continue
                         seen_ids.add(document_id)
-                        if isinstance(_loads_json(report_json, None), dict):
+                        if _normalize_comparison_report(
+                            report_json,
+                            row_schema_version=schema_version,
+                        ) is not None:
                             valid_ids.append(document_id)
                             if len(valid_ids) > page_size:
                                 break
@@ -1152,9 +1156,9 @@ class DiseaseProfileRepository:
             document = documents.get(run.document_id)
             if not document:
                 continue
-            report = _loads_json(result.report_json, None) if result else None
+            report = _validated_analysis_report(result, run)
             source_current = is_current_valid_analysis(run, result, document)
-            report_valid = isinstance(report, dict)
+            report_valid = report is not None
             analyses_by_document[run.document_id].append(
                 {
                     "run": _analysis_run_dict(run, result),
@@ -1413,6 +1417,27 @@ def _loads_json(value: str | None, default: Any) -> Any:
         return json.loads(value or "")
     except (TypeError, json.JSONDecodeError):
         return default
+
+
+def _validated_analysis_report(
+    result: Any,
+    run: Any,
+) -> dict[str, Any] | None:
+    """Return the one normalized report shape accepted by profile reads.
+
+    Profile summaries, document source lists, and comparison previews must
+    agree on what makes an analysis usable. Keeping the result/run extraction
+    here prevents a parseable but structurally empty JSON object from being
+    advertised as a current comparison source.
+    """
+    if not result or not run:
+        return None
+    report_json = result.get("report_json") if isinstance(result, dict) else getattr(result, "report_json", None)
+    row_schema_version = run.get("schema_version") if isinstance(run, dict) else getattr(run, "schema_version", None)
+    return _normalize_comparison_report(
+        report_json,
+        row_schema_version=row_schema_version,
+    )
 
 
 def _normalize_comparison_report(

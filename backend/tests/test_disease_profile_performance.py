@@ -50,6 +50,44 @@ def _document(document_id: str, user_id: str, workspace_id: str) -> DocumentReco
     )
 
 
+def _valid_analysis_report_json(evidence_id: str) -> str:
+    return json.dumps(
+        {
+            "schema_version": "medical-insights-v3",
+            "document_kind": "research_paper",
+            "language": "en",
+            "overview": {
+                "title": "External source",
+                "summary": "A valid report for the external source test.",
+                "evidence_ids": [evidence_id],
+            },
+            "study_methods": {
+                "population": {
+                    "value": "Adults",
+                    "support_status": "supported",
+                    "evidence_ids": [evidence_id],
+                }
+            },
+            "key_findings": [
+                {
+                    "id": "finding-1",
+                    "statement": "The study reported an outcome.",
+                    "plain_explanation": "The report keeps this outcome attached to its source.",
+                    "evidence_ids": [evidence_id],
+                }
+            ],
+            "limitations": [],
+            "coverage": {
+                "complete": True,
+                "selected_chunks": 1,
+                "total_chunks": 1,
+                "included_sections": ["methods", "results"],
+                "omitted_sections": [],
+            },
+        }
+    )
+
+
 def _input_record(concept_id: str, document_id: str) -> dict:
     return {
         "link": {
@@ -695,7 +733,7 @@ def test_external_source_page_requires_current_valid_analysis_and_scope():
             db.add(
                 MedicalAnalysisResultRecord(
                     run_id=run_id,
-                    report_json="{}",
+                    report_json=_valid_analysis_report_json(f"external-evidence-{suffix}"),
                     validation_status="validated",
                 )
             )
