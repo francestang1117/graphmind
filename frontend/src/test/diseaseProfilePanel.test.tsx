@@ -1,5 +1,5 @@
 import axios from "axios";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DiseaseProfilePanel from "../components/DiseaseProfilePanel";
@@ -726,9 +726,14 @@ describe("DiseaseProfilePanel", () => {
     await user.click(screen.getByRole("button", { name: /戈谢病/ }));
     await user.click(screen.getByRole("checkbox", { name: "Select gaucher-study.pdf for comparison" }));
     await user.click(screen.getByRole("checkbox", { name: "Select second-gaucher-study.pdf for comparison" }));
-    refreshGate.resolve();
 
-    await waitFor(() => expect(screen.getByText("2/5 selected")).toBeInTheDocument());
+    expect(configured.refreshCurrentProfile).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("2/5 selected")).toBeInTheDocument();
+    await act(async () => {
+      refreshGate.resolve();
+      await refreshGate.promise;
+    });
+    expect(screen.getByText("2/5 selected")).toBeInTheDocument();
     expect(screen.queryByText("Sources refreshed. Select two to five documents again.")).not.toBeInTheDocument();
     expect(screen.queryByText("Could not refresh the disease profile.")).not.toBeInTheDocument();
   });
@@ -816,9 +821,14 @@ describe("DiseaseProfilePanel", () => {
     await user.click(screen.getByRole("button", { name: /戈谢病/ }));
     await user.click(screen.getByRole("checkbox", { name: "Select gaucher-study.pdf for comparison" }));
     await user.click(screen.getByRole("checkbox", { name: "Select second-gaucher-study.pdf for comparison" }));
-    refreshGate.reject(new Error("old profile failed"));
 
-    await waitFor(() => expect(screen.getByText("2/5 selected")).toBeInTheDocument());
+    expect(configured.refreshCurrentProfile).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("2/5 selected")).toBeInTheDocument();
+    await act(async () => {
+      refreshGate.reject(new Error("old profile failed"));
+      await expect(refreshGate.promise).rejects.toThrow("old profile failed");
+    });
+    expect(screen.getByText("2/5 selected")).toBeInTheDocument();
     expect(screen.queryByText("Could not refresh the disease profile.")).not.toBeInTheDocument();
     expect(screen.queryByText("Sources refreshed. Select two to five documents again.")).not.toBeInTheDocument();
   });
@@ -890,9 +900,13 @@ describe("DiseaseProfilePanel", () => {
     await user.click(screen.getByRole("button", { name: /法布雷病/ }));
     await user.click(screen.getByRole("checkbox", { name: "Select fabry-study.pdf for comparison" }));
     await user.click(screen.getByRole("checkbox", { name: "Select second-fabry-study.pdf for comparison" }));
-    refreshGate.resolve();
 
-    await waitFor(() => expect(screen.getByText("2/5 selected")).toBeInTheDocument());
+    expect(screen.getByText("2/5 selected")).toBeInTheDocument();
+    await act(async () => {
+      refreshGate.resolve();
+      await refreshGate.promise;
+    });
+    expect(screen.getByText("2/5 selected")).toBeInTheDocument();
     expect(screen.queryByText("Sources refreshed. Select two to five documents again.")).not.toBeInTheDocument();
   });
 
