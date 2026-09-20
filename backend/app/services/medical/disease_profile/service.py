@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from pydantic import ValidationError
+
 from app.services.medical.disease_profile.aggregator import (
     PROFILE_SECTIONS,
     DiseaseProfileAggregator,
 )
+from app.services.medical.disease_profile.comparison_builder import build_comparison_preview
 from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 from app.services.medical.disease_profile.repository import (
     DiseaseProfileRepository,
     ProfileInputOptions,
     disease_profile_repository,
 )
+from app.services.medical.disease_profile.models import ComparisonPreviewRequest
 from app.services.medical.terminology import DiseaseOntologyError, get_default_ontology
 from app.services.medical.terminology.normalizer import normalize_terminology_text
 
@@ -334,6 +338,91 @@ class DiseaseProfileService:
             limit=limit,
             after_document_id=cursor_document_id,
         )
+
+    def preview_comparison(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        concept_id: str,
+        documents: list[dict[str, Any]],
+        language: str,
+    ) -> dict[str, Any]:
+        """Validate selected source versions before building a comparison."""
+        try:
+            request = ComparisonPreviewRequest(
+                documents=documents,
+                language=language,
+            )
+        except ValidationError as exc:
+            raise DiseaseProfileError(
+                "Select between two and five different profile documents.",
+                code="comparison_invalid_selection",
+                status_code=422,
+            ) from exc
+
+        selected_ids = [item.document_id for item in request.documents]
+        records = self.repository.load_comparison_inputs(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            concept_id=concept_id,
+            document_ids=selected_ids,
+        )
+        records_by_id = {
+            str(record.get("document", {}).get("document_id")): record
+            for record in records
+            if record.get("document", {}).get("document_id")
+        }
+        if len(records_by_id) != len(selected_ids) or any(
+            document_id not in records_by_id for document_id in selected_ids
+        ):
+            raise DiseaseProfileError(
+                "One or more selected documents were not found in this disease profile.",
+                code="comparison_source_not_found",
+                status_code=404,
+            )
+
+        ordered_records: list[dict[str, Any]] = []
+        for selection in request.documents:
+            record = records_by_id[selection.document_id]
+            document = record.get("document") or {}
+            if str(document.get("parsed_source_hash") or "") != selection.expected_parsed_source_hash:
+                raise DiseaseProfileError(
+                    "A selected document changed after it was chosen. Refresh and select it again.",
+                    code="comparison_source_changed",
+                    status_code=409,
+                )
+            if str(document.get("current_analysis_run_id") or "") != selection.expected_analysis_run_id:
+                raise DiseaseProfileError(
+                    "The selected analysis changed after it was chosen. Refresh and select it again.",
+                    code="comparison_source_changed",
+                    status_code=409,
+                )
+            if not any(
+                isinstance(analysis, dict)
+                and analysis.get("valid")
+                and isinstance(analysis.get("report"), dict)
+                for analysis in (record.get("analyses") or [])
+            ):
+                raise DiseaseProfileError(
+                    "A selected document no longer has a current validated analysis.",
+                    code="comparison_source_changed",
+                    status_code=409,
+                )
+            ordered_records.append(record)
+
+        preview = build_comparison_preview(
+            concept_id=concept_id,
+            inputs=ordered_records,
+            language=request.language,
+        )
+        if len(preview.documents) != len(selected_ids):
+            raise DiseaseProfileError(
+                "A selected document no longer has a current validated analysis.",
+                code="comparison_source_changed",
+                status_code=409,
+            )
+        return preview.model_dump()
 
     def _aggregate(
         self,

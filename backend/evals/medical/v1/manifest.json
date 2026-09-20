@@ -1,8 +1,8 @@
 {
   "schema_version": "medical-eval-v1",
-  "dataset_version": "medical-eval-v1.3.0",
-  "description": "Synthetic bilingual regression cases for GraphMind medical services, including visit preparation and disease profiles.",
-  "case_count": 50,
+  "dataset_version": "medical-eval-v1.4.0",
+  "description": "Synthetic bilingual regression cases for GraphMind medical services, including visit preparation, disease profiles, and evidence-bound comparisons.",
+  "case_count": 52,
   "cases": [
     {"case_id": "en_terminology_fabry_001", "suite": "terminology", "path": "terminology/en_fabry.json"},
     {"case_id": "zh_terminology_fabry_001", "suite": "terminology", "path": "terminology/zh_fabry.json"},
@@ -53,6 +53,8 @@
     {"case_id": "zh_profile_two_concepts_isolated_001", "suite": "disease_profiles", "path": "disease_profiles/zh_two_concepts_isolated.json"},
     {"case_id": "en_profile_population_types_001", "suite": "disease_profiles", "path": "disease_profiles/en_population_types.json"},
     {"case_id": "zh_profile_withdrawn_article_001", "suite": "disease_profiles", "path": "disease_profiles/zh_withdrawn_article.json"},
-    {"case_id": "en_profile_low_sample_counts_001", "suite": "disease_profiles", "path": "disease_profiles/en_low_sample_counts.json"}
+    {"case_id": "en_profile_low_sample_counts_001", "suite": "disease_profiles", "path": "disease_profiles/en_low_sample_counts.json"},
+    {"case_id": "en_profile_comparison_safety_001", "suite": "disease_profiles", "path": "disease_profiles/en_comparison_safety.json"},
+    {"case_id": "zh_profile_comparison_safety_001", "suite": "disease_profiles", "path": "disease_profiles/zh_comparison_safety.json"}
   ]
 }

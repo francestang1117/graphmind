@@ -8,6 +8,8 @@ import {
   getDiseaseProfileItems,
   listDiseaseProfiles,
   listUnassignedDiseaseDocuments,
+  previewDiseaseProfileComparison,
+  type ComparisonPreviewRequest,
   type DiseaseProfileItem,
   type DiseaseProfileDocumentsPage,
   searchDiseaseConcepts,
@@ -66,6 +68,7 @@ export function useDiseaseProfiles(
         title: item.title,
         document_date: item.document_date,
         parsed_source_hash: item.parsed_source_hash,
+        current_analysis_run_id: item.current_analysis_run_id,
         source_status: item.source_status,
       })))
     : "none";
@@ -116,6 +119,25 @@ export function useDiseaseProfiles(
     onSuccess: invalidate,
   });
 
+  const refreshCurrentProfile = async () => {
+    if (!workspaceId || !selectedConceptId) return;
+    const [listResult, detailResult] = await Promise.all([
+      listQuery.refetch({ throwOnError: true }),
+      detailQuery.refetch({ throwOnError: true }),
+    ]);
+    if (!listResult.isSuccess || !detailResult.isSuccess || !detailResult.data) {
+      throw new Error("Could not refresh the current disease profile.");
+    }
+    // The detail response is part of the linked-document query key. Refetch
+    // active document pages and propagate failures so the panel never clears
+    // its recovery state while an older page is still cached.
+    await queryClient.refetchQueries(
+      { queryKey: [...detailKey, "documents"], type: "active" },
+      { throwOnError: true },
+    );
+    return detailResult.data;
+  };
+
   return {
     list: profiles,
     hasMoreProfiles: Boolean(listQuery.hasNextPage),
@@ -146,6 +168,7 @@ export function useDiseaseProfiles(
     unlinkDocument: unlinkMutation.mutateAsync,
     unlinking: unlinkMutation.isPending,
     unlinkError: unlinkMutation.error,
+    refreshCurrentProfile,
   };
 }
 
@@ -211,5 +234,18 @@ export function useDiseaseProfileExternalSourceDocuments(
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
     enabled: Boolean(workspaceId && conceptId && source && externalId),
     refetchOnWindowFocus: false,
+  });
+}
+
+export function useDiseaseComparisonPreview(
+  workspaceId: string | null | undefined,
+  conceptId: string | null | undefined,
+) {
+  return useMutation({
+    mutationFn: (input: ComparisonPreviewRequest) => previewDiseaseProfileComparison(
+      conceptId as string,
+      workspaceId as string,
+      input,
+    ),
   });
 }

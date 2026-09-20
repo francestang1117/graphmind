@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import uuid
 
+import pytest
+
 from app.core.database import SessionLocal
 from app.models.persistence import (
     DocumentDiseaseLinkRecord,
@@ -23,6 +25,7 @@ from app.services.medical.disease_profile.repository import (
     DiseaseProfileRepository,
     ProfileInputOptions,
 )
+from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 from app.services.medical.disease_profile.service import DiseaseProfileService
 
 
@@ -47,6 +50,44 @@ def _document(document_id: str, user_id: str, workspace_id: str) -> DocumentReco
     )
 
 
+def _valid_analysis_report_json(evidence_id: str) -> str:
+    return json.dumps(
+        {
+            "schema_version": "medical-insights-v3",
+            "document_kind": "research_paper",
+            "language": "en",
+            "overview": {
+                "title": "External source",
+                "summary": "A valid report for the external source test.",
+                "evidence_ids": [evidence_id],
+            },
+            "study_methods": {
+                "population": {
+                    "value": "Adults",
+                    "support_status": "supported",
+                    "evidence_ids": [evidence_id],
+                }
+            },
+            "key_findings": [
+                {
+                    "id": "finding-1",
+                    "statement": "The study reported an outcome.",
+                    "plain_explanation": "The report keeps this outcome attached to its source.",
+                    "evidence_ids": [evidence_id],
+                }
+            ],
+            "limitations": [],
+            "coverage": {
+                "complete": True,
+                "selected_chunks": 1,
+                "total_chunks": 1,
+                "included_sections": ["methods", "results"],
+                "omitted_sections": [],
+            },
+        }
+    )
+
+
 def _input_record(concept_id: str, document_id: str) -> dict:
     return {
         "link": {
@@ -64,11 +105,52 @@ def _input_record(concept_id: str, document_id: str) -> dict:
             "document_date": "2026-01-01",
             "file_hash": f"hash-{document_id}",
             "parsed_source_hash": f"parsed-{document_id}",
+            "current_analysis_run_id": f"run-{document_id}",
             "modified_at": "2026-09-18T00:00:00+00:00",
         },
         "analyses": [],
         "matches": [],
         "questions": [],
+    }
+
+
+def _comparison_record(document_id: str) -> dict:
+    evidence_id = f"comparison-evidence-{document_id}"
+    return {
+        "document": {
+            "document_id": document_id,
+            "title": f"{document_id}.pdf",
+            "open_filename": f"stored-{document_id}.pdf",
+            "document_kind": "research_paper",
+            "document_date": "2026-01-01",
+            "parsed_source_hash": f"parsed-{document_id}",
+            "current_analysis_run_id": f"run-{document_id}",
+        },
+        "analyses": [{
+            "run": {
+                "run_id": f"run-{document_id}",
+                "parsed_source_hash": f"parsed-{document_id}",
+            },
+            "report": {
+                "study_methods": {
+                    "population": {
+                        "value": "Adults",
+                        "support_status": "supported",
+                        "evidence_ids": [evidence_id],
+                    },
+                },
+            },
+            "evidence": [{
+                "id": evidence_id,
+                "evidence_id": evidence_id,
+                "section_type": "methods",
+                "section_title": "Methods",
+                "quote": "Adults were included.",
+                "page_start": 1,
+                "page_end": 1,
+            }],
+            "valid": True,
+        }],
     }
 
 
@@ -374,6 +456,63 @@ def test_service_loads_only_the_current_concept_page():
     assert captured["inputs"]["concept_ids"] == ["mesh:A", "mesh:B"]
 
 
+def test_comparison_service_keeps_selection_at_five_documents():
+    captured: dict[str, object] = {}
+    document_ids = [f"comparison-doc-{index}" for index in range(5)]
+
+    class Repository:
+        def load_comparison_inputs(self, **kwargs):
+            captured.update(kwargs)
+            return [_comparison_record(document_id) for document_id in kwargs["document_ids"]]
+
+    preview = DiseaseProfileService(repository=Repository()).preview_comparison(
+        user_id="user-1",
+        workspace_id="workspace-1",
+        concept_id="mesh:D000795",
+        documents=[
+            {
+                "document_id": document_id,
+                "expected_parsed_source_hash": f"parsed-{document_id}",
+                "expected_analysis_run_id": f"run-{document_id}",
+            }
+            for document_id in document_ids
+        ],
+        language="en",
+    )
+
+    assert captured["document_ids"] == document_ids
+    assert len(preview["documents"]) == 5
+
+
+def test_comparison_service_rejects_analysis_run_changed_after_selection():
+    class Repository:
+        def load_comparison_inputs(self, **kwargs):
+            return [_comparison_record(document_id) for document_id in kwargs["document_ids"]]
+
+    with pytest.raises(DiseaseProfileError) as error:
+        DiseaseProfileService(repository=Repository()).preview_comparison(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            concept_id="mesh:D000795",
+            documents=[
+                {
+                    "document_id": "comparison-doc-1",
+                    "expected_parsed_source_hash": "parsed-comparison-doc-1",
+                    "expected_analysis_run_id": "run-before-reanalysis",
+                },
+                {
+                    "document_id": "comparison-doc-2",
+                    "expected_parsed_source_hash": "parsed-comparison-doc-2",
+                    "expected_analysis_run_id": "run-comparison-doc-2",
+                },
+            ],
+            language="en",
+        )
+
+    assert error.value.code == "comparison_source_changed"
+    assert error.value.status_code == 409
+
+
 def test_section_read_uses_only_its_declared_input_tables():
     captured: dict[str, object] = {}
 
@@ -594,7 +733,7 @@ def test_external_source_page_requires_current_valid_analysis_and_scope():
             db.add(
                 MedicalAnalysisResultRecord(
                     run_id=run_id,
-                    report_json="{}",
+                    report_json=_valid_analysis_report_json(f"external-evidence-{suffix}"),
                     validation_status="validated",
                 )
             )

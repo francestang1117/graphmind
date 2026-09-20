@@ -325,6 +325,7 @@ export interface DiseaseProfileDocument {
   language: string;
   document_date: string;
   parsed_source_hash: string;
+  current_analysis_run_id: string | null;
   source_status: "current" | "outdated" | "unavailable";
   warnings: string[];
 }
@@ -389,6 +390,109 @@ export interface DiseaseProfileItems {
 export interface DiseaseProfileDocumentsPage {
   items: DiseaseProfileDocument[];
   next_cursor?: string | null;
+}
+
+export type ComparisonCoverageStatus = "complete" | "partial" | "unknown";
+export type ComparisonSupportStatus =
+  | "supported"
+  | "partially_supported"
+  | "not_reported"
+  | "uncertain"
+  | "source_unavailable";
+export type ComparisonLanguage = "en" | "zh" | "ja";
+
+export interface ComparisonDocumentSelection {
+  document_id: string;
+  expected_parsed_source_hash: string;
+  expected_analysis_run_id: string;
+}
+
+export interface ComparisonPreviewRequest {
+  documents: ComparisonDocumentSelection[];
+  language: ComparisonLanguage;
+}
+
+export interface ComparisonEvidence {
+  document_id: string;
+  analysis_run_id: string;
+  evidence_id: string;
+  quote: string;
+  section_type: string;
+  section_title: string;
+  page_start?: number | null;
+  page_end?: number | null;
+  quote_truncated: boolean;
+}
+
+export interface ComparisonMethod {
+  value: string;
+  support_status: ComparisonSupportStatus;
+  evidence: ComparisonEvidence[];
+  evidence_total: number;
+  evidence_truncated: boolean;
+  warnings: string[];
+}
+
+export interface ComparisonMethods {
+  design: ComparisonMethod;
+  population: ComparisonMethod;
+  human_animal_in_vitro: ComparisonMethod;
+  sample_size: ComparisonMethod;
+  comparator: ComparisonMethod;
+}
+
+export interface ComparisonCoverage {
+  status: ComparisonCoverageStatus;
+  selected_chunks: number;
+  total_chunks: number;
+  included_sections: string[];
+  omitted_sections: string[];
+}
+
+export interface ComparisonFinding {
+  id: string;
+  statement: string;
+  explanation: string;
+  evidence: ComparisonEvidence[];
+  evidence_total: number;
+  evidence_truncated: boolean;
+  warnings: string[];
+}
+
+export interface ComparisonQuestion {
+  id: string;
+  question: string;
+  rationale: string;
+  document_id: string;
+  evidence: ComparisonEvidence[];
+  evidence_total: number;
+  evidence_truncated: boolean;
+}
+
+export interface ComparisonDocument {
+  document_id: string;
+  title: string;
+  document_kind: string;
+  document_date: string;
+  open_filename: string;
+  analysis_run_id: string;
+  parsed_source_hash: string;
+  coverage_status: ComparisonCoverageStatus;
+  coverage: ComparisonCoverage;
+  methods: ComparisonMethods;
+  findings: ComparisonFinding[];
+  findings_total: number;
+  findings_truncated: boolean;
+  limitations: ComparisonFinding[];
+  limitations_total: number;
+  limitations_truncated: boolean;
+}
+
+export interface ComparisonPreview {
+  concept_id: string;
+  documents: ComparisonDocument[];
+  discussion_questions: ComparisonQuestion[];
+  warnings: string[];
 }
 
 export interface DiseaseConceptOption {
@@ -1055,6 +1159,19 @@ export const getDiseaseProfile = (
   http
     .get<DiseaseProfileDetail>(
       `/disease-profiles/${encodeURIComponent(conceptId)}`,
+      workspaceParams(workspaceId),
+    )
+    .then((r) => r.data);
+
+export const previewDiseaseProfileComparison = (
+  conceptId: string,
+  workspaceId: string,
+  body: ComparisonPreviewRequest,
+): Promise<ComparisonPreview> =>
+  http
+    .post<ComparisonPreview>(
+      `/disease-profiles/${encodeURIComponent(conceptId)}/comparison-preview`,
+      body,
       workspaceParams(workspaceId),
     )
     .then((r) => r.data);

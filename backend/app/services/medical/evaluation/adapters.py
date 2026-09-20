@@ -22,6 +22,7 @@ from app.services.medical.ai.question_validator import validate_questions
 from app.services.medical.ai.safety_validator import validate_safety
 from app.services.medical.ai.support_validator import validate_support
 from app.services.medical.disease_profile.aggregator import DiseaseProfileAggregator
+from app.services.medical.disease_profile.comparison_builder import build_comparison_preview
 from app.services.medical.evidence_matching.matcher import match_articles
 from app.services.medical.evidence_matching.models import MatchableFinding
 from app.services.medical.evaluation.models import EvaluationCase
@@ -399,6 +400,8 @@ def evaluate_clinician_questions(case: EvaluationCase, _dataset_root: Path) -> d
 def evaluate_disease_profiles(case: EvaluationCase, _dataset_root: Path) -> dict[str, Any]:
     """Replay compact synthetic records through the production aggregator."""
     payload = case.input
+    if isinstance(payload.get("comparison"), Mapping):
+        return _evaluate_comparison_case(payload["comparison"])
     concept_id = str(payload.get("concept_id") or "")
     raw_records = payload.get("records", [])
     if not concept_id or not isinstance(raw_records, list):
@@ -507,6 +510,59 @@ def evaluate_disease_profiles(case: EvaluationCase, _dataset_root: Path) -> dict
     }
 
 
+def _evaluate_comparison_case(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Replay a bounded comparison case through the production builder."""
+    concept_id = str(payload.get("concept_id") or "")
+    raw_records = payload.get("records", [])
+    if not concept_id or not isinstance(raw_records, list):
+        raise EvaluationAdapterError("comparison cases require a concept and records")
+
+    records = [_profile_record(item, index) for index, item in enumerate(raw_records)]
+    for record in records:
+        document = record["document"]
+        document["open_filename"] = f"stored-{document['document_id']}.pdf"
+    preview = build_comparison_preview(
+        concept_id=concept_id,
+        inputs=records,
+        language=str(payload.get("language") or "en"),
+    )
+    all_methods = [
+        method
+        for document in preview.documents
+        for method in document.methods.model_dump().values()
+    ]
+    all_items = [
+        item
+        for document in preview.documents
+        for item in [*document.findings, *document.limitations]
+    ]
+    serialized = json.dumps(preview.model_dump(), ensure_ascii=False)
+    return {
+        "comparison_status": "ready",
+        "concept_id": preview.concept_id,
+        "document_count": len(preview.documents),
+        "document_ids": [document.document_id for document in preview.documents],
+        "coverage_statuses": [document.coverage_status for document in preview.documents],
+        "all_items_have_sources": all(bool(item.evidence) for item in all_items),
+        "not_reported_is_uncited": all(
+            not (
+                method["support_status"] == "not_reported"
+                and method["evidence"]
+            )
+            for method in all_methods
+        ),
+        "has_contradiction_label": "contradict" in serialized.casefold(),
+        "has_treatment_ranking": any(
+            marker in serialized
+            for marker in ("treatment_ranking", "recommended_treatment", "overall_grade")
+        ),
+        "questions_neutral": all(
+            not any(marker in question.question.casefold() for marker in ("should i", "take ", "dose"))
+            for question in preview.discussion_questions
+        ),
+    }
+
+
 def _profile_record(value: Any, index: int) -> dict[str, Any]:
     """Expand a readable evaluation record into the repository snapshot shape."""
     if not isinstance(value, Mapping):
@@ -584,6 +640,8 @@ def _profile_run(value: Any, run_id: str, document: Mapping[str, Any]) -> dict[s
 
 def _profile_report(analysis: Mapping[str, Any], document_id: str) -> dict[str, Any]:
     report = dict(analysis.get("report") or {})
+    if isinstance(analysis.get("coverage"), Mapping):
+        report["coverage"] = dict(analysis["coverage"])
     evidence_ids = [
         str(item.get("evidence_id") or item.get("id") or "")
         for item in analysis.get("evidence", [])
