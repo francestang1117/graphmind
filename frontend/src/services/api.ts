@@ -122,6 +122,7 @@ export interface MedicalInsightAttribute {
   value: string;
   support_status: "supported" | "partially_supported" | "not_reported" | "uncertain" | string;
   evidence_ids: string[];
+  missing_reason?: "not_reported_in_source" | "not_extracted_from_analyzed_text" | "source_unreadable" | string;
 }
 
 export type QuestionSuggestionCategory =
@@ -431,6 +432,7 @@ export interface ComparisonMethod {
   evidence_total: number;
   evidence_truncated: boolean;
   warnings: string[];
+  missing_reason?: string;
 }
 
 export interface ComparisonMethods {
@@ -464,6 +466,9 @@ export interface ComparisonQuestion {
   question: string;
   rationale: string;
   document_id: string;
+  document_ids: string[];
+  analysis_run_ids: string[];
+  topic: string;
   evidence: ComparisonEvidence[];
   evidence_total: number;
   evidence_truncated: boolean;

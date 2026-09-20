@@ -71,6 +71,41 @@ function readable(value: string) {
   return value.replaceAll("_", " ");
 }
 
+function methodValue(item: MedicalInsightAttribute) {
+  if (item.support_status !== "not_reported") return item.value;
+  switch (item.missing_reason) {
+    case "not_reported_in_source":
+      return "The source evidence states that this field was not reported.";
+    case "source_unreadable":
+      return "This field could not be checked because the source text was not readable.";
+    default:
+      return "This field was not confirmed in the analyzed text.";
+  }
+}
+
+function warningLabel(warning: string) {
+  switch (warning) {
+    case "not_medical_advice":
+      return "For research support only; this is not medical advice.";
+    case "pii_redacted":
+      return "Sensitive personal information was removed before analysis.";
+    case "extractive_output":
+      return "This report is a source extract, not a generated plain-language explanation.";
+    case "pdf_text_degraded":
+      return "Some PDF text was reconstructed from its word layout; check the cited passage in the original document.";
+    case "pdf_text_reconstructed":
+      return "Some PDF text was reconstructed from its word layout.";
+    case "analysis_report_unavailable":
+      return "The analysis report is unavailable and cannot be used as evidence.";
+    case "table_location_unavailable":
+      return "A table was found, but its exact source location could not be confirmed.";
+    case "figure_location_unavailable":
+      return "A figure was found, but its exact source location could not be confirmed.";
+    default:
+      return readable(warning);
+  }
+}
+
 function locationLabel(evidence: MedicalInsightEvidence) {
   const page = evidence.page_start
     ? evidence.page_end && evidence.page_end !== evidence.page_start
@@ -157,7 +192,7 @@ function MethodItem({
   return (
     <div className="insight-method-item">
       <span>{label}</span>
-      <strong>{item.value}</strong>
+      <strong>{methodValue(item)}</strong>
       <span className="insight-type">{readable(item.support_status)}</span>
       {item.evidence_ids.length > 0 && findingEvidence(
         {
@@ -194,11 +229,19 @@ function ReportView({
   staleSuggestionIds?: ReadonlySet<string>;
   savingSuggestionId?: string | null;
 }) {
+  // Older extractive runs predate the report warning. Use the persisted
+  // provider identity as a compatibility fallback so they are not shown as
+  // generated plain-language explanations after a frontend upgrade.
+  const isExtractive =
+    run.provider === "extractive"
+    || run.model_name === "extractive-v1"
+    || report.warnings.includes("extractive_output");
+
   return (
     <div className="insight-report">
       <section className="insight-report-section insight-overview">
         <div className="insight-section-heading">
-          <h3>Plain-language overview</h3>
+          <h3>{isExtractive ? "Extracted source summary" : "Plain-language overview"}</h3>
           <span className="insight-type">{readable(report.overview.study_type)}</span>
         </div>
         <p>{report.overview.summary}</p>
@@ -216,6 +259,34 @@ function ReportView({
         )}
       </section>
 
+      {run.warnings && run.warnings.length > 0 && (
+        <div className="insight-warning insight-warning-neutral">
+          <AlertCircle size={16} />
+          <div>
+            {run.warnings.map((warning) => (
+              <p key={warning}>{warningLabel(warning)}</p>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <FindingList
+        title={isExtractive ? "Reported findings" : "Key findings"}
+        items={report.key_findings}
+        evidenceById={evidenceById}
+        onSelectEvidence={onSelectEvidence}
+      />
+
+      <QuestionSuggestionList
+        report={report}
+        evidenceById={evidenceById}
+        onSelectEvidence={onSelectEvidence}
+        onSaveSuggestion={onSaveSuggestion}
+        savedSuggestionIds={savedSuggestionIds}
+        staleSuggestionIds={staleSuggestionIds}
+        savingSuggestionId={savingSuggestionId}
+      />
+
       {report.study_methods && (
         <details className="insight-report-section insight-details">
           <summary>Study methods</summary>
@@ -229,24 +300,22 @@ function ReportView({
         </details>
       )}
 
-      <FindingList
-        title="Key findings"
-        items={report.key_findings}
-        evidenceById={evidenceById}
-        onSelectEvidence={onSelectEvidence}
-      />
-      <FindingList
-        title="What this means"
-        items={report.what_it_means}
-        evidenceById={evidenceById}
-        onSelectEvidence={onSelectEvidence}
-      />
-      <FindingList
-        title="What this does not mean"
-        items={report.what_it_does_not_mean}
-        evidenceById={evidenceById}
-        onSelectEvidence={onSelectEvidence}
-      />
+      {!isExtractive && (
+        <>
+          <FindingList
+            title="What this means"
+            items={report.what_it_means}
+            evidenceById={evidenceById}
+            onSelectEvidence={onSelectEvidence}
+          />
+          <FindingList
+            title="What this does not mean"
+            items={report.what_it_does_not_mean}
+            evidenceById={evidenceById}
+            onSelectEvidence={onSelectEvidence}
+          />
+        </>
+      )}
       <FindingList
         title="Limitations"
         items={report.limitations}
@@ -290,27 +359,6 @@ function ReportView({
             ))}
           </div>
         </section>
-      )}
-
-      <QuestionSuggestionList
-        report={report}
-        evidenceById={evidenceById}
-        onSelectEvidence={onSelectEvidence}
-        onSaveSuggestion={onSaveSuggestion}
-        savedSuggestionIds={savedSuggestionIds}
-        staleSuggestionIds={staleSuggestionIds}
-        savingSuggestionId={savingSuggestionId}
-      />
-
-      {run.warnings && run.warnings.length > 0 && (
-        <div className="insight-warning">
-          <AlertCircle size={16} />
-          <div>
-            {run.warnings.map((warning) => (
-              <p key={warning}>{readable(warning)}</p>
-            ))}
-          </div>
-        </div>
       )}
 
       {report.coverage && (

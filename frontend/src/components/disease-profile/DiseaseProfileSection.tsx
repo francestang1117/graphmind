@@ -84,10 +84,18 @@ export default function DiseaseProfileSection({
               {item.retraction_status && item.retraction_status !== "unknown" && (
                 <p className="disease-profile-warning">Status: {item.retraction_status}</p>
               )}
-              <button type="button" className="disease-source-button" onClick={() => onOpenSource(item)}>
-                <FileSearch size={14} />
-                View source ({item.evidence.length || item.evidence_ids.length})
-              </button>
+              {(item.evidence.length || item.evidence_ids.length) > 0 ? (
+                <button type="button" className="disease-source-button" onClick={() => onOpenSource(item)}>
+                  <FileSearch size={14} />
+                  View source ({item.evidence.length || item.evidence_ids.length})
+                </button>
+              ) : (
+                <span className="disease-profile-no-source">
+                  {item.warnings.includes("source_unavailable")
+                    ? "Source unavailable"
+                    : "No source attached"}
+                </span>
+              )}
             </article>
           ))}
           {truncated && (
