@@ -2,11 +2,12 @@
 
 import inspect
 import logging
+from pathlib import Path
 from typing import Any, Optional
 
 from app.core.workspace import default_workspace_id
 from app.core.errors import ParsePersistenceError
-from app.services.document_parser import DocumentParser
+from app.services.document_parser import DocumentParser, PDF_TEXT_PARSER_VERSION
 from app.services.entity_extractor import entity_extractor
 from app.services.markdown_parser import MarkdownParser
 from app.services.medical.analyzer import analyze_document
@@ -17,6 +18,26 @@ from app.services.parsed_artifact_repository import parsed_artifact_repository
 
 _parse_cache: dict[str, dict[str, Any]] = {}
 log = logging.getLogger(__name__)
+
+
+def pdf_parser_refresh_required(
+    filename: str,
+    metadata: dict[str, Any],
+    parsed: dict[str, Any] | None = None,
+) -> bool:
+    """Force a stored PDF through a newer parser before serving derived data."""
+    extension = str(
+        metadata.get("file_extension") or Path(filename).suffix
+    ).lower()
+    if extension != ".pdf":
+        return False
+    parsed_metadata = parsed.get("metadata") if isinstance(parsed, dict) else None
+    current_version = (
+        parsed_metadata.get("parser_version")
+        if isinstance(parsed_metadata, dict)
+        else None
+    ) or metadata.get("parser_version")
+    return str(current_version or "") != PDF_TEXT_PARSER_VERSION
 
 
 def cache_key(

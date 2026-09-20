@@ -8,6 +8,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 from app.api.endpoints import documents, medical_insights
 from app.core.errors import AppError
+from app.services.document_parser import PDF_TEXT_PARSER_VERSION
 from app.services.medical.ai.analysis_repository import external_processing_fingerprint
 
 
@@ -29,6 +30,7 @@ def test_medical_analysis_route_passes_user_and_workspace_scope(monkeypatch):
             "filename": "paper.pdf",
             "file_path": "/tmp/paper.pdf",
             "original_filename": "paper.pdf",
+            "parser_version": PDF_TEXT_PARSER_VERSION,
         },
     )
     monkeypatch.setattr(
@@ -53,6 +55,57 @@ def test_medical_analysis_route_passes_user_and_workspace_scope(monkeypatch):
     assert requested == {"user_id": "user-a", "workspace_id": "workspace-a"}
     assert result["document_id"] == "document-a"
     assert result["workspace_id"] == "workspace-a"
+
+
+def test_medical_analysis_route_reparses_pdf_after_parser_upgrade(monkeypatch):
+    reparsed = []
+
+    monkeypatch.setattr(documents, "resolve_workspace_id", lambda *_: "workspace-a")
+    monkeypatch.setattr(
+        documents.document_service,
+        "get_document_by_id",
+        lambda *_args, **_kwargs: {
+            "document_id": "document-a",
+            "filename": "paper.pdf",
+            "file_path": "/tmp/paper.pdf",
+            "original_filename": "paper.pdf",
+            "parser_version": "document-parser-pdf-readable-v1",
+        },
+    )
+    monkeypatch.setattr(
+        documents,
+        "get_cached_parse",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        documents.medical_repository,
+        "get_analysis",
+        lambda *_args, **_kwargs: pytest.fail("stale PDF analysis must not be served"),
+    )
+
+    def fake_parse(*_args, **_kwargs):
+        reparsed.append(True)
+        return {
+            "medical_analysis": {
+                "document_id": "document-a",
+                "workspace_id": "workspace-a",
+                "document_kind": "research_paper",
+                "sections": [],
+            }
+        }
+
+    monkeypatch.setattr(documents, "parse_document_file", fake_parse)
+
+    result = asyncio.run(
+        documents.get_medical_analysis(
+            "document-a",
+            workspace_id="workspace-a",
+            user=SimpleNamespace(id="user-a"),
+        )
+    )
+
+    assert reparsed == [True]
+    assert result["document_id"] == "document-a"
 
 
 def test_medical_analysis_route_returns_404_for_missing_analysis(monkeypatch):
