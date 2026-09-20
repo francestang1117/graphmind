@@ -1307,16 +1307,19 @@ def _document_dict(row: DocumentRecord) -> dict[str, Any]:
 
 
 def _begin_consistent_read(db) -> None:
-    """Pin PostgreSQL multi-query comparison reads to one MVCC snapshot.
+    """Start the database transaction that owns a comparison read snapshot.
 
-    SQLite keeps its own read transaction semantics for the local development
-    path. PostgreSQL's default READ COMMITTED isolation would otherwise allow
-    later SELECT statements in this read to observe a newly committed parse or
-    analysis version.
+    This is called on a fresh Session before the first SELECT. PostgreSQL uses
+    repeatable-read MVCC, while SQLite needs an explicit database-level BEGIN
+    because its legacy driver mode does not start a transaction for SELECT.
     """
     bind = db.get_bind()
-    if getattr(getattr(bind, "dialect", None), "name", "") == "postgresql":
+    dialect = getattr(getattr(bind, "dialect", None), "name", "")
+    if dialect == "postgresql":
         db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+    elif dialect == "sqlite":
+        connection = db.connection()
+        connection.exec_driver_sql("BEGIN")
 
 
 def _analysis_run_dict(

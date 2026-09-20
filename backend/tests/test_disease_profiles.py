@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 import threading
 import uuid
 
@@ -79,6 +80,148 @@ def _comparison_report_json(
             "omitted_sections": [],
         }
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _seed_comparison_snapshot(
+    sessions,
+    *,
+    suffix: str,
+    user_id: str,
+    workspace_id: str,
+    document_id: str,
+    run_id: str,
+    parsed_source_hash: str = "parsed-snapshot",
+    evidence_id: str = "EVIDENCE-before",
+) -> None:
+    with sessions() as db:
+        db.add(
+            DocumentRecord(
+                id=document_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                filename=f"{document_id}.pdf",
+                stored_filename=f"stored-{document_id}.pdf",
+                original_filename="snapshot-paper.pdf",
+                file_extension="pdf",
+                file_type="pdf",
+                mime_type="application/pdf",
+                file_hash="file-snapshot",
+                file_path=f"/tmp/{document_id}.pdf",
+                file_size=10,
+                status="completed",
+                document_kind="research_paper",
+                language="en",
+                parsed_source_hash=parsed_source_hash,
+            )
+        )
+        db.flush()
+        db.add(
+            DocumentDiseaseLinkRecord(
+                id=f"comparison-snapshot-link-{suffix}",
+                user_id=user_id,
+                workspace_id=workspace_id,
+                document_id=document_id,
+                concept_id="mesh:D000795",
+                preferred_name_en="Fabry Disease",
+                preferred_name_zh="Fabry Disease",
+                matched_alias="Fabry Disease",
+                ontology_version="test-v1",
+                link_source="manual_selection",
+            )
+        )
+        db.add(
+            MedicalAnalysisRunRecord(
+                id=run_id,
+                user_id=user_id,
+                workspace_id=workspace_id,
+                document_id=document_id,
+                requested_by=user_id,
+                status="succeeded",
+                source_hash="file-snapshot",
+                parsed_source_hash=parsed_source_hash,
+                analysis_key=f"comparison-snapshot-{run_id}",
+                is_current=True,
+            )
+        )
+        db.flush()
+        db.add(
+            MedicalAnalysisResultRecord(
+                run_id=run_id,
+                report_json=_comparison_report_json(evidence_id),
+                validation_status="validated",
+            )
+        )
+        db.add(
+            MedicalAnalysisEvidenceRecord(
+                id=f"comparison-snapshot-evidence-{suffix}",
+                evidence_id=evidence_id,
+                run_id=run_id,
+                finding_id=f"finding-{run_id}",
+                chunk_id=f"chunk-{run_id}",
+                section_type="results",
+                section_title="Results",
+                quoted_text=f"Evidence from {run_id}.",
+                page_start=2,
+                page_end=2,
+            )
+        )
+        db.commit()
+
+
+def _replace_comparison_snapshot(
+    sessions,
+    *,
+    document_id: str,
+    old_run_id: str,
+    new_run_id: str,
+    change_document: bool,
+) -> None:
+    with sessions() as db:
+        old_run = db.get(MedicalAnalysisRunRecord, old_run_id)
+        assert old_run is not None
+        old_run.is_current = False
+        parsed_source_hash = "parsed-snapshot-v2" if change_document else "parsed-snapshot"
+        if change_document:
+            document = db.get(DocumentRecord, document_id)
+            assert document is not None
+            document.parsed_source_hash = parsed_source_hash
+        db.add(
+            MedicalAnalysisRunRecord(
+                id=new_run_id,
+                user_id=old_run.user_id,
+                workspace_id=old_run.workspace_id,
+                document_id=document_id,
+                requested_by=old_run.user_id,
+                status="succeeded",
+                source_hash="file-snapshot",
+                parsed_source_hash=parsed_source_hash,
+                analysis_key=f"comparison-snapshot-{new_run_id}",
+                is_current=True,
+            )
+        )
+        db.flush()
+        db.add(
+            MedicalAnalysisResultRecord(
+                run_id=new_run_id,
+                report_json=_comparison_report_json("EVIDENCE-after"),
+                validation_status="validated",
+            )
+        )
+        db.add(
+            MedicalAnalysisEvidenceRecord(
+                id=f"comparison-snapshot-evidence-{new_run_id}",
+                evidence_id="EVIDENCE-after",
+                run_id=new_run_id,
+                finding_id=f"finding-{new_run_id}",
+                chunk_id=f"chunk-{new_run_id}",
+                section_type="results",
+                section_title="Results",
+                quoted_text="Evidence from the replacement analysis.",
+                page_start=3,
+                page_end=3,
+            )
+        )
+        db.commit()
 
 
 def _record(
@@ -615,6 +758,152 @@ def test_repository_loads_only_selected_scoped_comparison_inputs():
                 workspace_id=workspace_id,
             ).delete(synchronize_session=False)
             db.commit()
+
+
+@pytest.mark.parametrize("change_document", [False, True])
+def test_sqlite_comparison_read_keeps_one_snapshot(change_document: bool):
+    """SQLite comparison reads must not combine document and analysis versions."""
+    with tempfile.TemporaryDirectory(prefix="graphmind-comparison-sqlite-") as directory:
+        database_path = os.path.join(directory, "comparison.sqlite3")
+        engine = create_engine(
+            f"sqlite:///{database_path}",
+            future=True,
+            poolclass=NullPool,
+            connect_args={"check_same_thread": False, "timeout": 10},
+        )
+
+        def configure_sqlite(dbapi_connection, _connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=10000")
+            finally:
+                cursor.close()
+
+        event.listen(engine, "connect", configure_sqlite)
+        sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
+        Base.metadata.create_all(engine)
+        suffix = uuid.uuid4().hex[:12]
+        user_id = f"sqlite-snapshot-user-{suffix}"
+        workspace_id = f"sqlite-snapshot-workspace-{suffix}"
+        document_id = f"sqlite-snapshot-document-{suffix}"
+        run_before = f"sqlite-snapshot-run-before-{suffix}"
+        run_after = f"sqlite-snapshot-run-after-{suffix}"
+        _seed_comparison_snapshot(
+            sessions,
+            suffix=suffix,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            document_id=document_id,
+            run_id=run_before,
+        )
+
+        first_select_finished = threading.Event()
+        allow_reader = threading.Event()
+        reader_state = threading.local()
+        listener_state = {"paused": False}
+
+        def pause_after_link_read(_conn, _cursor, statement, _parameters, _context, _executemany):
+            if (
+                getattr(reader_state, "name", "") == "reader"
+                and not listener_state["paused"]
+                and "document_disease_links" in statement.lower()
+            ):
+                listener_state["paused"] = True
+                first_select_finished.set()
+                assert allow_reader.wait(10), "reader was not released after the concurrent update"
+
+        event.listen(engine, "after_cursor_execute", pause_after_link_read)
+        repository = DiseaseProfileRepository(sessions, enabled=lambda: True)
+        outcome: dict[str, object] = {}
+
+        def read_comparison():
+            reader_state.name = "reader"
+            try:
+                outcome["records"] = repository.load_comparison_inputs(
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    concept_id="mesh:D000795",
+                    document_ids=[document_id],
+                )
+            except BaseException as exc:
+                outcome["error"] = exc
+
+        reader = threading.Thread(target=read_comparison)
+        reader.start()
+        assert first_select_finished.wait(10), "comparison reader did not reach its first SELECT"
+        _replace_comparison_snapshot(
+            sessions,
+            document_id=document_id,
+            old_run_id=run_before,
+            new_run_id=run_after,
+            change_document=change_document,
+        )
+        allow_reader.set()
+        reader.join(timeout=20)
+        assert not reader.is_alive(), "comparison reader did not finish"
+
+        try:
+            if "error" in outcome:
+                assert change_document
+                assert getattr(outcome["error"], "code", "") == "comparison_source_changed"
+            else:
+                records = outcome["records"]
+                assert records[0]["document"]["parsed_source_hash"] == "parsed-snapshot"
+                assert records[0]["analyses"][0]["run"]["run_id"] == run_before
+                assert records[0]["analyses"][0]["evidence"][0]["evidence_id"] == "EVIDENCE-before"
+        finally:
+            event.remove(engine, "after_cursor_execute", pause_after_link_read)
+            engine.dispose()
+
+
+def test_sqlite_comparison_read_rolls_back_after_mid_read_error():
+    """A failed snapshot read must not poison the next independent read."""
+    with tempfile.TemporaryDirectory(prefix="graphmind-comparison-sqlite-rollback-") as directory:
+        database_path = os.path.join(directory, "comparison.sqlite3")
+        engine = create_engine(
+            f"sqlite:///{database_path}",
+            future=True,
+            poolclass=NullPool,
+            connect_args={"check_same_thread": False, "timeout": 10},
+        )
+        sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
+        Base.metadata.create_all(engine)
+        suffix = uuid.uuid4().hex[:12]
+        document_id = f"sqlite-rollback-document-{suffix}"
+        run_id = f"sqlite-rollback-run-{suffix}"
+        _seed_comparison_snapshot(
+            sessions,
+            suffix=suffix,
+            user_id=f"sqlite-rollback-user-{suffix}",
+            workspace_id=f"sqlite-rollback-workspace-{suffix}",
+            document_id=document_id,
+            run_id=run_id,
+        )
+        repository = DiseaseProfileRepository(sessions, enabled=lambda: True)
+        original_load_evidence = repository._load_evidence
+
+        def fail_mid_read(_db, _run_ids):
+            raise RuntimeError("simulated comparison read failure")
+
+        repository._load_evidence = fail_mid_read  # type: ignore[method-assign]
+        with pytest.raises(RuntimeError, match="simulated comparison read failure"):
+            repository.load_comparison_inputs(
+                user_id=f"sqlite-rollback-user-{suffix}",
+                workspace_id=f"sqlite-rollback-workspace-{suffix}",
+                concept_id="mesh:D000795",
+                document_ids=[document_id],
+            )
+
+        repository._load_evidence = original_load_evidence  # type: ignore[method-assign]
+        records = repository.load_comparison_inputs(
+            user_id=f"sqlite-rollback-user-{suffix}",
+            workspace_id=f"sqlite-rollback-workspace-{suffix}",
+            concept_id="mesh:D000795",
+            document_ids=[document_id],
+        )
+        assert records[0]["analyses"][0]["run"]["run_id"] == run_id
+        engine.dispose()
 
 
 @pytest.mark.parametrize("change_document", [False, True])
