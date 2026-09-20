@@ -121,15 +121,21 @@ export function useDiseaseProfiles(
 
   const refreshCurrentProfile = async () => {
     if (!workspaceId || !selectedConceptId) return;
-    const [, detailResult] = await Promise.all([
-      listQuery.refetch(),
-      detailQuery.refetch(),
+    const [listResult, detailResult] = await Promise.all([
+      listQuery.refetch({ throwOnError: true }),
+      detailQuery.refetch({ throwOnError: true }),
     ]);
-    // The detail response is part of the linked-document query key. Invalidate
-    // the old pages so a previously loaded page cannot win over the refreshed
-    // run IDs when React Query reconciles the cache.
-    await queryClient.invalidateQueries({ queryKey: [...detailKey, "documents"] });
-    return detailResult.data ?? null;
+    if (!listResult.isSuccess || !detailResult.isSuccess || !detailResult.data) {
+      throw new Error("Could not refresh the current disease profile.");
+    }
+    // The detail response is part of the linked-document query key. Refetch
+    // active document pages and propagate failures so the panel never clears
+    // its recovery state while an older page is still cached.
+    await queryClient.refetchQueries(
+      { queryKey: [...detailKey, "documents"], type: "active" },
+      { throwOnError: true },
+    );
+    return detailResult.data;
   };
 
   return {

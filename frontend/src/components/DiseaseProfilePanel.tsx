@@ -104,6 +104,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   const [completedSections, setCompletedSections] = useState<Partial<Record<SectionName, boolean>>>({});
   const [sourceItem, setSourceItem] = useState<DiseaseProfileItem | null>(null);
   const [actionError, setActionError] = useState("");
+  const [profileRefreshNotice, setProfileRefreshNotice] = useState("");
   const [needsProfileRefresh, setNeedsProfileRefresh] = useState(false);
   const [refreshingProfile, setRefreshingProfile] = useState(false);
   const [documentSelection, setDocumentSelection] = useState<{ contextKey: string; ids: string[] }>({
@@ -213,11 +214,13 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     setSourceItem(null);
     setDocumentSelection({ contextKey: "", ids: [] });
     setActionError("");
+    setProfileRefreshNotice("");
     setNeedsProfileRefresh(false);
   };
 
   const toggleDocumentSelection = (documentId: string) => {
     setActionError("");
+    setProfileRefreshNotice("");
     invalidateComparison();
     setDocumentSelection((current) => {
       const selected = current.contextKey === comparisonContextKey ? selectedDocumentIds : [];
@@ -310,31 +313,18 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
   };
 
   const refreshProfile = async () => {
-    const selectedBeforeRefresh = selectedDocumentIds;
     setRefreshingProfile(true);
     setActionError("");
+    setProfileRefreshNotice("");
     invalidateComparison();
     try {
-      const refreshedProfile = await profiles.refreshCurrentProfile();
-      const refreshedDocuments = refreshedProfile?.documents ?? [];
-      const refreshedById = new Map(
-        [...linkedDocuments, ...refreshedDocuments].map((document) => [document.document_id, document]),
-      );
-      const removedIds = selectedBeforeRefresh.filter((documentId) => {
-        const document = refreshedById.get(documentId);
-        return !document
-          || document.source_status !== "current"
-          || !document.parsed_source_hash
-          || !document.current_analysis_run_id;
-      });
-      if (removedIds.length > 0) {
-        setDocumentSelection((current) => ({
-          contextKey: current.contextKey,
-          ids: current.ids.filter((documentId) => !removedIds.includes(documentId)),
-        }));
-        setActionError(comparisonMessages.partialSourcesUnavailable);
-      }
+      await profiles.refreshCurrentProfile();
+      // The refreshed detail response only contains the first document page.
+      // Clear every old selection instead of treating an unseen page as still
+      // current; the user can review the refreshed list and select again.
+      setDocumentSelection({ contextKey: comparisonContextKey, ids: [] });
       setNeedsProfileRefresh(false);
+      setProfileRefreshNotice(comparisonMessages.sourcesRefreshed);
     } catch (error) {
       setActionError(errorMessage(error, "Could not refresh the disease profile."));
     } finally {
@@ -439,6 +429,12 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
               <RefreshCw size={14} />
               {refreshingProfile ? comparisonMessages.refreshingProfile : comparisonMessages.refreshProfile}
             </button>
+          </div>
+        )}
+        {profileRefreshNotice && (
+          <div className="disease-profile-safety-notice" role="status">
+            <RefreshCw size={16} />
+            <span>{profileRefreshNotice}</span>
           </div>
         )}
         {actionError && <div className="disease-profile-inline-error" role="alert"><AlertCircle size={16} /><span>{actionError}</span></div>}

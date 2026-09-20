@@ -601,6 +601,11 @@ describe("DiseaseProfilePanel", () => {
       expect(configured.refreshCurrentProfile).toHaveBeenCalledTimes(1);
       expect(screen.queryByRole("button", { name: "Refresh sources" })).not.toBeInTheDocument();
     });
+    expect(screen.getByText("0/5 selected")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Sources refreshed. Select two to five documents again.");
+
+    await user.click(screen.getByRole("checkbox", { name: "Select fabry-study.pdf for comparison" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select second-fabry-study.pdf for comparison" }));
 
     await user.click(screen.getByRole("button", { name: "Compare selected documents" }));
     await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(2));
@@ -676,7 +681,7 @@ describe("DiseaseProfilePanel", () => {
     });
   });
 
-  it("removes a selected document that is no longer comparable after refresh", async () => {
+  it("keeps the refresh action when the profile detail refresh fails", async () => {
     const user = userEvent.setup();
     const sourceChanged = new axios.AxiosError("source changed");
     sourceChanged.response = {
@@ -712,23 +717,7 @@ describe("DiseaseProfilePanel", () => {
         reset: vi.fn(),
       },
     });
-    configured.refreshCurrentProfile.mockImplementation(async () => {
-      const unavailableDocument = {
-        ...detail.documents[0],
-        current_analysis_run_id: null,
-        source_status: "unavailable" as const,
-      } as unknown as typeof detail.documents[number];
-      configured.profilesState.linkedDocuments = [
-        unavailableDocument,
-        linkedDocuments[1],
-      ];
-      configured.profilesState.detail = {
-        ...detail,
-        document_count: 2,
-        documents: configured.profilesState.linkedDocuments as typeof detail.documents,
-      };
-      return configured.profilesState.detail;
-    });
+    configured.refreshCurrentProfile.mockRejectedValue(new Error("detail failed"));
 
     render(<DiseaseProfilePanel workspaceId="workspace-1" onOpenVisitPrep={vi.fn()} />);
     await user.click(screen.getByRole("checkbox", { name: "Select fabry-study.pdf for comparison" }));
@@ -737,10 +726,120 @@ describe("DiseaseProfilePanel", () => {
     await screen.findByText("The selected source data changed. Refresh the profile before comparing again.");
     await user.click(screen.getByRole("button", { name: "Refresh sources" }));
 
+    expect(await screen.findByText("Could not refresh the disease profile.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh sources" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Compare selected sources" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the refresh action when a loaded document page refresh fails", async () => {
+    const user = userEvent.setup();
+    const sourceChanged = new axios.AxiosError("source changed");
+    sourceChanged.response = {
+      status: 409,
+      statusText: "Conflict",
+      headers: {},
+      config: {} as never,
+      data: { code: "comparison_source_changed" },
+    };
+    const mutateAsync = vi.fn().mockRejectedValue(sourceChanged);
+    const linkedDocuments = [
+      ...detail.documents,
+      {
+        document_id: "document-2",
+        title: "second-fabry-study.pdf",
+        document_kind: "guideline",
+        language: "en",
+        document_date: "2026-02-01",
+        parsed_source_hash: "parsed-2",
+        current_analysis_run_id: "run-2",
+        source_status: "current" as const,
+        warnings: [],
+      },
+    ];
+    const configured = configure({
+      detailValue: { ...detail, document_count: 2 },
+      linkedDocuments,
+      comparisonMutation: {
+        data: undefined,
+        error: null,
+        isPending: false,
+        mutateAsync,
+        reset: vi.fn(),
+      },
+    });
+    configured.refreshCurrentProfile.mockRejectedValue(new Error("page failed"));
+
+    render(<DiseaseProfilePanel workspaceId="workspace-1" onOpenVisitPrep={vi.fn()} />);
+    await user.click(screen.getByRole("checkbox", { name: "Select fabry-study.pdf for comparison" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select second-fabry-study.pdf for comparison" }));
+    await user.click(screen.getByRole("button", { name: "Compare selected documents" }));
+    await screen.findByText("The selected source data changed. Refresh the profile before comparing again.");
+    await user.click(screen.getByRole("button", { name: "Refresh sources" }));
+
+    expect(await screen.findByText("Could not refresh the disease profile.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh sources" })).toBeInTheDocument();
+    expect(screen.queryByText("Sources refreshed. Select two to five documents again.")).not.toBeInTheDocument();
+  });
+
+  it("clears selections after refresh so unseen pages cannot retain stale document ids", async () => {
+    const user = userEvent.setup();
+    const sourceChanged = new axios.AxiosError("source changed");
+    sourceChanged.response = {
+      status: 409,
+      statusText: "Conflict",
+      headers: {},
+      config: {} as never,
+      data: { code: "comparison_source_changed" },
+    };
+    const mutateAsync = vi.fn().mockRejectedValue(sourceChanged);
+    const linkedDocuments = [
+      ...detail.documents,
+      ...Array.from({ length: 20 }, (_, index) => ({
+        document_id: `document-${index + 2}`,
+        title: `fabry-study-${index + 2}.pdf`,
+        document_kind: "guideline",
+        language: "en",
+        document_date: "2026-02-01",
+        parsed_source_hash: `parsed-${index + 2}`,
+        current_analysis_run_id: `run-${index + 2}`,
+        source_status: "current" as const,
+        warnings: [],
+      })),
+    ];
+    const configured = configure({
+      detailValue: { ...detail, document_count: 2 },
+      linkedDocuments,
+      comparisonMutation: {
+        data: undefined,
+        error: null,
+        isPending: false,
+        mutateAsync,
+        reset: vi.fn(),
+      },
+    });
+    configured.refreshCurrentProfile.mockImplementation(async () => {
+      configured.profilesState.linkedDocuments = [
+        ...linkedDocuments.slice(0, 20),
+      ];
+      configured.profilesState.detail = {
+        ...detail,
+        document_count: 21,
+        documents: configured.profilesState.linkedDocuments as typeof detail.documents,
+      };
+      return configured.profilesState.detail;
+    });
+
+    render(<DiseaseProfilePanel workspaceId="workspace-1" onOpenVisitPrep={vi.fn()} />);
+    await user.click(screen.getByRole("checkbox", { name: "Select fabry-study.pdf for comparison" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select fabry-study-21.pdf for comparison" }));
+    await user.click(screen.getByRole("button", { name: "Compare selected documents" }));
+    await screen.findByText("The selected source data changed. Refresh the profile before comparing again.");
+    await user.click(screen.getByRole("button", { name: "Refresh sources" }));
+
     await waitFor(() => {
-      expect(screen.getByText("Some selected documents are no longer available for comparison.")).toBeInTheDocument();
-      expect(screen.getByRole("checkbox", { name: "Select fabry-study.pdf for comparison" })).not.toBeChecked();
-      expect(screen.getByRole("checkbox", { name: "Select fabry-study.pdf for comparison" })).toBeDisabled();
+      expect(screen.getByText("0/5 selected")).toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent("Sources refreshed. Select two to five documents again.");
+      expect(screen.queryByRole("checkbox", { name: "Select fabry-study-21.pdf for comparison" })).not.toBeInTheDocument();
     });
   });
 
