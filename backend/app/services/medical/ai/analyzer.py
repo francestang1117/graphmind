@@ -92,6 +92,12 @@ class MedicalInsightAnalyzer:
             max_input_tokens=self.max_input_tokens,
             redact_pii=self.redact_pii,
         )
+        if "pdf_text_unreadable" in context.warnings:
+            raise MedicalInsightError(
+                "This PDF could not be read reliably. Choose a text-selectable PDF or run OCR before analysis.",
+                code="source_text_unreadable",
+                details={"warnings": context.warnings},
+            )
         if not context.evidence:
             raise MedicalInsightValidationError(
                 "The document has no extractable evidence for analysis.",

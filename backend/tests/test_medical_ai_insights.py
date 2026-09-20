@@ -458,6 +458,22 @@ def test_openai_provider_reports_timeout_after_bounded_retries():
     assert len(client.responses.calls) == 2
 
 
+def test_analyzer_rejects_unreadable_pdf_before_calling_provider():
+    provider = FakeMedicalAIProvider()
+
+    with pytest.raises(MedicalInsightError) as exc:
+        MedicalInsightAnalyzer(provider=provider).run(
+            [{"id": "chunk-1", "text": "unreliable scan text", "section_type": "results"}],
+            source_warnings=["pdf_text_unreadable"],
+            title="Scanned paper",
+            document_kind="research_paper",
+            language="en",
+        )
+
+    assert exc.value.code == "source_text_unreadable"
+    assert provider.calls == []
+
+
 def test_openai_invalid_json_gets_one_schema_repair_attempt():
     valid = json.dumps(_report("EVIDENCE_001").model_dump())
     client = _OpenAIClient(["not-json", valid])

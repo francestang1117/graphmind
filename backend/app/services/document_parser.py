@@ -22,6 +22,7 @@ import csv
 import json
 import logging
 import re
+import unicodedata
 import zipfile
 from dataclasses import asdict, dataclass, field
 from xml.etree import ElementTree
@@ -29,6 +30,9 @@ from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
+
+
+PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v2"
 
 
 # Parsed document shape
@@ -103,6 +107,132 @@ def _chunk(text: str, chunk_size: int = 800, overlap: int = 150,
                            "start": start, "end": min(end, len(text)), **meta})
         start = end - overlap
     return chunks
+
+
+def _normalise_pdf_text(text: str) -> str:
+    """Apply only layout-safe PDF cleanup before chunking and citation."""
+    normalized = unicodedata.normalize("NFKC", str(text or ""))
+    normalized = normalized.replace("\u00a0", " ").replace("\u200b", "")
+    # A hyphen at the end of a line is usually a word split in prose. Keep
+    # hyphens inside a line untouched because they may be meaningful terms.
+    normalized = re.sub(r"(?<=[A-Za-z])-\s*\n\s*(?=[a-z])", "", normalized)
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in normalized.splitlines()]
+    return "\n".join(lines).strip()
+
+
+def _glued_text_score(text: str) -> int:
+    """Return a conservative signal for text that lost most word spaces."""
+    normalized = _normalise_pdf_text(text)
+    if len(normalized) < 80:
+        return 0
+    tokens = re.findall(r"[A-Za-z]+", normalized)
+    long_tokens = sum(1 for token in tokens if len(token) >= 32)
+    average_token_length = (
+        sum(len(token) for token in tokens) / len(tokens) if tokens else 0
+    )
+    whitespace_ratio = sum(character.isspace() for character in normalized) / len(normalized)
+    # One long gene, disease, or author name is normal in a medical paper.
+    # Require a second independent signal before treating the page as glued.
+    score = int(long_tokens >= 1)
+    if average_token_length >= 24:
+        score += 1
+    if whitespace_ratio < 0.015:
+        score += 1
+    return score
+
+
+def _reconstruct_pdf_words(page: Any) -> str:
+    """Rebuild lines from pdfplumber word boxes when text extraction glues words."""
+    try:
+        words = page.extract_words(keep_blank_chars=False, use_text_flow=False)
+    except TypeError:
+        try:
+            words = page.extract_words()
+        except (AttributeError, ValueError, TypeError):
+            return ""
+    except (AttributeError, ValueError):
+        return ""
+
+    if not isinstance(words, list):
+        return ""
+    usable = [
+        word for word in words
+        if isinstance(word, dict) and str(word.get("text") or "").strip()
+    ]
+    if not usable:
+        return ""
+
+    # Coordinates are optional in lightweight test doubles and in a few PDF
+    # backends. In that case, the provider's word order is the least invasive
+    # fallback; never invent boundaries inside one reported word.
+    if not any("top" in word or "doctop" in word for word in usable):
+        return " ".join(str(word.get("text") or "").strip() for word in usable)
+
+    positioned = sorted(
+        usable,
+        key=lambda word: (
+            float(word.get("top", word.get("doctop", 0)) or 0),
+            float(word.get("x0", 0) or 0),
+        ),
+    )
+    lines: list[list[dict[str, Any]]] = []
+    line_tops: list[float] = []
+    for word in positioned:
+        top = float(word.get("top", word.get("doctop", 0)) or 0)
+        line_index = next(
+            (index for index, line_top in enumerate(line_tops) if abs(top - line_top) <= 3),
+            None,
+        )
+        if line_index is None:
+            line_tops.append(top)
+            lines.append([word])
+        else:
+            lines[line_index].append(word)
+
+    output: list[str] = []
+    for line in lines:
+        ordered = sorted(line, key=lambda word: float(word.get("x0", 0) or 0))
+        parts: list[str] = []
+        for word in ordered:
+            value = str(word.get("text") or "").strip()
+            if not value:
+                continue
+            if not parts:
+                parts.append(value)
+                continue
+            previous = parts[-1]
+            if previous.endswith(("-", "–", "—")):
+                parts[-1] = f"{previous}{value}"
+            elif previous.endswith(("(", "[", "{", "/")):
+                parts.append(value)
+            elif value.startswith((".", ",", ";", ":", "!", "?", ")", "]", "}")):
+                parts[-1] = f"{previous}{value}"
+            else:
+                parts.append(f"{value}")
+        if parts:
+            output.append(" ".join(parts))
+    return "\n".join(output)
+
+
+def _page_has_extractable_objects(page: Any) -> bool:
+    """Distinguish a blank page from an image/graphics-only scanned page."""
+    return any(
+        bool(getattr(page, attribute, None))
+        for attribute in ("chars", "images", "rects", "lines", "curves")
+    )
+
+
+def _aggregate_pdf_quality(
+    *,
+    unreadable_pages: list[int],
+    reconstructed_pages: list[int],
+    page_count: int,
+) -> str:
+    if unreadable_pages:
+        return "unreadable"
+    if reconstructed_pages:
+        return "degraded"
+    return "good" if page_count else "unreadable"
 
 
 # Markdown files
@@ -290,11 +420,22 @@ class PDFParser:
         import pdfplumber
 
         all_text, tables, sections, chunks, headings = [], [], [], [], []
+        unreadable_pages: list[int] = []
+        reconstructed_pages: list[int] = []
+        extraction_warnings: list[str] = []
 
         with pdfplumber.open(str(path)) as pdf:
             pdf_title = self._metadata_title(getattr(pdf, "metadata", None))
             for page_num, page in enumerate(pdf.pages, 1):
-                page_text = page.extract_text() or ""
+                page_text, quality, page_warnings = self._extract_page_text(page)
+                if quality == "unreadable":
+                    unreadable_pages.append(page_num)
+                if "pdf_text_reconstructed" in page_warnings:
+                    reconstructed_pages.append(page_num)
+                extraction_warnings.extend(
+                    f"{warning}_page_{page_num}" if warning == "pdf_text_unreadable" else warning
+                    for warning in page_warnings
+                )
                 all_text.append(page_text)
                 headings.extend(self._extract_layout_headings(page, page_num))
 
@@ -321,8 +462,22 @@ class PDFParser:
             "filename": path.name,
             "pages": len(all_text),
             "parser": "pdfplumber",
+            "parser_version": PDF_TEXT_PARSER_VERSION,
             "headings": headings,
             "table_count": len(tables),
+            "text_quality": _aggregate_pdf_quality(
+                unreadable_pages=unreadable_pages,
+                reconstructed_pages=reconstructed_pages,
+                page_count=len(all_text),
+            ),
+            "extraction_warnings": list(dict.fromkeys(extraction_warnings)),
+            "unreadable_pages": unreadable_pages,
+            "reconstructed_pages": reconstructed_pages,
+            "extraction_method": (
+                "pdfplumber-mixed"
+                if reconstructed_pages
+                else "pdfplumber-text"
+            ),
         }
         if pdf_title:
             metadata["title"] = pdf_title
@@ -359,6 +514,59 @@ class PDFParser:
         rows = padded[1:]
         return headers, rows
 
+    def _extract_page_text(self, page: Any) -> tuple[str, str, list[str]]:
+        """Extract one page without silently repairing unknown word boundaries.
+
+        Some PDFs report a very small gap between glyphs. pdfplumber then joins
+        adjacent words even though the PDF still exposes separate word boxes.
+        We first retry with a tighter tolerance, and only then use those boxes
+        to rebuild lines. If neither path produces readable text, the page is
+        marked unreadable so downstream medical analysis can stop safely.
+        """
+        candidates: list[str] = []
+        try:
+            candidates.append(
+                _normalise_pdf_text(
+                    page.extract_text(x_tolerance=1.5, y_tolerance=3) or ""
+                )
+            )
+        except TypeError:
+            candidates.append(_normalise_pdf_text(page.extract_text() or ""))
+        except (AttributeError, ValueError):
+            candidates.append("")
+
+        try:
+            candidates.append(
+                _normalise_pdf_text(
+                    page.extract_text(x_tolerance=0.5, y_tolerance=3) or ""
+                )
+            )
+        except (TypeError, AttributeError, ValueError):
+            pass
+
+        usable = [candidate for candidate in candidates if candidate.strip()]
+        best = min(usable, key=_glued_text_score, default="")
+        warnings: list[str] = []
+
+        if not best or _glued_text_score(best) >= 2:
+            reconstructed = _reconstruct_pdf_words(page)
+            if reconstructed and (
+                not best or _glued_text_score(reconstructed) < _glued_text_score(best)
+            ):
+                best = _normalise_pdf_text(reconstructed)
+                warnings.append("pdf_text_reconstructed")
+
+        if not best.strip():
+            if _page_has_extractable_objects(page):
+                warnings.append("pdf_text_unreadable")
+                return "", "unreadable", warnings
+            return "", "good", warnings
+
+        if _glued_text_score(best) >= 2:
+            warnings.append("pdf_text_unreadable")
+            return best, "unreadable", warnings
+        return best, "good", warnings
+
     def _extract_layout_headings(self, page: Any, page_num: int) -> list[dict]:
         """Best-effort heading hints from pdfplumber font sizes."""
         try:
@@ -382,7 +590,12 @@ class PDFParser:
         from PyPDF2 import PdfReader
         reader = PdfReader(str(path))
         pdf_title = self._metadata_title(getattr(reader, "metadata", None))
-        pages = [p.extract_text() or "" for p in reader.pages]
+        pages = [_normalise_pdf_text(p.extract_text() or "") for p in reader.pages]
+        unreadable_pages = [
+            index
+            for index, page_text in enumerate(pages, start=1)
+            if _glued_text_score(page_text) >= 2 or not page_text.strip()
+        ]
         full_text = "\n\n".join(pages)
         sections = [Section(f"Page {i+1}", 0, t) for i, t in enumerate(pages) if t.strip()]
         chunks = []
@@ -394,6 +607,18 @@ class PDFParser:
             "filename": path.name,
             "pages": len(pages),
             "parser": "PyPDF2",
+            "parser_version": PDF_TEXT_PARSER_VERSION,
+            "text_quality": _aggregate_pdf_quality(
+                unreadable_pages=unreadable_pages,
+                reconstructed_pages=[],
+                page_count=len(pages),
+            ),
+            "extraction_warnings": [
+                *("pdf_text_unreadable_page_%s" % page for page in unreadable_pages),
+            ],
+            "unreadable_pages": unreadable_pages,
+            "reconstructed_pages": [],
+            "extraction_method": "PyPDF2-text",
         }
         if pdf_title:
             metadata["title"] = pdf_title

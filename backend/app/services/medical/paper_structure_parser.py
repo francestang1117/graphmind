@@ -74,9 +74,13 @@ class PaperStructureParser:
         """Parse a classified paper or guideline into traceable sections."""
         required_sections = self._required_sections(analysis.document_kind)
         text = str(parsed.get("content") or parsed.get("raw_content") or "")
+        extraction_warnings = self._pdf_extraction_warnings(parsed)
         if not text.strip():
             warning = "ocr_required" if self._format(parsed) == "pdf" else "no_extractable_text"
-            return PaperStructureResult(warnings=[warning], missing_sections=list(required_sections))
+            return PaperStructureResult(
+                warnings=[*extraction_warnings, warning],
+                missing_sections=list(required_sections),
+            )
 
         pages = self._page_ranges(parsed, text)
         explicit = self._docx_sections(parsed)
@@ -130,7 +134,7 @@ class PaperStructureParser:
             for secondary in section.secondary_types
         )
         missing = [section for section in required_sections if section not in present]
-        warnings = []
+        warnings = [*extraction_warnings]
         if self._format(parsed) == "pdf" and not self._page_ranges(parsed, text):
             warnings.append("page_location_unavailable")
         if any(
@@ -149,6 +153,24 @@ class PaperStructureParser:
             missing_sections=missing,
             warnings=warnings,
         )
+
+    def _pdf_extraction_warnings(self, parsed: dict[str, Any]) -> list[str]:
+        """Expose parser quality to the analysis task without copying source text."""
+        if self._format(parsed) != "pdf":
+            return []
+        metadata = parsed.get("metadata")
+        if not isinstance(metadata, dict):
+            return []
+        quality = str(metadata.get("text_quality") or "").strip().lower()
+        warnings: list[str] = []
+        if quality == "unreadable":
+            warnings.append("pdf_text_unreadable")
+        elif quality == "degraded":
+            warnings.append("pdf_text_degraded")
+        for warning in metadata.get("extraction_warnings") or []:
+            if warning == "pdf_text_reconstructed":
+                warnings.append(warning)
+        return list(dict.fromkeys(warnings))
 
     def _sections_from_headings(
         self,
