@@ -19,6 +19,11 @@ SupportStatus = Literal[
     "not_reported",
     "uncertain",
 ]
+MissingReason = Literal[
+    "not_reported_in_source",
+    "not_extracted_from_analyzed_text",
+    "source_unreadable",
+]
 QuestionSuggestionCategory = Literal[
     "clarify_finding",
     "applicability",
@@ -93,6 +98,9 @@ class EvidenceAttribute(_StrictModel):
     value: str = NOT_REPORTED_VALUE
     support_status: SupportStatus = "not_reported"
     evidence_ids: list[str] = Field(default_factory=list)
+    # Old reports do not have this field. Keep the fallback conservative so a
+    # missing extraction is not presented as a claim about the whole paper.
+    missing_reason: MissingReason = "not_extracted_from_analyzed_text"
 
     @model_validator(mode="after")
     def validate_not_reported_state(self) -> Self:

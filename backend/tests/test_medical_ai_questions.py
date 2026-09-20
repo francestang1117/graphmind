@@ -394,6 +394,20 @@ def test_extractive_provider_emits_cited_question_suggestions():
     assert output.report.question_suggestions
     assert all(item.evidence_ids for item in output.report.question_suggestions)
     assert all(item.source_kind and item.source_id for item in output.report.question_suggestions)
+    assert "extractive_output" in output.report.warnings
+    assert output.report.what_it_means == []
+    assert output.report.what_it_does_not_mean == []
+
+
+def test_extractive_provider_does_not_invent_population_from_results_text():
+    context = _context(
+        ("EVIDENCE_001", "results", "The study reported an outcome in 42 participants."),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert output["study_methods"]["population"] == {}
+    assert output["question_suggestions"] == []
 
 
 def test_analyzer_deduplicates_multiple_sources_for_same_topic():

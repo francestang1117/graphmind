@@ -102,46 +102,8 @@ class ExtractiveMedicalAIProvider:
             if _summary(item.text)
         ]
 
-        meaning_item = _first_of(
-            evidence,
-            "recommendations",
-            "results",
-            "evidence",
-            "conclusion",
-        )
-        meanings = []
-        if meaning_item:
-            meanings.append(
-                _finding(
-                    "meaning_001",
-                    f"Within this document, the reported result is: {_summary(meaning_item.text)}",
-                    "This is a plain-language restatement of the cited passage, not a personal medical recommendation.",
-                    meaning_item,
-                    interpretation_type="summary",
-                )
-            )
-
-        does_not_mean = []
-        if limitations and meaning_item:
-            does_not_mean.append(
-                _finding(
-                    "boundary_001",
-                    "The document's findings should be read within the study population, methods, and limitations described by the authors.",
-                    "The source includes limitations, so the result should not be treated as proof that it applies to every patient.",
-                    _item_for_finding(limitations[0], evidence),
-                    interpretation_type="inference",
-                )
-            )
-
         question_suggestions = []
-        population_item = _first_of(
-            evidence,
-            "population",
-            "scope",
-            "methods",
-            "abstract",
-            "introduction",
-        )
+        population_item = _population_evidence(evidence)
         if population_item:
             question_suggestions.append(
                 _question_suggestion(
@@ -173,7 +135,7 @@ class ExtractiveMedicalAIProvider:
                 )
             )
 
-        warnings = ["not_medical_advice", *context.warnings]
+        warnings = ["not_medical_advice", "extractive_output", *context.warnings]
         return {
             "schema_version": "medical-insights-v3",
             "document_kind": context.document_kind,
@@ -185,21 +147,30 @@ class ExtractiveMedicalAIProvider:
                 "evidence_ids": [overview_item.evidence_id] if overview_item else [],
             },
             "study_methods": {
-                "population": (
+                field: (
                     {
-                        "value": _summary(population_item.text),
+                        "value": _summary(item.text),
                         "support_status": "supported",
-                        "evidence_ids": [population_item.evidence_id],
+                        "evidence_ids": [item.evidence_id],
                     }
-                    if population_item
+                    if (item := _method_evidence(evidence, field))
                     else {}
-                ),
+                )
+                for field in (
+                    "design",
+                    "population",
+                    "human_animal_in_vitro",
+                    "sample_size",
+                    "comparator",
+                )
             },
             "key_findings": findings,
             "limitations": limitations,
             "medical_terms": [],
-            "what_it_means": meanings,
-            "what_it_does_not_mean": does_not_mean,
+            # This provider is intentionally extractive. Do not place raw
+            # passages under headings that imply a plain-language explanation.
+            "what_it_means": [],
+            "what_it_does_not_mean": [],
             "applicability": [],
             "future_research": [],
             "question_suggestions": question_suggestions[:5],
@@ -389,6 +360,67 @@ def _first_of(evidence: list[EvidenceItem], *section_types: str) -> EvidenceItem
     return None
 
 
+_POPULATION_MARKERS = re.compile(
+    r"\b(?:participant|participants|patient|patients|subject|subjects|"
+    r"population|enrolled|recruited|included|病例|患者|受试者|研究人群)\b",
+    re.I,
+)
+
+
+def _population_evidence(evidence: list[EvidenceItem]) -> EvidenceItem | None:
+    """Return only a passage that can plausibly describe study participants."""
+    for item in evidence:
+        section_type = str(item.section_type or "").strip().lower()
+        if section_type not in {"population", "methods"}:
+            continue
+        if _POPULATION_MARKERS.search(item.text or ""):
+            return item
+    return None
+
+
+_METHOD_MARKERS = {
+    "design": re.compile(
+        r"\b(?:randomi[sz]ed|cohort|cross[- ]sectional|case[- ]control|case series|observational|trial|prospective|retrospective)\b",
+        re.I,
+    ),
+    "human_animal_in_vitro": re.compile(
+        r"\b(?:human|patient|animal|mouse|mice|rat|in vitro|cell line|tissue)\b|人|患者|动物|体外",
+        re.I,
+    ),
+    "sample_size": re.compile(
+        r"\b(?:n\s*=|sample size|participants?|patients?|subjects?|enrolled|recruited|included)\b|例|患者|受试者",
+        re.I,
+    ),
+    "comparator": re.compile(
+        r"\b(?:control(?: group)?|comparator|placebo|versus|\bvs\.?\b|untreated)\b|对照|安慰剂",
+        re.I,
+    ),
+}
+
+
+def _method_evidence(evidence: list[EvidenceItem], field: str) -> EvidenceItem | None:
+    """Use only clearly labelled method passages for structured fields."""
+    if field == "population":
+        return _population_evidence(evidence)
+
+    marker = _METHOD_MARKERS.get(field)
+    if marker is None:
+        return None
+    preferred_sections = {
+        "design": ("design", "methods"),
+        "human_animal_in_vitro": ("methods", "population", "outcomes"),
+        "sample_size": ("population", "methods", "results"),
+        "comparator": ("comparator", "methods", "design"),
+    }.get(field, ("methods",))
+    for section_type in preferred_sections:
+        for item in evidence:
+            if str(item.section_type or "").strip().lower() != section_type:
+                continue
+            if marker.search(item.text or ""):
+                return item
+    return None
+
+
 def _take_distinct(
     evidence: list[EvidenceItem],
     section_types: set[str],
@@ -447,11 +479,6 @@ def _question_suggestion(
         "evidence_ids": [],
         "interpretation_type": "inference",
     }
-
-
-def _item_for_finding(finding: dict[str, Any], evidence: list[EvidenceItem]) -> EvidenceItem:
-    evidence_id = (finding.get("evidence_ids") or [""])[0]
-    return next(item for item in evidence if item.evidence_id == evidence_id)
 
 
 def _summary(text: str, max_chars: int = 360) -> str:
