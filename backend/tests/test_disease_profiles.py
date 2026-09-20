@@ -363,6 +363,23 @@ def test_aggregator_keeps_multiple_documents_and_deduplicates_external_articles(
     assert payload["saved_question_count"] == 2
 
 
+def test_aggregator_merges_identical_clinician_questions_and_keeps_sources():
+    payload = DiseaseProfileAggregator().aggregate(
+        concept_id="mesh:D000795",
+        inputs=[
+            _record("doc-a", title="English paper", alias="Fabry Disease", run_id="run-a"),
+            _record("doc-b", title="Second paper", alias="Fabry Disease", run_id="run-b"),
+        ],
+    )
+
+    questions = payload["sections"]["clinician_questions"]
+    assert len(questions) == 1
+    assert payload["section_counts"]["clinician_questions"] == 1
+    assert questions[0]["document_ids"] == ["doc-a", "doc-b"]
+    assert questions[0]["related_document_count"] == 2
+    assert len(questions[0]["evidence"]) == 2
+
+
 def test_aggregator_bounds_external_article_document_preview_and_counts_all_sources():
     records = [
         _record(
