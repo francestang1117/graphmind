@@ -172,6 +172,7 @@ class DiseaseProfileDocument(_StrictModel):
     language: str = "unknown"
     document_date: str = ""
     parsed_source_hash: str = ""
+    current_analysis_run_id: str | None = None
     source_status: ProfileSourceStatus = "unavailable"
     warnings: list[str] = Field(default_factory=list, max_length=20)
 
@@ -201,10 +202,11 @@ class DiseaseProfileDocumentsView(_StrictModel):
 
 
 class ComparisonDocumentSelection(_StrictModel):
-    """One user-selected source and the parse version seen by the client."""
+    """One selected source and the current analysis versions seen by the client."""
 
     document_id: str = Field(min_length=1, max_length=255)
     expected_parsed_source_hash: str = Field(min_length=1, max_length=128)
+    expected_analysis_run_id: str = Field(min_length=1, max_length=64)
 
 
 class ComparisonPreviewRequest(_StrictModel):
@@ -244,6 +246,8 @@ class ComparisonMethod(_StrictModel):
     value: str = ""
     support_status: ComparisonSupportStatus = "not_reported"
     evidence: list[ComparisonEvidence] = Field(default_factory=list, max_length=5)
+    evidence_total: int = Field(default=0, ge=0)
+    evidence_truncated: bool = False
     warnings: list[str] = Field(default_factory=list, max_length=10)
 
 
@@ -268,6 +272,8 @@ class ComparisonFinding(_StrictModel):
     statement: str = Field(min_length=1, max_length=5000)
     explanation: str = ""
     evidence: list[ComparisonEvidence] = Field(default_factory=list, max_length=5)
+    evidence_total: int = Field(default=0, ge=0)
+    evidence_truncated: bool = False
     warnings: list[str] = Field(default_factory=list, max_length=10)
 
 
@@ -277,6 +283,8 @@ class ComparisonQuestion(_StrictModel):
     rationale: str = ""
     document_id: str = Field(min_length=1, max_length=255)
     evidence: list[ComparisonEvidence] = Field(default_factory=list, max_length=5)
+    evidence_total: int = Field(default=0, ge=0)
+    evidence_truncated: bool = False
 
 
 class ComparisonDocument(_StrictModel):

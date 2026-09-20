@@ -68,6 +68,7 @@ export function useDiseaseProfiles(
         title: item.title,
         document_date: item.document_date,
         parsed_source_hash: item.parsed_source_hash,
+        current_analysis_run_id: item.current_analysis_run_id,
         source_status: item.source_status,
       })))
     : "none";

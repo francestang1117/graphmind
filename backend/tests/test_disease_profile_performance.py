@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import uuid
 
+import pytest
+
 from app.core.database import SessionLocal
 from app.models.persistence import (
     DocumentDiseaseLinkRecord,
@@ -23,6 +25,7 @@ from app.services.medical.disease_profile.repository import (
     DiseaseProfileRepository,
     ProfileInputOptions,
 )
+from app.services.medical.disease_profile.exceptions import DiseaseProfileError
 from app.services.medical.disease_profile.service import DiseaseProfileService
 
 
@@ -64,6 +67,7 @@ def _input_record(concept_id: str, document_id: str) -> dict:
             "document_date": "2026-01-01",
             "file_hash": f"hash-{document_id}",
             "parsed_source_hash": f"parsed-{document_id}",
+            "current_analysis_run_id": f"run-{document_id}",
             "modified_at": "2026-09-18T00:00:00+00:00",
         },
         "analyses": [],
@@ -82,6 +86,7 @@ def _comparison_record(document_id: str) -> dict:
             "document_kind": "research_paper",
             "document_date": "2026-01-01",
             "parsed_source_hash": f"parsed-{document_id}",
+            "current_analysis_run_id": f"run-{document_id}",
         },
         "analyses": [{
             "run": {
@@ -430,6 +435,7 @@ def test_comparison_service_keeps_selection_at_five_documents():
             {
                 "document_id": document_id,
                 "expected_parsed_source_hash": f"parsed-{document_id}",
+                "expected_analysis_run_id": f"run-{document_id}",
             }
             for document_id in document_ids
         ],
@@ -438,6 +444,35 @@ def test_comparison_service_keeps_selection_at_five_documents():
 
     assert captured["document_ids"] == document_ids
     assert len(preview["documents"]) == 5
+
+
+def test_comparison_service_rejects_analysis_run_changed_after_selection():
+    class Repository:
+        def load_comparison_inputs(self, **kwargs):
+            return [_comparison_record(document_id) for document_id in kwargs["document_ids"]]
+
+    with pytest.raises(DiseaseProfileError) as error:
+        DiseaseProfileService(repository=Repository()).preview_comparison(
+            user_id="user-1",
+            workspace_id="workspace-1",
+            concept_id="mesh:D000795",
+            documents=[
+                {
+                    "document_id": "comparison-doc-1",
+                    "expected_parsed_source_hash": "parsed-comparison-doc-1",
+                    "expected_analysis_run_id": "run-before-reanalysis",
+                },
+                {
+                    "document_id": "comparison-doc-2",
+                    "expected_parsed_source_hash": "parsed-comparison-doc-2",
+                    "expected_analysis_run_id": "run-comparison-doc-2",
+                },
+            ],
+            language="en",
+        )
+
+    assert error.value.code == "comparison_source_changed"
+    assert error.value.status_code == 409
 
 
 def test_section_read_uses_only_its_declared_input_tables():

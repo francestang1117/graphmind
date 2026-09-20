@@ -392,6 +392,12 @@ class DiseaseProfileService:
                     code="comparison_source_changed",
                     status_code=409,
                 )
+            if str(document.get("current_analysis_run_id") or "") != selection.expected_analysis_run_id:
+                raise DiseaseProfileError(
+                    "The selected analysis changed after it was chosen. Refresh and select it again.",
+                    code="comparison_source_changed",
+                    status_code=409,
+                )
             if not any(
                 isinstance(analysis, dict)
                 and analysis.get("valid")

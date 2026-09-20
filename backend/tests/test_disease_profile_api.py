@@ -184,10 +184,12 @@ def test_comparison_preview_api_forwards_scope_and_returns_strict_payload(monkey
             {
                 "document_id": "document-1",
                 "expected_parsed_source_hash": "parsed-document-1",
+                "expected_analysis_run_id": "run-document-1",
             },
             {
                 "document_id": "document-2",
                 "expected_parsed_source_hash": "parsed-document-2",
+                "expected_analysis_run_id": "run-document-2",
             },
         ],
         language="zh",
@@ -215,10 +217,12 @@ def test_comparison_preview_api_forwards_scope_and_returns_strict_payload(monkey
             {
                 "document_id": "document-1",
                 "expected_parsed_source_hash": "parsed-document-1",
+                "expected_analysis_run_id": "run-document-1",
             },
             {
                 "document_id": "document-2",
                 "expected_parsed_source_hash": "parsed-document-2",
+                "expected_analysis_run_id": "run-document-2",
             },
         ],
         "language": "zh",
@@ -275,6 +279,7 @@ def _link_selection(document_id: str) -> dict[str, str]:
     return {
         "document_id": document_id,
         "expected_parsed_source_hash": f"parsed-{document_id}",
+        "expected_analysis_run_id": f"run-{document_id}",
     }
 
 

@@ -38,6 +38,7 @@ interface Props {
 type ComparisonSourceSnapshot = {
   document_id: string;
   parsed_source_hash: string;
+  analysis_run_id: string;
 };
 
 type ComparisonSnapshot = {
@@ -156,6 +157,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
     sources: selectedDocumentIds.map((documentId) => ({
       document_id: documentId,
       parsed_source_hash: linkedDocuments.find((document) => document.document_id === documentId)?.parsed_source_hash ?? "",
+      analysis_run_id: linkedDocuments.find((document) => document.document_id === documentId)?.current_analysis_run_id ?? "",
     })),
   }), [
     comparisonContextToken,
@@ -245,7 +247,9 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
       return;
     }
     const currentDocuments = selectedDocuments.filter((document): document is DiseaseProfileDocument => Boolean(
-      document?.source_status === "current" && document.parsed_source_hash,
+      document?.source_status === "current"
+      && document.parsed_source_hash
+      && document.current_analysis_run_id,
     ));
     if (currentDocuments.length !== selectedDocumentIds.length || currentDocuments.length < 2 || !effectiveConceptId || !workspaceId) {
       setActionError("Select two to five current documents with validated analyses.");
@@ -256,6 +260,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
       sources: currentDocuments.map((document) => ({
         document_id: document.document_id,
         parsed_source_hash: document.parsed_source_hash,
+        analysis_run_id: document.current_analysis_run_id as string,
       })),
     };
     const requestVersion = ++comparisonRequestVersion.current;
@@ -266,6 +271,7 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
         documents: currentDocuments.map((document) => ({
           document_id: document.document_id,
           expected_parsed_source_hash: document.parsed_source_hash,
+          expected_analysis_run_id: document.current_analysis_run_id as string,
         })),
         language: comparisonLanguage,
       });
@@ -419,7 +425,10 @@ export default function DiseaseProfilePanel({ workspaceId, onOpenVisitPrep }: Pr
                         aria-label={`Select ${document.title} for comparison`}
                         checked={selectedDocumentIds.includes(document.document_id)}
                         onChange={() => toggleDocumentSelection(document.document_id)}
-                        disabled={document.source_status !== "current" || !document.parsed_source_hash || (!selectedDocumentIds.includes(document.document_id) && selectedDocumentIds.length >= 5)}
+                        disabled={document.source_status !== "current"
+                          || !document.parsed_source_hash
+                          || !document.current_analysis_run_id
+                          || (!selectedDocumentIds.includes(document.document_id) && selectedDocumentIds.length >= 5)}
                       />
                       <div>
                         <strong>{document.title}</strong>

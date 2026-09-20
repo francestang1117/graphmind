@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
 import uuid
 
 import pytest
+from sqlalchemy import create_engine, event
+from sqlalchemy.pool import NullPool
+from sqlalchemy.orm import sessionmaker
 
-from app.core.database import SessionLocal
+from app.core.database import Base, SessionLocal
 from app.models.persistence import (
     DocumentDiseaseLinkRecord,
     DocumentRecord,
@@ -505,6 +510,10 @@ def test_repository_loads_only_selected_scoped_comparison_inputs():
         ]
         assert all(len(record["analyses"]) == 1 for record in records)
         assert all(record["analyses"][0]["valid"] for record in records)
+        assert [record["document"]["current_analysis_run_id"] for record in records] == [
+            run_ids[2],
+            run_ids[0],
+        ]
         assert [record["analyses"][0]["evidence"][0]["evidence_id"] for record in records] == [
             "EVIDENCE-2",
             "EVIDENCE-0",
@@ -521,10 +530,12 @@ def test_repository_loads_only_selected_scoped_comparison_inputs():
                 {
                     "document_id": document_ids[2],
                     "expected_parsed_source_hash": f"parsed-{document_ids[2]}",
+                    "expected_analysis_run_id": run_ids[2],
                 },
                 {
                     "document_id": document_ids[0],
                     "expected_parsed_source_hash": f"parsed-{document_ids[0]}",
+                    "expected_analysis_run_id": run_ids[0],
                 },
             ],
             language="en",
@@ -604,3 +615,208 @@ def test_repository_loads_only_selected_scoped_comparison_inputs():
                 workspace_id=workspace_id,
             ).delete(synchronize_session=False)
             db.commit()
+
+
+@pytest.mark.parametrize("change_document", [False, True])
+def test_postgres_comparison_read_keeps_one_repeatable_snapshot(change_document: bool):
+    """A current-analysis update between repository SELECTs cannot mix versions."""
+    url = (
+        os.getenv("GRAPHMIND_TEST_POSTGRES_URL")
+        or os.getenv("TEST_POSTGRES_URL")
+        or os.getenv("POSTGRES_TEST_DATABASE_URL")
+    )
+    if not url or not url.startswith("postgresql"):
+        pytest.skip("set GRAPHMIND_TEST_POSTGRES_URL to test comparison snapshots")
+
+    suffix = uuid.uuid4().hex[:12]
+    schema = f"comparison_snapshot_{suffix}"
+    user_id = f"comparison-snapshot-user-{suffix}"
+    workspace_id = f"comparison-snapshot-workspace-{suffix}"
+    document_id = f"comparison-snapshot-document-{suffix}"
+    run_before = f"comparison-snapshot-run-before-{suffix}"
+    run_after = f"comparison-snapshot-run-after-{suffix}"
+    admin = create_engine(url, future=True)
+    with admin.begin() as db:
+        db.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
+    engine = create_engine(
+        url,
+        future=True,
+        poolclass=NullPool,
+        connect_args={
+            "options": f"-csearch_path={schema} -clock_timeout=5000 -cstatement_timeout=10000"
+        },
+    )
+    sessions = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
+    Base.metadata.create_all(engine)
+    first_select_finished = threading.Event()
+    allow_reader = threading.Event()
+    reader_state = threading.local()
+    listener_state = {"paused": False}
+
+    def pause_after_link_read(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if (
+            getattr(reader_state, "name", "") == "reader"
+            and not listener_state["paused"]
+            and "document_disease_links" in statement.lower()
+        ):
+            listener_state["paused"] = True
+            first_select_finished.set()
+            assert allow_reader.wait(10), "reader was not released after the concurrent update"
+
+    event.listen(engine, "after_cursor_execute", pause_after_link_read)
+    try:
+        with sessions() as db:
+            db.add(
+                DocumentRecord(
+                    id=document_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    filename=f"{document_id}.pdf",
+                    stored_filename=f"stored-{document_id}.pdf",
+                    original_filename="snapshot-paper.pdf",
+                    file_extension="pdf",
+                    file_type="pdf",
+                    mime_type="application/pdf",
+                    file_hash="file-snapshot",
+                    file_path=f"/tmp/{document_id}.pdf",
+                    file_size=10,
+                    status="completed",
+                    document_kind="research_paper",
+                    language="en",
+                    parsed_source_hash="parsed-snapshot",
+                )
+            )
+            db.flush()
+            db.add(
+                DocumentDiseaseLinkRecord(
+                    id=f"comparison-snapshot-link-{suffix}",
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=document_id,
+                    concept_id="mesh:D000795",
+                    preferred_name_en="Fabry Disease",
+                    preferred_name_zh="法布雷病",
+                    matched_alias="Fabry Disease",
+                    ontology_version="test-v1",
+                    link_source="manual_selection",
+                )
+            )
+            db.add(
+                MedicalAnalysisRunRecord(
+                    id=run_before,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=document_id,
+                    requested_by=user_id,
+                    status="succeeded",
+                    source_hash="file-snapshot",
+                    parsed_source_hash="parsed-snapshot",
+                    analysis_key=f"comparison-snapshot-before-{suffix}",
+                    is_current=True,
+                )
+            )
+            db.flush()
+            db.add(
+                MedicalAnalysisResultRecord(
+                    run_id=run_before,
+                    report_json=_comparison_report_json("EVIDENCE-before"),
+                    validation_status="validated",
+                )
+            )
+            db.add(
+                MedicalAnalysisEvidenceRecord(
+                    id=f"comparison-snapshot-evidence-before-{suffix}",
+                    evidence_id="EVIDENCE-before",
+                    run_id=run_before,
+                    finding_id="finding-before",
+                    chunk_id="chunk-before",
+                    section_type="results",
+                    section_title="Results",
+                    quoted_text="Evidence from the original analysis.",
+                    page_start=2,
+                    page_end=2,
+                )
+            )
+            db.commit()
+
+        repository = DiseaseProfileRepository(sessions, enabled=lambda: True)
+        outcome: dict[str, object] = {}
+
+        def read_comparison():
+            reader_state.name = "reader"
+            try:
+                outcome["records"] = repository.load_comparison_inputs(
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    concept_id="mesh:D000795",
+                    document_ids=[document_id],
+                )
+            except BaseException as exc:
+                outcome["error"] = exc
+
+        reader = threading.Thread(target=read_comparison)
+        reader.start()
+        assert first_select_finished.wait(10), "comparison reader did not reach its first SELECT"
+
+        with sessions() as db:
+            old_run = db.get(MedicalAnalysisRunRecord, run_before)
+            assert old_run is not None
+            old_run.is_current = False
+            if change_document:
+                document = db.get(DocumentRecord, document_id)
+                assert document is not None
+                document.parsed_source_hash = "parsed-snapshot-v2"
+            db.add(
+                MedicalAnalysisRunRecord(
+                    id=run_after,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    document_id=document_id,
+                    requested_by=user_id,
+                    status="succeeded",
+                    source_hash="file-snapshot",
+                    parsed_source_hash="parsed-snapshot-v2" if change_document else "parsed-snapshot",
+                    analysis_key=f"comparison-snapshot-after-{suffix}",
+                    is_current=True,
+                )
+            )
+            db.flush()
+            db.add(
+                MedicalAnalysisResultRecord(
+                    run_id=run_after,
+                    report_json=_comparison_report_json("EVIDENCE-after"),
+                    validation_status="validated",
+                )
+            )
+            db.add(
+                MedicalAnalysisEvidenceRecord(
+                    id=f"comparison-snapshot-evidence-after-{suffix}",
+                    evidence_id="EVIDENCE-after",
+                    run_id=run_after,
+                    finding_id="finding-after",
+                    chunk_id="chunk-after",
+                    section_type="results",
+                    section_title="Results",
+                    quoted_text="Evidence from the replacement analysis.",
+                    page_start=3,
+                    page_end=3,
+                )
+            )
+            db.commit()
+
+        allow_reader.set()
+        reader.join(timeout=20)
+        assert not reader.is_alive(), "comparison reader did not finish"
+        if "error" in outcome:
+            assert change_document
+            assert getattr(outcome["error"], "code", "") == "comparison_source_changed"
+        else:
+            records = outcome["records"]
+            assert records[0]["document"]["parsed_source_hash"] == "parsed-snapshot"
+            assert records[0]["analyses"][0]["run"]["run_id"] == run_before
+    finally:
+        event.remove(engine, "after_cursor_execute", pause_after_link_read)
+        with admin.begin() as db:
+            db.exec_driver_sql(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        engine.dispose()
+        admin.dispose()

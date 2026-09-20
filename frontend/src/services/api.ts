@@ -325,6 +325,7 @@ export interface DiseaseProfileDocument {
   language: string;
   document_date: string;
   parsed_source_hash: string;
+  current_analysis_run_id: string | null;
   source_status: "current" | "outdated" | "unavailable";
   warnings: string[];
 }
@@ -403,6 +404,7 @@ export type ComparisonLanguage = "en" | "zh" | "ja";
 export interface ComparisonDocumentSelection {
   document_id: string;
   expected_parsed_source_hash: string;
+  expected_analysis_run_id: string;
 }
 
 export interface ComparisonPreviewRequest {
@@ -426,6 +428,8 @@ export interface ComparisonMethod {
   value: string;
   support_status: ComparisonSupportStatus;
   evidence: ComparisonEvidence[];
+  evidence_total: number;
+  evidence_truncated: boolean;
   warnings: string[];
 }
 
@@ -450,6 +454,8 @@ export interface ComparisonFinding {
   statement: string;
   explanation: string;
   evidence: ComparisonEvidence[];
+  evidence_total: number;
+  evidence_truncated: boolean;
   warnings: string[];
 }
 
@@ -459,6 +465,8 @@ export interface ComparisonQuestion {
   rationale: string;
   document_id: string;
   evidence: ComparisonEvidence[];
+  evidence_total: number;
+  evidence_truncated: boolean;
 }
 
 export interface ComparisonDocument {

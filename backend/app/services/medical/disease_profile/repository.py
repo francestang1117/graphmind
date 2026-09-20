@@ -626,6 +626,7 @@ class DiseaseProfileRepository:
         self._require_available()
         try:
             with self.session_factory() as db:
+                _begin_consistent_read(db)
                 link_rows = db.execute(
                     select(DocumentDiseaseLinkRecord, DocumentRecord)
                     .join(
@@ -683,6 +684,13 @@ class DiseaseProfileRepository:
                 ).all()
                 runs_by_document: dict[str, tuple[Any, Any]] = {}
                 for run, result in current_rows:
+                    document = documents.get(run.document_id)
+                    if not is_current_valid_analysis(run, result, document):
+                        raise DiseaseProfileError(
+                            "A selected document changed while comparison sources were being read.",
+                            code="comparison_source_changed",
+                            status_code=409,
+                        )
                     if run.document_id in runs_by_document:
                         raise DiseaseProfileError(
                             "A selected document has multiple current analyses.",
@@ -706,6 +714,10 @@ class DiseaseProfileRepository:
                 records_by_document: dict[str, dict[str, Any]] = {}
                 for document_id, document in documents.items():
                     run, result = runs_by_document[document_id]
+                    document = {
+                        **document,
+                        "current_analysis_run_id": run.id,
+                    }
                     report = _normalize_comparison_report(
                         result.report_json,
                         row_schema_version=run.schema_version,
@@ -1159,6 +1171,14 @@ class DiseaseProfileRepository:
                 continue
             seen.add(document.id)
             analyses = analyses_by_document.get(document.id, [])
+            current_analysis_run_id = next(
+                (
+                    str((item.get("run") or {}).get("run_id") or "")
+                    for item in analyses
+                    if item.get("valid")
+                ),
+                None,
+            )
             if any(item.get("valid") for item in analyses):
                 source_status = "current"
             elif any(
@@ -1177,6 +1197,7 @@ class DiseaseProfileRepository:
                     "language": document_view["language"],
                     "document_date": document_view["document_date"],
                     "parsed_source_hash": document_view["parsed_source_hash"],
+                    "current_analysis_run_id": current_analysis_run_id,
                     "source_status": source_status,
                     "warnings": _unique_strings(
                         warning
@@ -1283,6 +1304,19 @@ def _document_dict(row: DocumentRecord) -> dict[str, Any]:
         "parsed_source_hash": row.parsed_source_hash or "",
         "modified_at": _iso(row.modified_at),
     }
+
+
+def _begin_consistent_read(db) -> None:
+    """Pin PostgreSQL multi-query comparison reads to one MVCC snapshot.
+
+    SQLite keeps its own read transaction semantics for the local development
+    path. PostgreSQL's default READ COMMITTED isolation would otherwise allow
+    later SELECT statements in this read to observe a newly committed parse or
+    analysis version.
+    """
+    bind = db.get_bind()
+    if getattr(getattr(bind, "dialect", None), "name", "") == "postgresql":
+        db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
 
 
 def _analysis_run_dict(

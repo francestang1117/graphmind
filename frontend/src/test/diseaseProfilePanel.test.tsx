@@ -118,6 +118,7 @@ const detail = {
     language: "en",
     document_date: "2026-01-01",
     parsed_source_hash: "parsed-1",
+    current_analysis_run_id: "run-1",
     source_status: "current",
     warnings: [],
   }],
@@ -258,6 +259,8 @@ function comparisonPreview(title: string): ComparisonPreview {
     value: "Not reported",
     support_status: "not_reported" as const,
     evidence: [],
+    evidence_total: 0,
+    evidence_truncated: false,
     warnings: [],
   };
   return {
@@ -387,6 +390,7 @@ describe("DiseaseProfilePanel", () => {
         language: "en",
         document_date: "2026-02-01",
         parsed_source_hash: "parsed-2",
+        current_analysis_run_id: "run-2",
         source_status: "current" as const,
         warnings: [],
       },
@@ -418,6 +422,7 @@ describe("DiseaseProfilePanel", () => {
         language: "en",
         document_date: "2026-02-01",
         parsed_source_hash: "parsed-2",
+        current_analysis_run_id: "run-2",
         source_status: "current" as const,
         warnings: [],
       },
@@ -442,8 +447,16 @@ describe("DiseaseProfilePanel", () => {
 
     expect(mutateAsync).toHaveBeenCalledWith({
       documents: [
-        { document_id: "document-1", expected_parsed_source_hash: "parsed-1" },
-        { document_id: "document-2", expected_parsed_source_hash: "parsed-2" },
+        {
+          document_id: "document-1",
+          expected_parsed_source_hash: "parsed-1",
+          expected_analysis_run_id: "run-1",
+        },
+        {
+          document_id: "document-2",
+          expected_parsed_source_hash: "parsed-2",
+          expected_analysis_run_id: "run-2",
+        },
       ],
       language: "en",
     });
@@ -465,6 +478,7 @@ describe("DiseaseProfilePanel", () => {
         language: "en",
         document_date: "2026-02-01",
         parsed_source_hash: "parsed-2",
+        current_analysis_run_id: "run-2",
         source_status: "current" as const,
         warnings: [],
       },
@@ -475,6 +489,7 @@ describe("DiseaseProfilePanel", () => {
         language: "en",
         document_date: "2026-03-01",
         parsed_source_hash: "parsed-3",
+        current_analysis_run_id: "run-3",
         source_status: "current" as const,
         warnings: [],
       },
