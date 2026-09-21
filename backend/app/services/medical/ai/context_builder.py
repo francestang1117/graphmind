@@ -7,6 +7,18 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable
 
 
+_REFERENCE_SECTION_TYPES = frozenset(
+    {
+        "references",
+        "reference",
+        "bibliography",
+        "works_cited",
+        "reference_list",
+        "references_and_bibliography",
+    }
+)
+
+
 @dataclass(frozen=True)
 class EvidenceItem:
     evidence_id: str
@@ -139,6 +151,10 @@ class ContextBuilder:
                     section,
                     section.get("metadata") if isinstance(section.get("metadata"), dict) else {},
                 )
+            if section_type in _REFERENCE_SECTION_TYPES:
+                # References remain available in the document browser, but
+                # bibliographic entries are not analysis evidence.
+                continue
             chunk_id = str(raw_chunk.get("id") or f"chunk:{index}")
             dedupe_key = (chunk_id, text)
             if dedupe_key in seen:
@@ -175,7 +191,7 @@ class ContextBuilder:
             first_by_section: dict[str, dict[str, Any]] = {}
             for _priority, _index, candidate in candidates:
                 section_type = candidate["section_type"]
-                if section_type in {"references", "reference", "bibliography"}:
+                if section_type in _REFERENCE_SECTION_TYPES:
                     continue
                 first_by_section.setdefault(section_type, candidate)
             section_candidates = list(first_by_section.values())

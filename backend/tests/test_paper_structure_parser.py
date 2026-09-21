@@ -202,6 +202,64 @@ def test_chunk_page_range_is_narrower_than_a_multi_page_section():
     assert all(chunk["section_page_end"] == 2 for chunk in result_chunks)
 
 
+def test_chunks_start_and_end_on_sentence_boundaries():
+    text = "Results\n" + (
+        "Fabry patients had higher Gb3 levels than controls. "
+        "The difference was most pronounced in classic disease. "
+        "Follow-up measurements remained stable. "
+        "Urinary isoforms were also higher in the classic subgroup. "
+        "The observed pattern was consistent across the measured samples."
+    )
+    parsed = {
+        "content": text,
+        "metadata": {"format": "pdf"},
+        "extra": {"sections": [], "tables": []},
+    }
+
+    result = PaperStructureParser(chunk_size=200, overlap=40).parse(parsed, _analysis())
+    chunks = [chunk for chunk in result.chunks if chunk["section_type"] == "results"]
+
+    assert len(chunks) >= 2
+    assert all(chunk["starts_at_sentence_boundary"] for chunk in chunks)
+    assert all(chunk["ends_at_sentence_boundary"] for chunk in chunks)
+    assert all(text[chunk["char_start"]:chunk["char_end"]] == chunk["text"] for chunk in chunks)
+    assert all(not chunk["text"].lstrip().startswith(("ary ", "orm,")) for chunk in chunks)
+
+
+def test_structured_abstract_labels_get_distinct_semantic_sections():
+    text = (
+        "Abstract\n"
+        "Objectives The study assessed biomarker levels. "
+        "Methods Plasma samples from 15 patients and 36 controls were analyzed. "
+        "Results Patients had higher levels than controls. "
+        "Conclusion The marker may support further study."
+    )
+    parsed = {
+        "content": text,
+        "metadata": {"format": "pdf"},
+        "extra": {"sections": [], "tables": []},
+    }
+
+    result = PaperStructureParser().parse(parsed, _analysis())
+
+    assert {section.section_type for section in result.sections} >= {
+        "abstract",
+        "scope",
+        "methods",
+        "results",
+        "conclusion",
+    }
+    assert any(
+        chunk["section_type"] == "results"
+        and "Patients had higher levels" in chunk["text"]
+        for chunk in result.chunks
+    )
+    assert not any(
+        chunk["section_type"] == "results" and "Objectives" in chunk["text"]
+        for chunk in result.chunks
+    )
+
+
 def test_table_section_keeps_exact_text_location():
     text = "Results\nOutcome\nRecovered\n"
     parsed = {

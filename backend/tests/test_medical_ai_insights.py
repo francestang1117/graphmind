@@ -290,6 +290,24 @@ def test_context_builder_reads_legacy_page_metadata_for_guidelines():
     assert evidence.page_start == evidence.page_end == 4
 
 
+def test_context_builder_excludes_reference_chunks_even_when_budget_is_available():
+    context = ContextBuilder().build(
+        [
+            {"id": "results", "text": "The study reported a result.", "section_type": "results"},
+            {"id": "references", "text": "A cited paper and its DOI.", "section_type": "references"},
+        ],
+        title="Paper",
+        document_kind="research_paper",
+        language="en",
+        max_input_tokens=1000,
+    )
+
+    assert context.total_chunks == 1
+    assert [item.section_type for item in context.evidence] == ["results"]
+    assert "references" not in context.included_sections
+    assert "references" not in context.omitted_sections
+
+
 def test_context_builder_preserves_safe_parser_warnings_only():
     context = ContextBuilder().build(
         [{"id": "chunk-1", "text": "A table was extracted.", "section_type": "table"}],

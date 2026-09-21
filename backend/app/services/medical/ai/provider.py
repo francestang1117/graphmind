@@ -54,15 +54,15 @@ class ExtractiveMedicalAIProvider:
             evidence,
             {
                 "results",
-                "recommendations",
                 "evidence",
-                "contraindications",
-                "scope",
                 "conclusion",
-                "abstract",
+                "adverse_events",
+                "recommendations",
             },
             limit=3,
         ):
+            if overview_item and item.evidence_id == overview_item.evidence_id:
+                continue
             statement = _summary(item.text)
             if not statement:
                 continue
@@ -73,17 +73,6 @@ class ExtractiveMedicalAIProvider:
                     f"This is reported in the document's {item.section_type} section.",
                     item,
                     interpretation_type="direct_statement",
-                )
-            )
-
-        if not findings and overview_item:
-            findings.append(
-                _finding(
-                    "finding_001",
-                    summary,
-                    "This is the clearest extractable statement in the document.",
-                    overview_item,
-                    interpretation_type="summary",
                 )
             )
 
@@ -358,6 +347,34 @@ _ENGLISH_POPULATION_MARKERS = re.compile(
     re.I,
 )
 _CJK_POPULATION_MARKERS = re.compile(r"病例|患者|受试者|研究人群")
+_POPULATION_COUNT_EVIDENCE = re.compile(
+    r"(?:\bn\s*[=:]\s*\d[\d,]*\b"
+    r"|\b\d[\d,]*\s+(?:patients?|participants?|subjects?|controls?|cases?|"
+    r"adults?|children|men|women|males?|females?)\b"
+    r"|\b(?:enrolled|recruited|included|consisted of|comprised|measured in)\b"
+    r"[^.!?。！？]{0,120}\b\d[\d,]*\b"
+    r"|\d[\d,]*(?:例|名)(?:患者|受试者|对照|病例)?"
+    r"|(?:患者|受试者|对照|研究人群)[^。！？]{0,40}\d[\d,]*"
+    r")",
+    re.I,
+)
+_POPULATION_GROUP_EVIDENCE = re.compile(
+    r"\b(?:the|this|a)\s+(?:study|trial|cohort|population)\b"
+    r"[^.!?]{0,100}\b(?:included|enrolled|recruited|consisted of|comprised)\b"
+    r"[^.!?]{1,100}\b(?:patients?|participants?|subjects?|adults?|children|"
+    r"controls?|men|women|males?|females?)\b",
+    re.I,
+)
+_CJK_POPULATION_GROUP_EVIDENCE = re.compile(
+    r"(?:研究人群|研究对象|研究纳入|纳入)[^。！？]{0,50}"
+    r"(?:患者|受试者|对照|成人|儿童|男性|女性)"
+)
+_AUTHOR_METADATA_MARKERS = re.compile(
+    r"\b(?:affiliation|department|correspondence|corresponding author|email|doi)\b"
+    r"|作者单位|通信作者|电子邮箱|通讯地址|基金项目",
+    re.I,
+)
+_AUTHOR_NAME = re.compile(r"\b[A-Z][a-z]+(?:[-'][A-Z]?[a-z]+)?\s+[A-Z][a-z]+\b")
 _ENGLISH_SUBJECT_MARKERS = re.compile(
     r"\b(?:humans?|patients?|animals?|mouse|mice|rats?|in vitro|cell lines?|tissues?)\b",
     re.I,
@@ -376,13 +393,33 @@ def _population_marker_found(text: str) -> bool:
     )
 
 
+def _looks_like_author_metadata(text: str) -> bool:
+    """Reject title-page/name-list text before it can become population evidence."""
+    value = str(text or "")
+    if _AUTHOR_METADATA_MARKERS.search(value) or "@" in value:
+        return True
+    names = _AUTHOR_NAME.findall(value)
+    return len(names) >= 2 and ("," in value or ";" in value or len(names) >= 3)
+
+
+def _population_sentence_supported(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value or _looks_like_author_metadata(value):
+        return False
+    return bool(
+        _POPULATION_COUNT_EVIDENCE.search(value)
+        or _POPULATION_GROUP_EVIDENCE.search(value)
+        or _CJK_POPULATION_GROUP_EVIDENCE.search(value)
+    )
+
+
 def _population_evidence(evidence: list[EvidenceItem]) -> EvidenceItem | None:
     """Return only a passage that can plausibly describe study participants."""
     for item in evidence:
         section_type = str(item.section_type or "").strip().lower()
-        if section_type not in {"population", "methods"}:
+        if section_type not in {"abstract", "population", "methods"}:
             continue
-        if _population_marker_found(item.text or ""):
+        if any(_population_sentence_supported(sentence) for sentence in _sentence_parts(item.text)):
             return item
     return None
 
@@ -440,7 +477,7 @@ def _method_evidence(evidence: list[EvidenceItem], field: str) -> EvidenceItem |
 
 def _method_marker_found(text: str, field: str, marker: re.Pattern[str]) -> bool:
     if field == "population":
-        return _population_marker_found(text)
+        return any(_population_sentence_supported(sentence) for sentence in _sentence_parts(text))
     if field == "human_animal_in_vitro":
         return bool(
             _ENGLISH_SUBJECT_MARKERS.search(text or "")
@@ -472,7 +509,7 @@ def _method_excerpt(item: EvidenceItem, field: str) -> str:
         sentence
         for sentence in _sentence_parts(item.text)
         if (
-            _population_marker_found(sentence)
+            _population_sentence_supported(sentence)
             if field == "population"
             else _method_marker_found(sentence, field, marker)
         )
@@ -557,6 +594,12 @@ def _question_suggestion(
 def _summary(text: str, max_chars: int = 360) -> str:
     normalized = " ".join(str(text or "").split())
     if not normalized:
+        return ""
+    # A fixed-size parser chunk can begin with the tail of a word or contain
+    # a column/header splice. Such text is not safe to present as a finding.
+    if re.match(r"^[a-z]{2,}(?:\s|,)", normalized) or re.search(
+        r"\b[a-z]{2,}-\s+[A-Z][a-z]+", normalized
+    ):
         return ""
     match = re.search(r"[.!?。！？](?:\s|$)", normalized)
     if match and match.end() <= max_chars:

@@ -241,7 +241,7 @@ function ReportView({
     <div className="insight-report">
       <section className="insight-report-section insight-overview">
         <div className="insight-section-heading">
-          <h3>{isExtractive ? "Extracted source summary" : "Plain-language overview"}</h3>
+          <h3>{isExtractive ? "Selected source passages" : "Plain-language overview"}</h3>
           <span className="insight-type">{readable(report.overview.study_type)}</span>
         </div>
         <p>{report.overview.summary}</p>
@@ -271,7 +271,7 @@ function ReportView({
       )}
 
       <FindingList
-        title={isExtractive ? "Reported findings" : "Key findings"}
+        title={isExtractive ? "Source-reported findings" : "Key findings"}
         items={report.key_findings}
         evidenceById={evidenceById}
         onSelectEvidence={onSelectEvidence}
@@ -674,14 +674,14 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
       {run?.status === "succeeded" && report && (
         <>
           <div className="insight-meta">
-            <span><CheckCircle2 size={13} /> Citations and claim wording checked</span>
+            <span><CheckCircle2 size={13} /> Source links attached</span>
             <span>{run.provider === "extractive" ? "Local extractive analysis" : `${readable(run.provider)} AI analysis`}</span>
             <span>{run.model_name}</span>
             {run.parsed_source_hash && <span>Source {run.parsed_source_hash.slice(0, 8)}</span>}
             <span>{readable(report.document_kind)}</span>
             <span>{report.language}</span>
             {typeof run.citation_coverage === "number" && (
-              <span>{Math.round(run.citation_coverage * 100)}% citation coverage</span>
+              <span>{Math.round(run.citation_coverage * 100)}% of displayed items linked to source passages</span>
             )}
           </div>
           {run.provider !== "extractive" && (

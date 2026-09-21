@@ -410,6 +410,52 @@ def test_extractive_provider_does_not_invent_population_from_results_text():
     assert output["question_suggestions"] == []
 
 
+def test_extractive_provider_rejects_author_names_as_population_evidence():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "population",
+            "Tomoko Shiga, Takahiro Tsukimura, Takao Kubota, and Tadayasu Togawa. "
+            "Plasma analysis included 15 classic Fabry men, 6 late-onset men, "
+            "11 women, and 36 controls.",
+        )
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    population = output["study_methods"]["population"]
+    assert population["support_status"] == "supported"
+    assert "Tomoko Shiga" not in population["value"]
+    assert "15 classic Fabry men" in population["value"]
+    assert "36 controls" in population["value"]
+
+
+def test_extractive_provider_does_not_turn_objectives_into_findings():
+    context = _context(
+        ("EVIDENCE_001", "abstract", "Objectives The study assessed a biomarker."),
+        ("EVIDENCE_002", "results", "Results Fabry patients had higher biomarker levels."),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    statements = [item["statement"] for item in output["key_findings"]]
+    assert all("Objectives" not in statement for statement in statements)
+    assert statements == ["Results Fabry patients had higher biomarker levels."]
+
+
+def test_extractive_provider_skips_fragmented_source_text():
+    context = _context(
+        ("EVIDENCE_001", "results", "ary Gb3 isoforms were higher in patients..."),
+        ("EVIDENCE_002", "results", "The measured isoforms were higher in patients."),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert [item["statement"] for item in output["key_findings"]] == [
+        "The measured isoforms were higher in patients."
+    ]
+
+
 def test_extractive_provider_uses_field_matching_sentences_for_method_attributes():
     context = _context(
         (

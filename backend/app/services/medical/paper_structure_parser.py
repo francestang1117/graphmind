@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.services.medical.models import (
@@ -61,6 +61,13 @@ class PaperStructureParser:
         r"^(?:figure|fig\.?)\s*\d+\s*[.:：-]?\s*\S|^(?:图|図)\s*\d+\s*[.:：-]?\s*\S",
         re.I,
     )
+    _STRUCTURED_ABSTRACT_LABEL = re.compile(
+        r"(?<![A-Za-z])(?P<label>Objectives?|Methods?|Results?|"
+        r"Conclusion|Conclusions|目的|方法|结果|結論|结论)"
+        r"(?=\s+|[:：])",
+        re.I,
+    )
+    _SENTENCE_END = re.compile(r"[.!?。！？](?=\s|$)|\n{2,}")
 
     def __init__(self, chunk_size: int = 1200, overlap: int = 160) -> None:
         self.chunk_size = max(200, chunk_size)
@@ -103,6 +110,13 @@ class PaperStructureParser:
                     heading_detected=False,
                 )
             ]
+
+        sections = self._expand_structured_abstracts(
+            sections,
+            text,
+            analysis.language,
+            pages,
+        )
 
         table_sections, _ = self._table_parts(
             parsed, text, analysis.language, analysis.document_kind
@@ -221,6 +235,85 @@ class PaperStructureParser:
                 )
             )
         return sections
+
+    def _expand_structured_abstracts(
+        self,
+        sections: list[StructuredSection],
+        text: str,
+        language: str,
+        pages: list[_PageRange],
+    ) -> list[StructuredSection]:
+        """Split inline abstract labels before providers assign semantic roles."""
+        expanded: list[StructuredSection] = []
+        type_by_label = {
+            "objective": MedicalSectionType.SCOPE.value,
+            "objectives": MedicalSectionType.SCOPE.value,
+            "method": MedicalSectionType.METHODS.value,
+            "methods": MedicalSectionType.METHODS.value,
+            "result": MedicalSectionType.RESULTS.value,
+            "results": MedicalSectionType.RESULTS.value,
+            "conclusion": MedicalSectionType.CONCLUSION.value,
+            "conclusions": MedicalSectionType.CONCLUSION.value,
+            "目的": MedicalSectionType.SCOPE.value,
+            "方法": MedicalSectionType.METHODS.value,
+            "结果": MedicalSectionType.RESULTS.value,
+            "結論": MedicalSectionType.CONCLUSION.value,
+            "结论": MedicalSectionType.CONCLUSION.value,
+        }
+
+        for section in sections:
+            if section.section_type != MedicalSectionType.ABSTRACT.value:
+                expanded.append(section)
+                continue
+
+            matches = [
+                match
+                for match in self._STRUCTURED_ABSTRACT_LABEL.finditer(section.text)
+                if not match.group("label").isascii()
+                or match.group("label")[:1].isupper()
+            ]
+            if len(matches) < 2:
+                expanded.append(section)
+                continue
+
+            parent_metadata = dict(section.metadata)
+            parent_metadata["structured_abstract_parent"] = True
+            expanded.append(replace(section, metadata=parent_metadata))
+            for index, match in enumerate(matches):
+                label = match.group("label")
+                section_type = type_by_label.get(label.casefold())
+                if section_type is None:
+                    continue
+                relative_end = (
+                    matches[index + 1].start()
+                    if index + 1 < len(matches)
+                    else len(section.text)
+                )
+                content_start = match.end()
+                while content_start < relative_end and section.text[content_start] in " \t\r\n:：":
+                    content_start += 1
+                start, end, section_text = self._trim_range(
+                    text,
+                    section.char_start + content_start,
+                    section.char_start + relative_end,
+                )
+                if not section_text:
+                    continue
+                child = self._section(
+                    section_type,
+                    label,
+                    start,
+                    end,
+                    section_text,
+                    language,
+                    max(0.0, section.confidence - 0.02),
+                    pages,
+                    False,
+                    location_exact=bool(section.metadata.get("location_exact", True)),
+                )
+                child.metadata["structured_abstract_label"] = True
+                expanded.append(child)
+        return expanded
 
     def _sections_from_explicit_blocks(
         self,
@@ -485,22 +578,29 @@ class PaperStructureParser:
         document_kind: str,
         pages: list[_PageRange] | None = None,
     ) -> list[dict[str, Any]]:
-        if not section.text.strip():
+        if not section.text.strip() or section.metadata.get("structured_abstract_parent"):
             return []
         chunks: list[dict[str, Any]] = []
-        start = 0
         text = section.text
-        while start < len(text):
-            end = min(len(text), start + self.chunk_size)
-            raw_piece = text[start:end]
-            piece = raw_piece.strip()
+        spans = self._sentence_spans(text)
+        start_index = 0
+        while start_index < len(spans):
+            chunk_start = spans[start_index][0]
+            chunk_end = spans[start_index][1]
+            end_index = start_index + 1
+            while (
+                end_index < len(spans)
+                and spans[end_index][1] - chunk_start <= self.chunk_size
+            ):
+                chunk_end = spans[end_index][1]
+                end_index += 1
+
+            piece = text[chunk_start:chunk_end]
             if piece:
                 location_exact = bool(section.metadata.get("location_exact", True))
                 if location_exact:
-                    leading = len(raw_piece) - len(raw_piece.lstrip())
-                    trailing = len(raw_piece) - len(raw_piece.rstrip())
-                    absolute_start = section.char_start + start + leading
-                    absolute_end = section.char_start + end - trailing
+                    absolute_start = section.char_start + chunk_start
+                    absolute_end = section.char_start + chunk_end
                 else:
                     absolute_start = 0
                     absolute_end = 0
@@ -531,11 +631,33 @@ class PaperStructureParser:
                     "document_kind": document_kind,
                     "evidence_role": section.metadata.get("evidence_role", "context"),
                     "location_exact": location_exact,
+                    "starts_at_sentence_boundary": True,
+                    "ends_at_sentence_boundary": True,
                 })
-            if end >= len(text):
+            if end_index >= len(spans):
                 break
-            start = max(start + 1, end - self.overlap)
+            target = chunk_end - self.overlap
+            next_index = end_index
+            for candidate_index in range(end_index - 1, start_index, -1):
+                if spans[candidate_index][0] <= target:
+                    next_index = candidate_index
+                    break
+            start_index = max(start_index + 1, next_index)
         return chunks
+
+    def _sentence_spans(self, text: str) -> list[tuple[int, int]]:
+        """Return trimmed, punctuation-aware spans for stable chunk boundaries."""
+        spans: list[tuple[int, int]] = []
+        cursor = 0
+        for match in self._SENTENCE_END.finditer(text):
+            start, end, value = self._trim_range(text, cursor, match.end())
+            if value:
+                spans.append((start, end))
+            cursor = match.end()
+        start, end, value = self._trim_range(text, cursor, len(text))
+        if value:
+            spans.append((start, end))
+        return spans
 
     def _table_parts(
         self,
