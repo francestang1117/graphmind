@@ -91,6 +91,11 @@ export default function DiseaseSourceDrawer({
         {item.explanation && <p className="disease-source-explanation">{item.explanation}</p>}
         {item.value && <p className="disease-source-main-text"><strong>{item.title}: </strong>{item.value}</p>}
         {item.question && <p className="disease-source-main-text"><strong>{item.question}</strong></p>}
+        {item.evidence_truncated && (
+          <p className="disease-profile-warning">
+            Only the first {item.evidence.length} evidence sources are shown.
+          </p>
+        )}
         {item.evidence.map((source) => (
           <article className="disease-source-quote" key={`${source.evidence_id ?? source.external_id}:${source.section_title}`}>
             <div className="disease-source-quote-meta">

@@ -113,9 +113,8 @@ def _normalise_pdf_text(text: str) -> str:
     """Apply only layout-safe PDF cleanup before chunking and citation."""
     normalized = unicodedata.normalize("NFKC", str(text or ""))
     normalized = normalized.replace("\u00a0", " ").replace("\u200b", "")
-    # A hyphen at the end of a line is usually a word split in prose. Keep
-    # hyphens inside a line untouched because they may be meaningful terms.
-    normalized = re.sub(r"(?<=[A-Za-z])-\s*\n\s*(?=[a-z])", "", normalized)
+    # Do not guess whether a line-ending hyphen is typography or part of a
+    # medical compound. Keeping it lets later readers verify the source text.
     lines = [re.sub(r"[ \t]+", " ", line).strip() for line in normalized.splitlines()]
     return "\n".join(lines).strip()
 

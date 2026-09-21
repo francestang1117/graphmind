@@ -197,6 +197,7 @@ class DiseaseProfileAggregator:
                                 "source_id": str(question.get("source_id") or ""),
                                 "evidence_ids": evidence_ids,
                                 "evidence": sources,
+                                "evidence_truncated": False,
                             }
                         )
                     all_question_count += 1
@@ -556,6 +557,7 @@ class DiseaseProfileAggregator:
                         "source_url": str(article.get("source_url") or ""),
                         "retraction_status": status,
                         "flagged": flagged,
+                        "evidence_truncated": False,
                         "warnings": [],
                         "relevance_score": match.get("relevance_score"),
                         "match_specificity": str(match.get("match_specificity") or ""),
@@ -697,6 +699,7 @@ def _base_item(
         "source_status": "current",
         "evidence_ids": evidence_ids,
         "evidence": sources,
+        "evidence_truncated": False,
     }
 
 
@@ -734,53 +737,27 @@ def _merge_clinician_questions(
     """Collapse identical template questions without losing their sources."""
     merged: dict[tuple[str, str], dict[str, Any]] = {}
     order: list[tuple[str, str]] = []
+    all_document_ids: dict[tuple[str, str], list[str]] = {}
+    all_document_titles: dict[tuple[str, str], list[str]] = {}
+    all_evidence_ids: dict[tuple[str, str], list[str]] = {}
+    all_sources: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for item in items:
         key = (
             str(item.get("topic") or "").strip(),
             " ".join(str(item.get("question") or "").split()).casefold(),
         )
-        current = merged.get(key)
-        if current is None:
-            current = dict(item)
-            current["document_ids"] = _unique_strings(
-                item.get("document_ids") or [item.get("document_id")]
-            )
-            current["document_titles"] = _unique_strings(
-                item.get("document_titles") or [item.get("document_title")]
-            )
-            current["related_document_count"] = len(current["document_ids"])
-            current["related_documents_truncated"] = False
-            merged[key] = current
-            order.append(key)
-            continue
-
         document_ids = _unique_strings(
-            [
-                *current.get("document_ids", []),
-                *item.get("document_ids", []),
-                item.get("document_id"),
-            ]
+            item.get("document_ids") or [item.get("document_id")]
         )
         document_titles = _unique_strings(
-            [
-                *current.get("document_titles", []),
-                *item.get("document_titles", []),
-                item.get("document_title"),
-            ]
+            item.get("document_titles") or [item.get("document_title")]
         )
-        current["document_ids"] = document_ids[:20]
-        current["document_titles"] = document_titles[:20]
-        current["related_document_count"] = len(document_ids)
-        current["related_documents_truncated"] = len(document_ids) > 20
-
-        evidence_ids = _unique_strings(
-            [*current.get("evidence_ids", []), *item.get("evidence_ids", [])]
-        )
-        current["evidence_ids"] = evidence_ids[:5]
-        sources = [*current.get("evidence", []), *item.get("evidence", [])]
-        unique_sources: list[dict[str, Any]] = []
+        evidence_ids = _unique_strings(item.get("evidence_ids", []))
+        sources: list[dict[str, Any]] = []
         seen_sources: set[tuple[str, str, str]] = set()
-        for source in sources:
+        for source in item.get("evidence", []) or []:
+            if not isinstance(source, dict):
+                continue
             identity = (
                 str(source.get("document_id") or ""),
                 str(source.get("analysis_run_id") or ""),
@@ -789,8 +766,53 @@ def _merge_clinician_questions(
             if identity in seen_sources:
                 continue
             seen_sources.add(identity)
-            unique_sources.append(source)
-        current["evidence"] = unique_sources[:5]
+            sources.append(source)
+
+        all_document_ids[key] = _unique_strings(
+            [*all_document_ids.get(key, []), *document_ids]
+        )
+        all_document_titles[key] = _unique_strings(
+            [*all_document_titles.get(key, []), *document_titles]
+        )
+        all_evidence_ids[key] = _unique_strings(
+            [*all_evidence_ids.get(key, []), *evidence_ids]
+        )
+        existing_sources = all_sources.setdefault(key, [])
+        existing_source_ids = {
+            (
+                str(source.get("document_id") or ""),
+                str(source.get("analysis_run_id") or ""),
+                str(source.get("evidence_id") or ""),
+            )
+            for source in existing_sources
+        }
+        for source in sources:
+            identity = (
+                str(source.get("document_id") or ""),
+                str(source.get("analysis_run_id") or ""),
+                str(source.get("evidence_id") or ""),
+            )
+            if identity not in existing_source_ids:
+                existing_sources.append(source)
+                existing_source_ids.add(identity)
+
+        current = merged.get(key)
+        if current is None:
+            current = dict(item)
+            merged[key] = current
+            order.append(key)
+
+        document_ids = all_document_ids[key]
+        document_titles = all_document_titles[key]
+        evidence_ids = all_evidence_ids[key]
+        sources = all_sources[key]
+        current["document_ids"] = document_ids[:20]
+        current["document_titles"] = document_titles[:20]
+        current["related_document_count"] = len(document_ids)
+        current["related_documents_truncated"] = len(document_ids) > 20
+        current["evidence_ids"] = evidence_ids[:5]
+        current["evidence"] = sources[:5]
+        current["evidence_truncated"] = len(sources) > 5 or len(evidence_ids) > 5
     return [merged[key] for key in order]
 
 

@@ -380,6 +380,28 @@ def test_aggregator_merges_identical_clinician_questions_and_keeps_sources():
     assert len(questions[0]["evidence"]) == 2
 
 
+def test_aggregator_keeps_full_question_counts_when_document_previews_are_truncated():
+    payload = DiseaseProfileAggregator().aggregate(
+        concept_id="mesh:D000795",
+        inputs=[
+            _record(
+                f"doc-{index}",
+                title=f"Paper {index}",
+                alias="Fabry Disease",
+                run_id=f"run-{index}",
+            )
+            for index in range(22)
+        ],
+    )
+
+    question = payload["sections"]["clinician_questions"][0]
+    assert question["related_document_count"] == 22
+    assert len(question["document_ids"]) == 20
+    assert question["related_documents_truncated"] is True
+    assert len(question["evidence"]) == 5
+    assert question["evidence_truncated"] is True
+
+
 def test_aggregator_bounds_external_article_document_preview_and_counts_all_sources():
     records = [
         _record(

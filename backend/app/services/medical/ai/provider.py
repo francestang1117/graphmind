@@ -147,15 +147,7 @@ class ExtractiveMedicalAIProvider:
                 "evidence_ids": [overview_item.evidence_id] if overview_item else [],
             },
             "study_methods": {
-                field: (
-                    {
-                        "value": _summary(item.text),
-                        "support_status": "supported",
-                        "evidence_ids": [item.evidence_id],
-                    }
-                    if (item := _method_evidence(evidence, field))
-                    else {}
-                )
+                field: _method_attribute(evidence, field)
                 for field in (
                     "design",
                     "population",
@@ -360,11 +352,20 @@ def _first_of(evidence: list[EvidenceItem], *section_types: str) -> EvidenceItem
     return None
 
 
-_POPULATION_MARKERS = re.compile(
+_ENGLISH_POPULATION_MARKERS = re.compile(
     r"\b(?:participant|participants|patient|patients|subject|subjects|"
-    r"population|enrolled|recruited|included|病例|患者|受试者|研究人群)\b",
+    r"population|enrolled|recruited|included)\b",
     re.I,
 )
+_CJK_POPULATION_MARKERS = re.compile(r"病例|患者|受试者|研究人群")
+
+
+def _population_marker_found(text: str) -> bool:
+    """Match CJK population terms without Python's ASCII word-boundary rules."""
+    return bool(
+        _ENGLISH_POPULATION_MARKERS.search(text or "")
+        or _CJK_POPULATION_MARKERS.search(text or "")
+    )
 
 
 def _population_evidence(evidence: list[EvidenceItem]) -> EvidenceItem | None:
@@ -373,7 +374,7 @@ def _population_evidence(evidence: list[EvidenceItem]) -> EvidenceItem | None:
         section_type = str(item.section_type or "").strip().lower()
         if section_type not in {"population", "methods"}:
             continue
-        if _POPULATION_MARKERS.search(item.text or ""):
+        if _population_marker_found(item.text or ""):
             return item
     return None
 
@@ -397,6 +398,14 @@ _METHOD_MARKERS = {
     ),
 }
 
+_SAMPLE_SIZE_EVIDENCE = re.compile(
+    r"(?:\bn\s*[=:]\s*\d[\d,]*\b"
+    r"|\b(?:sample size|enrolled|recruited|included)\b[^.!?。！？]{0,40}\b\d[\d,]*\b"
+    r"|\b\d[\d,]*\s+(?:participants?|patients?|subjects?|adults?|children)\b"
+    r"|\d[\d,]*(?:例|名(?:患者|受试者)?))",
+    re.I,
+)
+
 
 def _method_evidence(evidence: list[EvidenceItem], field: str) -> EvidenceItem | None:
     """Use only clearly labelled method passages for structured fields."""
@@ -408,7 +417,7 @@ def _method_evidence(evidence: list[EvidenceItem], field: str) -> EvidenceItem |
         return None
     preferred_sections = {
         "design": ("design", "methods"),
-        "human_animal_in_vitro": ("methods", "population", "outcomes"),
+        "human_animal_in_vitro": ("methods", "population"),
         "sample_size": ("population", "methods", "results"),
         "comparator": ("comparator", "methods", "design"),
     }.get(field, ("methods",))
@@ -416,9 +425,60 @@ def _method_evidence(evidence: list[EvidenceItem], field: str) -> EvidenceItem |
         for item in evidence:
             if str(item.section_type or "").strip().lower() != section_type:
                 continue
-            if marker.search(item.text or ""):
+            if _method_marker_found(item.text or "", field, marker):
                 return item
     return None
+
+
+def _method_marker_found(text: str, field: str, marker: re.Pattern[str]) -> bool:
+    if field == "population":
+        return _population_marker_found(text)
+    if field == "sample_size":
+        return bool(_SAMPLE_SIZE_EVIDENCE.search(text or ""))
+    return bool(marker.search(text or ""))
+
+
+def _sentence_parts(text: str) -> list[str]:
+    normalized = " ".join(str(text or "").split()).strip()
+    if not normalized:
+        return []
+    return [
+        part.strip()
+        for part in re.split(
+            r"(?<=[.!?])\s+|(?<=[.!?])(?=[A-Z][a-z])|(?<=[。！？])",
+            normalized,
+        )
+        if part.strip()
+    ]
+
+
+def _method_excerpt(item: EvidenceItem, field: str) -> str:
+    """Return only sentences that support the selected structured field."""
+    marker = _METHOD_MARKERS.get(field)
+    matching = [
+        sentence
+        for sentence in _sentence_parts(item.text)
+        if (
+            _population_marker_found(sentence)
+            if field == "population"
+            else _method_marker_found(sentence, field, marker)
+        )
+    ]
+    return _summary(" ".join(matching[:2])) if matching else ""
+
+
+def _method_attribute(evidence: list[EvidenceItem], field: str) -> dict[str, Any]:
+    item = _method_evidence(evidence, field)
+    if item is None:
+        return {}
+    value = _method_excerpt(item, field)
+    if not value:
+        return {}
+    return {
+        "value": value,
+        "support_status": "supported",
+        "evidence_ids": [item.evidence_id],
+    }
 
 
 def _take_distinct(

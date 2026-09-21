@@ -13,6 +13,7 @@ const item: DiseaseProfileItem = {
   document_titles: ["study.pdf"],
   related_document_count: 1,
   related_documents_truncated: false,
+  evidence_truncated: false,
   document_kind: "research_paper",
   document_date: "2026-01-01",
   analysis_run_id: "run-1",
@@ -99,5 +100,35 @@ describe("DiseaseProfileSection source actions", () => {
 
     expect(screen.getByRole("button", { name: /view source \(1\)/i })).toBeInTheDocument();
     expect(screen.queryByText("No source attached")).not.toBeInTheDocument();
+  });
+
+  it("discloses linked document and evidence truncation", () => {
+    renderSection({
+      document_ids: Array.from({ length: 20 }, (_, index) => `document-${index}`),
+      related_document_count: 22,
+      related_documents_truncated: true,
+      evidence_truncated: true,
+      evidence_ids: ["evidence-1"],
+      evidence: [{
+        source_type: "document_evidence",
+        evidence_id: "evidence-1",
+        document_id: "document-1",
+        document_title: "study.pdf",
+        document_date: "2026-01-01",
+        parsed_source_hash: "parsed-1",
+        section_type: "results",
+        section_title: "Results",
+        quote: "The study reported a finding.",
+        source: "",
+        external_id: "",
+        source_url: "",
+        retraction_status: "unknown",
+        flagged: false,
+        warnings: [],
+      }],
+    });
+
+    expect(screen.getByText("Showing the first 20 of 22 linked documents.")).toBeInTheDocument();
+    expect(screen.getByText("Showing the first 1 evidence sources.")).toBeInTheDocument();
   });
 });

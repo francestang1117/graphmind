@@ -3,7 +3,11 @@
 import sys
 from types import SimpleNamespace
 
-from app.services.document_parser import PDFParser, PDF_TEXT_PARSER_VERSION
+from app.services.document_parser import (
+    PDFParser,
+    PDF_TEXT_PARSER_VERSION,
+    _normalise_pdf_text,
+)
 
 
 class FakePDF:
@@ -33,6 +37,14 @@ class FakePDFPage:
 
     def extract_words(self, extra_attrs=None, **_kwargs):
         return self._words
+
+
+def test_pdf_text_cleanup_preserves_line_ending_medical_hyphens():
+    text = _normalise_pdf_text("non-\nsmall-cell lung cancer\nrandom-\nized trial")
+
+    assert "non-\nsmall-cell" in text
+    assert "random-\nized" in text
+    assert "nonsmall-cell" not in text
 
 
 def test_pdfplumber_parser_extracts_pages_and_tables(tmp_path, monkeypatch):

@@ -107,6 +107,7 @@ class DiseaseProfileItem(_StrictModel):
     source_id: str = ""
     evidence_ids: list[str] = Field(default_factory=list, max_length=5)
     evidence: list[DiseaseProfileSource] = Field(default_factory=list, max_length=5)
+    evidence_truncated: bool = False
     source: str = ""
     external_id: str = ""
     doi: str | None = None

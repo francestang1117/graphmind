@@ -410,6 +410,41 @@ def test_extractive_provider_does_not_invent_population_from_results_text():
     assert output["question_suggestions"] == []
 
 
+def test_extractive_provider_uses_field_matching_sentences_for_method_attributes():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "methods",
+            "This trial included 200 adults. The comparison group received placebo.",
+        )
+    )
+
+    methods = ExtractiveMedicalAIProvider().generate("prompt", context)["study_methods"]
+
+    assert methods["sample_size"]["support_status"] == "supported"
+    assert methods["sample_size"]["value"] == "This trial included 200 adults."
+    assert methods["comparator"]["support_status"] == "supported"
+    assert methods["comparator"]["value"] == "The comparison group received placebo."
+
+    no_sample_size = ExtractiveMedicalAIProvider().generate(
+        "prompt",
+        _context(("EVIDENCE_002", "methods", "Patients were monitored during follow-up.")),
+    )["study_methods"]
+    assert no_sample_size["sample_size"] == {}
+
+
+@pytest.mark.parametrize("population_text", ["患者共1040例参与研究。", "研究人群包括儿童患者。"])
+def test_extractive_provider_detects_contiguous_chinese_population_terms(population_text):
+    context = _context(("EVIDENCE_001", "population", population_text))
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    population = output["study_methods"]["population"]
+    assert population["support_status"] == "supported"
+    assert population["value"] == population_text
+    assert output["question_suggestions"][0]["topic"] == "study_population"
+
+
 def test_analyzer_deduplicates_multiple_sources_for_same_topic():
     first = _structured_question(
         category="clarify_finding",
