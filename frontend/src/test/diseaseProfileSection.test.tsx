@@ -33,6 +33,7 @@ const item: DiseaseProfileItem = {
   source_id: "",
   evidence_ids: [],
   evidence: [],
+  evidence_total: 0,
   source: "",
   external_id: "",
   doi: null,
@@ -108,6 +109,7 @@ describe("DiseaseProfileSection source actions", () => {
       related_document_count: 22,
       related_documents_truncated: true,
       evidence_truncated: true,
+      evidence_total: 1,
       evidence_ids: ["evidence-1"],
       evidence: [{
         source_type: "document_evidence",
@@ -129,6 +131,6 @@ describe("DiseaseProfileSection source actions", () => {
     });
 
     expect(screen.getByText("Showing the first 20 of 22 linked documents.")).toBeInTheDocument();
-    expect(screen.getByText("Showing the first 1 evidence sources.")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1 of 1 evidence sources.")).toBeInTheDocument();
   });
 });

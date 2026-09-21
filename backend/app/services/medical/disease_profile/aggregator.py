@@ -197,6 +197,7 @@ class DiseaseProfileAggregator:
                                 "source_id": str(question.get("source_id") or ""),
                                 "evidence_ids": evidence_ids,
                                 "evidence": sources,
+                                "evidence_total": len(sources),
                                 "evidence_truncated": False,
                             }
                         )
@@ -557,6 +558,7 @@ class DiseaseProfileAggregator:
                         "source_url": str(article.get("source_url") or ""),
                         "retraction_status": status,
                         "flagged": flagged,
+                        "evidence_total": 1,
                         "evidence_truncated": False,
                         "warnings": [],
                         "relevance_score": match.get("relevance_score"),
@@ -699,6 +701,7 @@ def _base_item(
         "source_status": "current",
         "evidence_ids": evidence_ids,
         "evidence": sources,
+        "evidence_total": len(sources),
         "evidence_truncated": False,
     }
 
@@ -812,6 +815,7 @@ def _merge_clinician_questions(
         current["related_documents_truncated"] = len(document_ids) > 20
         current["evidence_ids"] = evidence_ids[:5]
         current["evidence"] = sources[:5]
+        current["evidence_total"] = len(sources)
         current["evidence_truncated"] = len(sources) > 5 or len(evidence_ids) > 5
     return [merged[key] for key in order]
 

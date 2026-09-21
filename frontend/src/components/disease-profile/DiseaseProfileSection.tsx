@@ -91,7 +91,7 @@ export default function DiseaseProfileSection({
               )}
               {item.evidence_truncated && (
                 <p className="disease-profile-warning">
-                  Showing the first {item.evidence.length} evidence sources.
+                  Showing {item.evidence.length} of {item.evidence_total} evidence sources.
                 </p>
               )}
               {(item.evidence.length || item.evidence_ids.length) > 0 ? (

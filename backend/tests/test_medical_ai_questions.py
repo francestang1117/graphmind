@@ -445,6 +445,31 @@ def test_extractive_provider_detects_contiguous_chinese_population_terms(populat
     assert output["question_suggestions"][0]["topic"] == "study_population"
 
 
+@pytest.mark.parametrize(
+    ("subject_text", "expected_value"),
+    [
+        ("A total of 200 patients were enrolled.", True),
+        ("The experiment was performed in rats.", True),
+        ("本研究纳入1040名患者。", True),
+        ("该实验使用小鼠模型。", True),
+        ("研究人员使用统计模型分析数据。", False),
+        ("本研究采用人工智能方法处理影像。", False),
+        ("由两人独立审查研究质量。", False),
+    ],
+)
+def test_extractive_provider_requires_explicit_human_or_model_subject_terms(
+    subject_text, expected_value
+):
+    output = ExtractiveMedicalAIProvider().generate(
+        "prompt", _context(("EVIDENCE_001", "methods", subject_text))
+    )
+
+    attribute = output["study_methods"]["human_animal_in_vitro"]
+    assert bool(attribute) is expected_value
+    if expected_value:
+        assert attribute["value"] == subject_text
+
+
 def test_analyzer_deduplicates_multiple_sources_for_same_topic():
     first = _structured_question(
         category="clarify_finding",

@@ -140,6 +140,29 @@ def _glued_text_score(text: str) -> int:
     return score
 
 
+_COMMON_GLUE_MARKERS = re.compile(
+    r"\b(?:the|a|an|this|that|patients?|participants?|study|were|was|"
+    r"is|are|in|of|and|to|with|during|received|enrolled)"
+    r"(?:the|a|an|this|that|patients?|participants?|study|were|was|"
+    r"is|are|in|of|and|to|with|during|received|enrolled)\b",
+    re.I,
+)
+
+
+def _pdf_candidate_rank(text: str) -> tuple[int, int, float]:
+    """Prefer the more separated Latin extraction when quality ties."""
+    normalized = _normalise_pdf_text(text)
+    if not normalized:
+        return (999, 999, 0.0)
+    latin_count = len(re.findall(r"[A-Za-z]", normalized))
+    non_space_count = len(re.findall(r"\S", normalized))
+    if latin_count / max(1, non_space_count) < 0.5:
+        return (_glued_text_score(normalized), 0, 0.0)
+    whitespace_ratio = sum(character.isspace() for character in normalized) / len(normalized)
+    suspicious_glue = len(_COMMON_GLUE_MARKERS.findall(normalized))
+    return (_glued_text_score(normalized), suspicious_glue, -whitespace_ratio)
+
+
 def _reconstruct_pdf_words(page: Any) -> str:
     """Rebuild lines from pdfplumber word boxes when text extraction glues words."""
     try:
@@ -167,8 +190,94 @@ def _reconstruct_pdf_words(page: Any) -> str:
     if not any("top" in word or "doctop" in word for word in usable):
         return " ".join(str(word.get("text") or "").strip() for word in usable)
 
+    column_boundary = _pdf_column_boundary(usable, page)
+    columns = (
+        [
+            [word for word in usable if float(word.get("x0", 0) or 0) <= column_boundary],
+            [word for word in usable if float(word.get("x0", 0) or 0) > column_boundary],
+        ]
+        if column_boundary is not None
+        else [usable]
+    )
+    output: list[str] = []
+    for column in columns:
+        output.extend(_pdf_word_lines(column))
+    return "\n".join(output)
+
+
+def _pdf_column_boundary(
+    words: list[dict[str, Any]], page: Any
+) -> float | None:
+    """Find an obvious two-column gutter without guessing normal word spacing."""
+    positions = sorted({float(word.get("x0", 0) or 0) for word in words})
+    if len(positions) < 4:
+        return None
+    gaps = [
+        (positions[index + 1] - positions[index], index)
+        for index in range(len(positions) - 1)
+    ]
+    gap, gap_index = max(gaps, default=(0.0, -1))
+    if gap_index < 0:
+        return None
+
+    minimum_position = positions[0]
+    maximum_position = positions[-1]
+    span = maximum_position - minimum_position
+    if span <= 0:
+        return None
+    page_width = float(getattr(page, "width", 0) or 0)
+    boundary = (positions[gap_index] + positions[gap_index + 1]) / 2
+    if page_width:
+        if not page_width * 0.25 <= boundary <= page_width * 0.75:
+            return None
+        if gap < max(18.0, page_width * 0.03):
+            return None
+    elif gap < max(72.0, span * 0.2):
+        return None
+
+    left = [word for word in words if float(word.get("x0", 0) or 0) <= boundary]
+    right = [word for word in words if float(word.get("x0", 0) or 0) > boundary]
+    if len(left) < 2 or len(right) < 2:
+        return None
+
+    # A normal single-column page can contain a large incidental x gap. A
+    # repeated split across text lines is stronger evidence of a page gutter;
+    # a very large gap is enough for small synthetic or sparse pages.
+    top_groups: list[list[dict[str, Any]]] = []
+    for word in sorted(
+        words,
+        key=lambda value: float(value.get("top", value.get("doctop", 0)) or 0),
+    ):
+        top = float(word.get("top", word.get("doctop", 0)) or 0)
+        group = next(
+            (
+                group
+                for group in top_groups
+                if abs(
+                    top
+                    - float(group[0].get("top", group[0].get("doctop", 0)) or 0)
+                )
+                <= 3
+            ),
+            None,
+        )
+        if group is None:
+            top_groups.append([word])
+        else:
+            group.append(word)
+    split_lines = sum(
+        bool(any(float(word.get("x0", 0) or 0) <= boundary for word in group))
+        and bool(any(float(word.get("x0", 0) or 0) > boundary for word in group))
+        for group in top_groups
+    )
+    if split_lines < 2 and gap < span * 0.25:
+        return None
+    return boundary
+
+
+def _pdf_word_lines(words: list[dict[str, Any]]) -> list[str]:
     positioned = sorted(
-        usable,
+        words,
         key=lambda word: (
             float(word.get("top", word.get("doctop", 0)) or 0),
             float(word.get("x0", 0) or 0),
@@ -207,10 +316,10 @@ def _reconstruct_pdf_words(page: Any) -> str:
             elif value.startswith((".", ",", ";", ":", "!", "?", ")", "]", "}")):
                 parts[-1] = f"{previous}{value}"
             else:
-                parts.append(f"{value}")
+                parts.append(value)
         if parts:
             output.append(" ".join(parts))
-    return "\n".join(output)
+    return output
 
 
 def _page_has_extractable_objects(page: Any) -> bool:
@@ -544,7 +653,7 @@ class PDFParser:
             pass
 
         usable = [candidate for candidate in candidates if candidate.strip()]
-        best = min(usable, key=_glued_text_score, default="")
+        best = min(usable, key=_pdf_candidate_rank, default="")
         warnings: list[str] = []
 
         if not best or _glued_text_score(best) >= 2:

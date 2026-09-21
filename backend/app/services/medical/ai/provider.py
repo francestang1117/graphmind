@@ -358,6 +358,11 @@ _ENGLISH_POPULATION_MARKERS = re.compile(
     re.I,
 )
 _CJK_POPULATION_MARKERS = re.compile(r"病例|患者|受试者|研究人群")
+_ENGLISH_SUBJECT_MARKERS = re.compile(
+    r"\b(?:humans?|patients?|animals?|mouse|mice|rats?|in vitro|cell lines?|tissues?)\b",
+    re.I,
+)
+_CJK_SUBJECT_MARKERS = re.compile(r"患者|受试者|人类|人体|动物|小鼠|大鼠|体外|细胞系|组织")
 
 
 def _population_marker_found(text: str) -> bool:
@@ -385,7 +390,7 @@ _METHOD_MARKERS = {
         re.I,
     ),
     "human_animal_in_vitro": re.compile(
-        r"\b(?:human|patient|animal|mouse|mice|rat|in vitro|cell line|tissue)\b|人|患者|动物|体外",
+        r"\b(?:humans?|patients?|animals?|mouse|mice|rats?|in vitro|cell lines?|tissues?)\b|患者|受试者|人类|人体|动物|小鼠|大鼠|体外|细胞系|组织",
         re.I,
     ),
     "sample_size": re.compile(
@@ -433,6 +438,11 @@ def _method_evidence(evidence: list[EvidenceItem], field: str) -> EvidenceItem |
 def _method_marker_found(text: str, field: str, marker: re.Pattern[str]) -> bool:
     if field == "population":
         return _population_marker_found(text)
+    if field == "human_animal_in_vitro":
+        return bool(
+            _ENGLISH_SUBJECT_MARKERS.search(text or "")
+            or _CJK_SUBJECT_MARKERS.search(text or "")
+        )
     if field == "sample_size":
         return bool(_SAMPLE_SIZE_EVIDENCE.search(text or ""))
     return bool(marker.search(text or ""))

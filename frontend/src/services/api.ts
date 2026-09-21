@@ -303,6 +303,7 @@ export interface DiseaseProfileItem {
   source_id: string;
   evidence_ids: string[];
   evidence: DiseaseProfileSource[];
+  evidence_total: number;
   evidence_truncated: boolean;
   source: string;
   external_id: string;

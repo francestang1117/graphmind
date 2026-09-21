@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from app.services.document_parser import (
     PDFParser,
     PDF_TEXT_PARSER_VERSION,
+    _reconstruct_pdf_words,
     _normalise_pdf_text,
 )
 
@@ -45,6 +46,24 @@ def test_pdf_text_cleanup_preserves_line_ending_medical_hyphens():
     assert "non-\nsmall-cell" in text
     assert "random-\nized" in text
     assert "nonsmall-cell" not in text
+
+
+def test_pdf_word_reconstruction_keeps_obvious_columns_in_reading_order():
+    page = FakePDFPage(
+        "",
+        words=[
+            {"text": "Left", "x0": 20, "top": 10},
+            {"text": "column", "x0": 55, "top": 10},
+            {"text": "Right", "x0": 330, "top": 10},
+            {"text": "column", "x0": 370, "top": 10},
+        ],
+    )
+    page.width = 600
+
+    reconstructed = _reconstruct_pdf_words(page)
+
+    assert reconstructed == "Left column\nRight column"
+    assert "Left column Right column" not in reconstructed
 
 
 def test_pdfplumber_parser_extracts_pages_and_tables(tmp_path, monkeypatch):
@@ -139,6 +158,25 @@ def test_pdfplumber_parser_reconstructs_glued_words_before_chunking(tmp_path, mo
     assert parsed.metadata["text_quality"] == "degraded"
     assert parsed.metadata["reconstructed_pages"] == [1]
     assert any("Patients selection" in chunk["text"] for chunk in parsed.chunks)
+
+
+def test_pdf_parser_prefers_more_spaced_candidate_when_scores_tie(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "candidate-tie.pdf"
+    pdf_path.write_bytes(b"%PDF fake")
+
+    class CandidatePage(FakePDFPage):
+        def extract_text(self, x_tolerance=1.5, **_kwargs):
+            if x_tolerance == 1.5:
+                return "Thepatient was enrolled in the study."
+            return "The patient was enrolled in the study."
+
+    page = CandidatePage("")
+    fake_pdfplumber = SimpleNamespace(open=lambda _path: FakePDF([page]))
+    monkeypatch.setitem(sys.modules, "pdfplumber", fake_pdfplumber)
+
+    parsed = PDFParser().parse(pdf_path)
+
+    assert parsed.raw_text == "The patient was enrolled in the study."
 
 
 def test_pdfplumber_parser_keeps_normal_long_medical_terms_readable(tmp_path, monkeypatch):
