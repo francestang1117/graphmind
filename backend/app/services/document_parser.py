@@ -150,6 +150,31 @@ _COMMON_GLUE_MARKERS = re.compile(
 
 
 _SCIENTIFIC_SINGLE_LETTER_TERMS = {"p", "n", "t", "b", "r", "x", "y", "z", "f"}
+_SCIENTIFIC_TERM_FOLLOWERS = {
+    "value",
+    "values",
+    "cell",
+    "cells",
+    "helper",
+    "lymphocyte",
+    "lymphocytes",
+    "control",
+    "controls",
+    "patient",
+    "patients",
+    "threshold",
+    "thresholds",
+    "axis",
+    "axes",
+    "score",
+    "scores",
+    "test",
+    "tests",
+    "statistic",
+    "statistics",
+    "group",
+    "groups",
+}
 
 
 _FRAGMENTABLE_WORDS = {
@@ -198,8 +223,7 @@ def _scientific_spacing_score(text: str) -> int:
         1
         for index, token in enumerate(tokens[:-1])
         if token.lower() in _SCIENTIFIC_SINGLE_LETTER_TERMS
-        and len(tokens[index + 1]) >= 3
-        and f"{token}{tokens[index + 1]}".lower() not in _FRAGMENTABLE_WORDS
+        and tokens[index + 1].lower() in _SCIENTIFIC_TERM_FOLLOWERS
     )
 
 

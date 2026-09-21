@@ -263,6 +263,34 @@ def test_pdf_parser_preserves_scientific_single_letter_terms(
     assert parsed.raw_text == expected
 
 
+@pytest.mark.parametrize(
+    ("correct", "fragmented"),
+    [
+        ("Treatment response improved.", "T reatment response improved."),
+        ("Results were significant.", "R esults were significant."),
+        ("Baseline characteristics were similar.", "B aseline characteristics were similar."),
+        ("Follow-up lasted 12 weeks.", "F ollow-up lasted 12 weeks."),
+        ("Randomized patients received placebo.", "R andomized patients received placebo."),
+        ("Population characteristics were reported.", "P opulation characteristics were reported."),
+    ],
+)
+def test_pdf_parser_rejects_fragmented_common_words(tmp_path, monkeypatch, correct, fragmented):
+    pdf_path = tmp_path / "fragmented-common-word.pdf"
+    pdf_path.write_bytes(b"%PDF fake")
+
+    class CandidatePage(FakePDFPage):
+        def extract_text(self, x_tolerance=1.5, **_kwargs):
+            return correct if x_tolerance == 1.5 else fragmented
+
+    page = CandidatePage("")
+    fake_pdfplumber = SimpleNamespace(open=lambda _path: FakePDF([page]))
+    monkeypatch.setitem(sys.modules, "pdfplumber", fake_pdfplumber)
+
+    parsed = PDFParser().parse(pdf_path)
+
+    assert parsed.raw_text == correct
+
+
 def test_pdf_candidate_rank_does_not_treat_within_or_into_as_glued_words():
     text = "The study was conducted within the clinic and into the follow-up phase for patients."
 
