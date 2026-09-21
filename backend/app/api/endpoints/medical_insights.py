@@ -10,9 +10,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.api.endpoints.auth import UserRecord, current_user_or_dev
+from app.api.endpoints.documents_with_markdown import (
+    get_cached_parse,
+    parse_document_file,
+    pdf_parser_refresh_required,
+)
 from app.api.workspace_scope import normalize_workspace_id, resolve_workspace_id
 from app.core.config import settings
-from app.core.errors import AppError
+from app.core.errors import AppError, ParseError, ParsePersistenceError
 from app.services.document_service import document_service
 from app.services.medical.ai.analysis_repository import (
     external_processing_fingerprint,
@@ -189,6 +194,7 @@ async def _start_analysis(
     scope = resolve_workspace_id(user_id, normalize_workspace_id(workspace_id))
     metadata = _get_scoped_document(document_id, user_id, scope)
     _require_repository()
+    _refresh_stale_pdf_if_needed(metadata, user_id=user_id, workspace_id=scope)
     source = medical_analysis_repository.get_source(document_id, user_id, scope)
     if not source:
         raise HTTPException(status_code=404, detail="Document source not found")
@@ -312,6 +318,39 @@ def _enqueue(run_id: str, background_tasks: BackgroundTasks) -> None:
             code="analysis_queue_failed",
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             details={"run_id": run_id},
+        ) from exc
+
+
+def _refresh_stale_pdf_if_needed(
+    metadata: dict[str, Any],
+    *,
+    user_id: str,
+    workspace_id: str,
+) -> None:
+    """Refresh old PDF artifacts before the analysis source is snapshotted."""
+    filename = str(metadata.get("filename") or "")
+    parsed = get_cached_parse(filename, user_id, workspace_id)
+    if not pdf_parser_refresh_required(filename, metadata, parsed):
+        return
+
+    try:
+        parse_document_file(
+            filename,
+            metadata["file_path"],
+            metadata.get("original_filename", ""),
+            user_id=user_id,
+            document_id=str(metadata.get("document_id") or ""),
+            workspace_id=workspace_id,
+        )
+    except ParsePersistenceError:
+        raise
+    except Exception as exc:
+        raise ParseError(
+            details={
+                "filename": filename,
+                "original_filename": metadata.get("original_filename", ""),
+                "reason": str(exc),
+            }
         ) from exc
 
 

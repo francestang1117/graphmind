@@ -26,18 +26,24 @@ def pdf_parser_refresh_required(
     parsed: dict[str, Any] | None = None,
 ) -> bool:
     """Force a stored PDF through a newer parser before serving derived data."""
-    extension = str(
-        metadata.get("file_extension") or Path(filename).suffix
-    ).lower()
+    extension = str(metadata.get("file_extension") or Path(filename).suffix).lower()
+    if extension and not extension.startswith("."):
+        extension = f".{extension}"
     if extension != ".pdf":
         return False
     parsed_metadata = parsed.get("metadata") if isinstance(parsed, dict) else None
-    current_version = (
+    known_versions = [
         parsed_metadata.get("parser_version")
         if isinstance(parsed_metadata, dict)
-        else None
-    ) or metadata.get("parser_version")
-    return str(current_version or "") != PDF_TEXT_PARSER_VERSION
+        else None,
+        metadata.get("parser_version"),
+    ]
+    known_versions = [str(version) for version in known_versions if version]
+    # A current process-cache entry cannot hide an older persisted document
+    # record. Require every known version to match before reusing the source.
+    return not known_versions or any(
+        version != PDF_TEXT_PARSER_VERSION for version in known_versions
+    )
 
 
 def cache_key(

@@ -108,6 +108,72 @@ def test_medical_analysis_route_reparses_pdf_after_parser_upgrade(monkeypatch):
     assert result["document_id"] == "document-a"
 
 
+def test_starting_medical_insights_reparses_stale_pdf_before_loading_source(monkeypatch):
+    events = []
+
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_ENABLED", True)
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_PROVIDER", "extractive")
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_MODEL", "extractive-v1")
+    monkeypatch.setattr(medical_insights, "resolve_workspace_id", lambda *_: "workspace-a")
+    monkeypatch.setattr(
+        medical_insights,
+        "_get_scoped_document",
+        lambda *_args, **_kwargs: {
+            "document_id": "document-a",
+            "filename": "paper.pdf",
+            "file_path": "/tmp/paper.pdf",
+            "original_filename": "paper.pdf",
+            "file_extension": "pdf",
+            "file_hash": "a" * 64,
+            "parser_version": "document-parser-pdf-readable-v1",
+        },
+    )
+    monkeypatch.setattr(medical_insights, "_require_repository", lambda: None)
+    monkeypatch.setattr(medical_insights, "get_cached_parse", lambda *_args, **_kwargs: None)
+
+    def fake_parse(*_args, **_kwargs):
+        events.append("parse")
+        return {"metadata": {"parser_version": PDF_TEXT_PARSER_VERSION}}
+
+    monkeypatch.setattr(medical_insights, "parse_document_file", fake_parse)
+    monkeypatch.setattr(
+        medical_insights.medical_analysis_repository,
+        "get_source",
+        lambda *_args, **_kwargs: events.append("source") or {
+            "source_hash": "a" * 64,
+            "parsed_source_hash": "parsed-a",
+            "document_kind": "research_paper",
+            "chunks": [{"id": "chunk-1", "text": "Result"}],
+        },
+    )
+    monkeypatch.setattr(
+        medical_insights,
+        "get_provider",
+        lambda *_args: SimpleNamespace(model_name="extractive-v1"),
+    )
+    monkeypatch.setattr(
+        medical_insights.medical_analysis_repository,
+        "create_or_reuse",
+        lambda **_kwargs: ({"run_id": "run-1", "status": "queued"}, True),
+    )
+    monkeypatch.setattr(medical_insights, "_enqueue", lambda *_args: None)
+
+    result = asyncio.run(
+        medical_insights._start_analysis(
+            "document-a",
+            BackgroundTasks(),
+            SimpleNamespace(id="user-a"),
+            workspace_id="workspace-a",
+            external_processing_confirmed=False,
+            external_processing_config_fingerprint=None,
+            force=False,
+        )
+    )
+
+    assert result.status_code == 202
+    assert events == ["parse", "source"]
+
+
 def test_medical_analysis_route_returns_404_for_missing_analysis(monkeypatch):
     monkeypatch.setattr(documents, "resolve_workspace_id", lambda *_: "workspace-a")
     monkeypatch.setattr(
