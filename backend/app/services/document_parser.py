@@ -141,18 +141,47 @@ def _glued_text_score(text: str) -> int:
 
 
 _COMMON_GLUE_MARKERS = re.compile(
-    r"\b(?:the|a|an|this|that|patients?|participants?|study|were|was|"
+    r"\b(?:(?:the|a|an|this|that|patients?|participants?|study|were|was|"
     r"is|are|with|during|received|enrolled)"
     r"(?:the|a|an|this|that|patients?|participants?|study|were|was|"
-    r"is|are|with|during|received|enrolled)\b",
+    r"is|are|with|during|received|enrolled)|"
+    r"pvalues?|tcells?|bcells?|npatients?|rvalues?|xaxis(?:es)?)\b",
     re.I,
 )
 
 
+_FRAGMENTABLE_WORDS = {
+    "the",
+    "this",
+    "that",
+    "patient",
+    "patients",
+    "participant",
+    "participants",
+    "study",
+    "were",
+    "was",
+    "received",
+    "enrolled",
+}
+
+
 def _fragmentation_score(text: str) -> int:
-    """Penalize candidates that split ordinary words into one-letter tokens."""
+    """Penalize only one-letter tokens that clearly split a common word."""
     tokens = re.findall(r"[A-Za-z]+", text)
-    return sum(1 for token in tokens if len(token) == 1 and token.lower() not in {"a", "i"})
+    score = 0
+    for index, token in enumerate(tokens):
+        if len(token) != 1:
+            continue
+        if index + 1 < len(tokens) and (
+            f"{token}{tokens[index + 1]}".lower() in _FRAGMENTABLE_WORDS
+        ):
+            score += 1
+        elif index > 0 and (
+            f"{tokens[index - 1]}{token}".lower() in _FRAGMENTABLE_WORDS
+        ):
+            score += 1
+    return score
 
 
 def _pdf_candidate_rank(text: str, candidate_priority: int = 0) -> tuple[int, int, int, int]:

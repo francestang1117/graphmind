@@ -3,6 +3,8 @@
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.document_parser import (
     PDFParser,
     PDF_TEXT_PARSER_VERSION,
@@ -221,6 +223,37 @@ def test_pdf_parser_prefers_conservative_candidate_over_fragmented_words(tmp_pat
 
     assert parsed.raw_text.startswith("The patient was enrolled")
     assert "T he patient" not in parsed.raw_text
+
+
+@pytest.mark.parametrize(
+    ("glued", "expected"),
+    [
+        ("The pvalue was significant.", "The p value was significant."),
+        ("Tcell responses were measured.", "T cell responses were measured."),
+        ("npatients were enrolled.", "n patients were enrolled."),
+        ("Bcell activation was measured.", "B cell activation was measured."),
+        ("Rvalue was reported.", "R value was reported."),
+        ("xaxis labels were visible.", "x axis labels were visible."),
+        ("P atients were enrolled.", "Patients were enrolled."),
+    ],
+)
+def test_pdf_parser_preserves_scientific_single_letter_terms(
+    tmp_path, monkeypatch, glued, expected
+):
+    pdf_path = tmp_path / "single-letter-term.pdf"
+    pdf_path.write_bytes(b"%PDF fake")
+
+    class CandidatePage(FakePDFPage):
+        def extract_text(self, x_tolerance=1.5, **_kwargs):
+            return glued if x_tolerance == 1.5 else expected
+
+    page = CandidatePage("")
+    fake_pdfplumber = SimpleNamespace(open=lambda _path: FakePDF([page]))
+    monkeypatch.setitem(sys.modules, "pdfplumber", fake_pdfplumber)
+
+    parsed = PDFParser().parse(pdf_path)
+
+    assert parsed.raw_text == expected
 
 
 def test_pdf_candidate_rank_does_not_treat_within_or_into_as_glued_words():
