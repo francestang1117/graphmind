@@ -75,40 +75,42 @@ export default function QuestionSuggestionCard({
     .filter((item): item is MedicalInsightEvidence => Boolean(item));
 
   return (
-    <article className="insight-question-card">
+    <article className="insight-question-item">
       <div className="insight-question-header">
         <span className="insight-question-category">
           {CATEGORY_LABELS[suggestion.category] || "Discussion question"}
         </span>
-        <button
-          className="insight-question-copy"
-          type="button"
-          onClick={copyQuestion}
-          title={copied ? "Question copied" : "Copy this question"}
-          aria-label={copied ? "Question copied" : "Copy this question"}
-        >
-          {copied ? <Check size={14} /> : <Copy size={14} />}
-          <span>{copied ? "Copied" : "Copy"}</span>
-        </button>
-        {onSave && (
+        <div className="insight-question-actions">
           <button
-            className="insight-question-save"
+            className="insight-question-copy"
             type="button"
-            onClick={onSave}
-            disabled={saved || saving}
-            title={saved ? "Question saved" : stale ? "Refresh saved source" : "Save for visit preparation"}
-            aria-label={saved ? "Question saved" : stale ? "Refresh saved source" : "Save question for visit preparation"}
+            onClick={copyQuestion}
+            title={copied ? "Question copied" : "Copy this question"}
+            aria-label={copied ? "Question copied" : "Copy this question"}
           >
-            {saving ? <Loader2 className="spin" size={14} /> : saved ? <Check size={14} /> : <Bookmark size={14} />}
-            <span>{saved ? "Saved" : stale ? "Refresh" : "Save"}</span>
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            <span>{copied ? "Copied" : "Copy"}</span>
           </button>
-        )}
+          {onSave && (
+            <button
+              className="insight-question-save"
+              type="button"
+              onClick={onSave}
+              disabled={saved || saving}
+              title={saved ? "Question saved" : stale ? "Refresh saved source" : "Save for visit preparation"}
+              aria-label={saved ? "Question saved" : stale ? "Refresh saved source" : "Save question for visit preparation"}
+            >
+              {saving ? <Loader2 className="spin" size={14} /> : saved ? <Check size={14} /> : <Bookmark size={14} />}
+              <span>{saved ? "Saved" : stale ? "Refresh" : "Save"}</span>
+            </button>
+          )}
+        </div>
       </div>
-      <p className="insight-question-text">{suggestion.question}</p>
+      <h4 className="insight-question-text">{suggestion.question}</h4>
       <p className="insight-question-rationale">{suggestion.rationale}</p>
       {evidence.length > 0 && (
         <div className="insight-question-evidence">
-          <span className="insight-question-evidence-label">Based on</span>
+          <span className="insight-question-evidence-label">Source</span>
           {evidence.map((item) => (
             <button
               className="insight-evidence-button"

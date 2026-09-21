@@ -1,4 +1,5 @@
-import { AlertCircle, BookOpen, Loader2, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { useState } from "react";
+import { AlertCircle, BookOpen, Loader2, RefreshCw, Search } from "lucide-react";
 import { useLiteratureEvidence } from "../../../hooks/useLiteratureEvidence";
 import LiteratureEvidenceAlerts from "./LiteratureEvidenceAlerts";
 import LiteratureFindingGroup from "./LiteratureFindingGroup";
@@ -22,6 +23,7 @@ export default function LiteratureEvidencePanel({
   analysisRunId,
   onEvidenceClick,
 }: Props) {
+  const [searchOpen, setSearchOpen] = useState(false);
   const literature = useLiteratureEvidence(documentId, workspaceId, analysisRunId);
   const searchRun = literature.searchRun;
   const matchRun = literature.matchRun;
@@ -43,22 +45,28 @@ export default function LiteratureEvidencePanel({
         <BookOpen size={20} aria-hidden="true" />
       </header>
 
-      <div className="literature-disclosure">
-        <ShieldCheck size={17} />
-        <div>
-          <strong>Before you search</strong>
-          <p>Only normalized medical query terms are sent to PubMed. Your document, analysis text, and uploaded file stay on this server.</p>
-          <span>The exact query and the local terminology version will be shown before each external search.</span>
+      <details
+        className="literature-search-disclosure"
+        open={searchOpen}
+        onToggle={(event) => setSearchOpen(event.currentTarget.open)}
+      >
+        <summary>
+          <div>
+            <strong>Find related research</strong>
+            <span>Compare these findings with PubMed literature.</span>
+          </div>
+          <span className="literature-search-disclosure-hint">Search after reviewing the analysis</span>
+        </summary>
+        <div className="literature-search-disclosure-content">
+          <LiteratureSearchForm
+            form={literature.form}
+            onChange={literature.updateForm}
+            onToggleStudyType={literature.toggleStudyType}
+            onSubmit={literature.previewSearch}
+            disabled={literature.previewLoading || literature.startLoading}
+          />
         </div>
-      </div>
-
-      <LiteratureSearchForm
-        form={literature.form}
-        onChange={literature.updateForm}
-        onToggleStudyType={literature.toggleStudyType}
-        onSubmit={literature.previewSearch}
-        disabled={literature.previewLoading || literature.startLoading}
-      />
+      </details>
 
       {literature.error && (
         <div className="literature-inline-error" role="alert">

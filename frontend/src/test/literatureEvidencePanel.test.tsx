@@ -185,6 +185,25 @@ describe("LiteratureEvidencePanel", () => {
     expect(screen.getByText("Finding-specific candidate")).toBeInTheDocument();
   });
 
+  it("keeps the research task and advanced filters quiet until opened", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    const searchDisclosure = screen.getByText("Find related research").closest("details");
+    expect(searchDisclosure).not.toHaveAttribute("open");
+    expect(screen.queryByText("Before you search")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Find related research"));
+    expect(searchDisclosure).toHaveAttribute("open");
+    expect(screen.getByText(/Only normalized medical terms are sent to PubMed/)).toBeInTheDocument();
+
+    const filters = screen.getByText("Advanced filters").closest("details");
+    expect(filters).not.toHaveAttribute("open");
+    await user.click(screen.getByText("Advanced filters"));
+    expect(filters).toHaveAttribute("open");
+    expect(screen.getByRole("checkbox", { name: "Clinical trial" })).toBeInTheDocument();
+  });
+
   it("requires an ambiguous concept to be selected and re-previewed", async () => {
     const user = userEvent.setup();
     const ambiguousPreview = {
