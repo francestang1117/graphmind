@@ -144,16 +144,23 @@ _COMMON_GLUE_MARKERS = re.compile(
     r"\b(?:(?:the|a|an|this|that|patients?|participants?|study|were|was|"
     r"is|are|with|during|received|enrolled)"
     r"(?:the|a|an|this|that|patients?|participants?|study|were|was|"
-    r"is|are|with|during|received|enrolled)|"
-    r"pvalues?|tcells?|bcells?|npatients?|rvalues?|xaxis(?:es)?)\b",
+    r"is|are|with|during|received|enrolled))\b",
     re.I,
 )
+
+
+_SCIENTIFIC_SINGLE_LETTER_TERMS = {"p", "n", "t", "b", "r", "x", "y", "z", "f"}
 
 
 _FRAGMENTABLE_WORDS = {
     "the",
     "this",
     "that",
+    "is",
+    "are",
+    "not",
+    "with",
+    "during",
     "patient",
     "patients",
     "participant",
@@ -184,20 +191,39 @@ def _fragmentation_score(text: str) -> int:
     return score
 
 
-def _pdf_candidate_rank(text: str, candidate_priority: int = 0) -> tuple[int, int, int, int]:
+def _scientific_spacing_score(text: str) -> int:
+    """Reward spacing after common single-letter scientific symbols."""
+    tokens = re.findall(r"[A-Za-z]+", text)
+    return sum(
+        1
+        for index, token in enumerate(tokens[:-1])
+        if token.lower() in _SCIENTIFIC_SINGLE_LETTER_TERMS
+        and len(tokens[index + 1]) >= 3
+        and f"{token}{tokens[index + 1]}".lower() not in _FRAGMENTABLE_WORDS
+    )
+
+
+def _pdf_candidate_rank(text: str, candidate_priority: int = 0) -> tuple[int, int, int, int, int]:
     """Prefer readable extraction without rewarding accidental word fragments."""
     normalized = _normalise_pdf_text(text)
     if not normalized:
-        return (999, 999, 999, candidate_priority)
+        return (999, 999, 999, 999, candidate_priority)
     latin_count = len(re.findall(r"[A-Za-z]", normalized))
     non_space_count = len(re.findall(r"\S", normalized))
     if latin_count / max(1, non_space_count) < 0.5:
-        return (_glued_text_score(normalized), 0, _fragmentation_score(normalized), candidate_priority)
+        return (
+            _glued_text_score(normalized),
+            0,
+            _fragmentation_score(normalized),
+            0,
+            candidate_priority,
+        )
     suspicious_glue = len(_COMMON_GLUE_MARKERS.findall(normalized))
     return (
         _glued_text_score(normalized),
         suspicious_glue,
         _fragmentation_score(normalized),
+        -_scientific_spacing_score(normalized),
         candidate_priority,
     )
 

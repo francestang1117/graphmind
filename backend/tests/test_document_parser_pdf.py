@@ -234,7 +234,14 @@ def test_pdf_parser_prefers_conservative_candidate_over_fragmented_words(tmp_pat
         ("Bcell activation was measured.", "B cell activation was measured."),
         ("Rvalue was reported.", "R value was reported."),
         ("xaxis labels were visible.", "x axis labels were visible."),
+        ("Thelper cells were measured.", "T helper cells were measured."),
+        ("Blymphocyte counts increased.", "B lymphocyte counts increased."),
+        ("ncontrols were enrolled.", "n controls were enrolled."),
+        ("The pthreshold was prespecified.", "The p threshold was prespecified."),
+        ("The xaxes were labelled.", "The x axes were labelled."),
         ("P atients were enrolled.", "Patients were enrolled."),
+        ("n ot reported.", "not reported."),
+        ("r eceived treatment.", "received treatment."),
     ],
 )
 def test_pdf_parser_preserves_scientific_single_letter_terms(
