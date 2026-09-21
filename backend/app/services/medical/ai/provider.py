@@ -362,7 +362,10 @@ _ENGLISH_SUBJECT_MARKERS = re.compile(
     r"\b(?:humans?|patients?|animals?|mouse|mice|rats?|in vitro|cell lines?|tissues?)\b",
     re.I,
 )
-_CJK_SUBJECT_MARKERS = re.compile(r"患者|受试者|人类|人体|动物|小鼠|大鼠|体外|细胞系|组织")
+_CJK_SUBJECT_MARKERS = re.compile(
+    r"患者|受试者|人类|人体|动物|小鼠|大鼠|体外|细胞系|"
+    r"组织样本|组织切片|肿瘤组织|病理组织|组织培养|组织学"
+)
 
 
 def _population_marker_found(text: str) -> bool:
@@ -390,7 +393,7 @@ _METHOD_MARKERS = {
         re.I,
     ),
     "human_animal_in_vitro": re.compile(
-        r"\b(?:humans?|patients?|animals?|mouse|mice|rats?|in vitro|cell lines?|tissues?)\b|患者|受试者|人类|人体|动物|小鼠|大鼠|体外|细胞系|组织",
+        r"\b(?:humans?|patients?|animals?|mouse|mice|rats?|in vitro|cell lines?|tissues?)\b|患者|受试者|人类|人体|动物|小鼠|大鼠|体外|细胞系|组织样本|组织切片|肿瘤组织|病理组织|组织培养|组织学",
         re.I,
     ),
     "sample_size": re.compile(

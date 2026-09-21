@@ -452,9 +452,13 @@ def test_extractive_provider_detects_contiguous_chinese_population_terms(populat
         ("The experiment was performed in rats.", True),
         ("本研究纳入1040名患者。", True),
         ("该实验使用小鼠模型。", True),
+        ("检测肿瘤组织中的蛋白表达。", True),
+        ("使用组织切片进行病理分析。", True),
         ("研究人员使用统计模型分析数据。", False),
         ("本研究采用人工智能方法处理影像。", False),
         ("由两人独立审查研究质量。", False),
+        ("该研究由医院组织开展。", False),
+        ("研究团队组织实施随访。", False),
     ],
 )
 def test_extractive_provider_requires_explicit_human_or_model_subject_terms(

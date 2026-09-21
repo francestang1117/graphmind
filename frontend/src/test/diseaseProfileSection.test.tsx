@@ -109,7 +109,7 @@ describe("DiseaseProfileSection source actions", () => {
       related_document_count: 22,
       related_documents_truncated: true,
       evidence_truncated: true,
-      evidence_total: 1,
+      evidence_total: 6,
       evidence_ids: ["evidence-1"],
       evidence: [{
         source_type: "document_evidence",
@@ -131,6 +131,6 @@ describe("DiseaseProfileSection source actions", () => {
     });
 
     expect(screen.getByText("Showing the first 20 of 22 linked documents.")).toBeInTheDocument();
-    expect(screen.getByText("Showing 1 of 1 evidence sources.")).toBeInTheDocument();
+    expect(screen.getByText("Showing 1 of 6 evidence sources.")).toBeInTheDocument();
   });
 });

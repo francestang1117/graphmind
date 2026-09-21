@@ -142,25 +142,35 @@ def _glued_text_score(text: str) -> int:
 
 _COMMON_GLUE_MARKERS = re.compile(
     r"\b(?:the|a|an|this|that|patients?|participants?|study|were|was|"
-    r"is|are|in|of|and|to|with|during|received|enrolled)"
+    r"is|are|with|during|received|enrolled)"
     r"(?:the|a|an|this|that|patients?|participants?|study|were|was|"
-    r"is|are|in|of|and|to|with|during|received|enrolled)\b",
+    r"is|are|with|during|received|enrolled)\b",
     re.I,
 )
 
 
-def _pdf_candidate_rank(text: str) -> tuple[int, int, float]:
-    """Prefer the more separated Latin extraction when quality ties."""
+def _fragmentation_score(text: str) -> int:
+    """Penalize candidates that split ordinary words into one-letter tokens."""
+    tokens = re.findall(r"[A-Za-z]+", text)
+    return sum(1 for token in tokens if len(token) == 1 and token.lower() not in {"a", "i"})
+
+
+def _pdf_candidate_rank(text: str, candidate_priority: int = 0) -> tuple[int, int, int, int]:
+    """Prefer readable extraction without rewarding accidental word fragments."""
     normalized = _normalise_pdf_text(text)
     if not normalized:
-        return (999, 999, 0.0)
+        return (999, 999, 999, candidate_priority)
     latin_count = len(re.findall(r"[A-Za-z]", normalized))
     non_space_count = len(re.findall(r"\S", normalized))
     if latin_count / max(1, non_space_count) < 0.5:
-        return (_glued_text_score(normalized), 0, 0.0)
-    whitespace_ratio = sum(character.isspace() for character in normalized) / len(normalized)
+        return (_glued_text_score(normalized), 0, _fragmentation_score(normalized), candidate_priority)
     suspicious_glue = len(_COMMON_GLUE_MARKERS.findall(normalized))
-    return (_glued_text_score(normalized), suspicious_glue, -whitespace_ratio)
+    return (
+        _glued_text_score(normalized),
+        suspicious_glue,
+        _fragmentation_score(normalized),
+        candidate_priority,
+    )
 
 
 def _reconstruct_pdf_words(page: Any) -> str:
@@ -190,19 +200,105 @@ def _reconstruct_pdf_words(page: Any) -> str:
     if not any("top" in word or "doctop" in word for word in usable):
         return " ".join(str(word.get("text") or "").strip() for word in usable)
 
+    line_groups = _pdf_line_groups(usable)
     column_boundary = _pdf_column_boundary(usable, page)
-    columns = (
-        [
-            [word for word in usable if float(word.get("x0", 0) or 0) <= column_boundary],
-            [word for word in usable if float(word.get("x0", 0) or 0) > column_boundary],
-        ]
-        if column_boundary is not None
-        else [usable]
-    )
+    if column_boundary is None:
+        return "\n".join(_pdf_word_lines(usable))
+
+    split_indices = [
+        index
+        for index, line in enumerate(line_groups)
+        if _pdf_line_has_gutter(line, column_boundary, page)
+    ]
+    if not split_indices:
+        return "\n".join(_pdf_word_lines(usable))
+
+    first_split = min(split_indices)
+    last_split = max(split_indices)
     output: list[str] = []
-    for column in columns:
-        output.extend(_pdf_word_lines(column))
+    left_column: list[list[dict[str, Any]]] = []
+    right_column: list[list[dict[str, Any]]] = []
+
+    def flush_columns() -> None:
+        output.extend(_pdf_render_line(line) for line in left_column)
+        output.extend(_pdf_render_line(line) for line in right_column)
+        left_column.clear()
+        right_column.clear()
+
+    for index, line in enumerate(line_groups):
+        inside_column_region = first_split <= index <= last_split
+        if not inside_column_region:
+            flush_columns()
+            rendered = _pdf_render_line(line)
+            if rendered:
+                output.append(rendered)
+            continue
+
+        left = [word for word in line if float(word.get("x0", 0) or 0) <= column_boundary]
+        right = [word for word in line if float(word.get("x0", 0) or 0) > column_boundary]
+        if left and right and _pdf_line_has_gutter(line, column_boundary, page):
+            left_column.append(left)
+            right_column.append(right)
+        elif left and not right:
+            left_column.append(left)
+        elif right and not left:
+            right_column.append(right)
+        else:
+            # A line spanning the page, such as a subheading or table row,
+            # must stay intact and separates adjacent column segments.
+            flush_columns()
+            rendered = _pdf_render_line(line)
+            if rendered:
+                output.append(rendered)
+
+    flush_columns()
     return "\n".join(output)
+
+
+def _pdf_line_groups(words: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    positioned = sorted(
+        words,
+        key=lambda word: (
+            float(word.get("top", word.get("doctop", 0)) or 0),
+            float(word.get("x0", 0) or 0),
+        ),
+    )
+    lines: list[list[dict[str, Any]]] = []
+    line_tops: list[float] = []
+    for word in positioned:
+        top = float(word.get("top", word.get("doctop", 0)) or 0)
+        line_index = next(
+            (index for index, line_top in enumerate(line_tops) if abs(top - line_top) <= 3),
+            None,
+        )
+        if line_index is None:
+            line_tops.append(top)
+            lines.append([word])
+        else:
+            lines[line_index].append(word)
+    return lines
+
+
+def _pdf_line_has_gutter(
+    line: list[dict[str, Any]], boundary: float, page: Any
+) -> bool:
+    left = [word for word in line if float(word.get("x0", 0) or 0) <= boundary]
+    right = [word for word in line if float(word.get("x0", 0) or 0) > boundary]
+    if not left or not right:
+        return False
+
+    left_edge = max(
+        float(word.get("x1", word.get("x0", 0)) or 0) for word in left
+    )
+    right_edge = min(float(word.get("x0", 0) or 0) for word in right)
+    gap = right_edge - left_edge
+    page_width = float(getattr(page, "width", 0) or 0)
+    if page_width:
+        return gap >= max(18.0, page_width * 0.03)
+    line_span = max(float(word.get("x0", 0) or 0) for word in line) - min(
+        float(word.get("x0", 0) or 0) for word in line
+    )
+    return gap >= max(18.0, line_span * 0.1)
 
 
 def _pdf_column_boundary(
@@ -265,61 +361,41 @@ def _pdf_column_boundary(
             top_groups.append([word])
         else:
             group.append(word)
-    split_lines = sum(
-        bool(any(float(word.get("x0", 0) or 0) <= boundary for word in group))
-        and bool(any(float(word.get("x0", 0) or 0) > boundary for word in group))
-        for group in top_groups
-    )
+    split_lines = sum(_pdf_line_has_gutter(group, boundary, page) for group in top_groups)
     if split_lines < 2 and gap < span * 0.25:
         return None
     return boundary
 
 
 def _pdf_word_lines(words: list[dict[str, Any]]) -> list[str]:
-    positioned = sorted(
-        words,
-        key=lambda word: (
-            float(word.get("top", word.get("doctop", 0)) or 0),
-            float(word.get("x0", 0) or 0),
-        ),
-    )
-    lines: list[list[dict[str, Any]]] = []
-    line_tops: list[float] = []
-    for word in positioned:
-        top = float(word.get("top", word.get("doctop", 0)) or 0)
-        line_index = next(
-            (index for index, line_top in enumerate(line_tops) if abs(top - line_top) <= 3),
-            None,
-        )
-        if line_index is None:
-            line_tops.append(top)
-            lines.append([word])
-        else:
-            lines[line_index].append(word)
-
     output: list[str] = []
-    for line in lines:
-        ordered = sorted(line, key=lambda word: float(word.get("x0", 0) or 0))
-        parts: list[str] = []
-        for word in ordered:
-            value = str(word.get("text") or "").strip()
-            if not value:
-                continue
-            if not parts:
-                parts.append(value)
-                continue
-            previous = parts[-1]
-            if previous.endswith(("-", "–", "—")):
-                parts[-1] = f"{previous}{value}"
-            elif previous.endswith(("(", "[", "{", "/")):
-                parts.append(value)
-            elif value.startswith((".", ",", ";", ":", "!", "?", ")", "]", "}")):
-                parts[-1] = f"{previous}{value}"
-            else:
-                parts.append(value)
-        if parts:
-            output.append(" ".join(parts))
+    for line in _pdf_line_groups(words):
+        rendered = _pdf_render_line(line)
+        if rendered:
+            output.append(rendered)
     return output
+
+
+def _pdf_render_line(line: list[dict[str, Any]]) -> str:
+    ordered = sorted(line, key=lambda word: float(word.get("x0", 0) or 0))
+    parts: list[str] = []
+    for word in ordered:
+        value = str(word.get("text") or "").strip()
+        if not value:
+            continue
+        if not parts:
+            parts.append(value)
+            continue
+        previous = parts[-1]
+        if previous.endswith(("-", "–", "—")):
+            parts[-1] = f"{previous}{value}"
+        elif previous.endswith(("(", "[", "{", "/")):
+            parts.append(value)
+        elif value.startswith((".", ",", ";", ":", "!", "?", ")", "]", "}")):
+            parts[-1] = f"{previous}{value}"
+        else:
+            parts.append(value)
+    return " ".join(parts)
 
 
 def _page_has_extractable_objects(page: Any) -> bool:
@@ -653,7 +729,11 @@ class PDFParser:
             pass
 
         usable = [candidate for candidate in candidates if candidate.strip()]
-        best = min(usable, key=_pdf_candidate_rank, default="")
+        best = min(
+            enumerate(usable),
+            key=lambda candidate: _pdf_candidate_rank(candidate[1], candidate[0]),
+            default=(0, ""),
+        )[1]
         warnings: list[str] = []
 
         if not best or _glued_text_score(best) >= 2:

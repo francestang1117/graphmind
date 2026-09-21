@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from app.services.document_parser import (
     PDFParser,
     PDF_TEXT_PARSER_VERSION,
+    _pdf_candidate_rank,
     _reconstruct_pdf_words,
     _normalise_pdf_text,
 )
@@ -64,6 +65,29 @@ def test_pdf_word_reconstruction_keeps_obvious_columns_in_reading_order():
 
     assert reconstructed == "Left column\nRight column"
     assert "Left column Right column" not in reconstructed
+
+
+def test_pdf_word_reconstruction_keeps_full_width_header_before_columns():
+    page = FakePDFPage(
+        "",
+        words=[
+            {"text": "Full", "x0": 20, "x1": 45, "top": 10},
+            {"text": "width", "x0": 50, "x1": 80, "top": 10},
+            {"text": "title", "x0": 85, "x1": 115, "top": 10},
+            {"text": "here", "x0": 120, "x1": 150, "top": 10},
+            {"text": "Left", "x0": 20, "x1": 42, "top": 50},
+            {"text": "body", "x0": 48, "x1": 75, "top": 50},
+            {"text": "Right", "x0": 330, "x1": 360, "top": 50},
+            {"text": "body", "x0": 366, "x1": 393, "top": 50},
+            {"text": "continues", "x0": 20, "x1": 75, "top": 65},
+            {"text": "continues", "x0": 330, "x1": 385, "top": 65},
+        ],
+    )
+    page.width = 600
+
+    reconstructed = _reconstruct_pdf_words(page)
+
+    assert reconstructed == "Full width title here\nLeft body\ncontinues\nRight body\ncontinues"
 
 
 def test_pdfplumber_parser_extracts_pages_and_tables(tmp_path, monkeypatch):
@@ -177,6 +201,32 @@ def test_pdf_parser_prefers_more_spaced_candidate_when_scores_tie(tmp_path, monk
     parsed = PDFParser().parse(pdf_path)
 
     assert parsed.raw_text == "The patient was enrolled in the study."
+
+
+def test_pdf_parser_prefers_conservative_candidate_over_fragmented_words(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "candidate-fragmented.pdf"
+    pdf_path.write_bytes(b"%PDF fake")
+
+    class CandidatePage(FakePDFPage):
+        def extract_text(self, x_tolerance=1.5, **_kwargs):
+            if x_tolerance == 1.5:
+                return "The patient was enrolled in the study and participants were monitored during follow-up."
+            return "T he patient was enrolled in the study and participants were monitored during follow-up."
+
+    page = CandidatePage("")
+    fake_pdfplumber = SimpleNamespace(open=lambda _path: FakePDF([page]))
+    monkeypatch.setitem(sys.modules, "pdfplumber", fake_pdfplumber)
+
+    parsed = PDFParser().parse(pdf_path)
+
+    assert parsed.raw_text.startswith("The patient was enrolled")
+    assert "T he patient" not in parsed.raw_text
+
+
+def test_pdf_candidate_rank_does_not_treat_within_or_into_as_glued_words():
+    text = "The study was conducted within the clinic and into the follow-up phase for patients."
+
+    assert _pdf_candidate_rank(text)[1] == 0
 
 
 def test_pdfplumber_parser_keeps_normal_long_medical_terms_readable(tmp_path, monkeypatch):
