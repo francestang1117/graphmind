@@ -293,18 +293,18 @@ def test_current_insights_rejects_runs_from_an_older_analysis_pipeline(monkeypat
     monkeypatch.setattr(medical_insights, "_require_repository", lambda: None)
     monkeypatch.setattr(medical_insights, "get_cached_parse", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_PROVIDER", "extractive")
-    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_MODEL", "extractive-v2")
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_MODEL", "extractive-v3")
     monkeypatch.setattr(
         medical_insights,
         "get_provider",
-        lambda *_args: SimpleNamespace(model_name="extractive-v2"),
+        lambda *_args: SimpleNamespace(model_name="extractive-v3"),
     )
     monkeypatch.setattr(
         medical_insights.medical_analysis_repository,
         "get_current",
         lambda *_args: {
             "provider": "extractive",
-            "model_name": "extractive-v2",
+            "model_name": "extractive-v3",
             "prompt_version": "medical-insights-v3",
             "schema_version": "medical-insights-v3",
         },
@@ -333,7 +333,7 @@ def test_run_detail_rejects_a_saved_report_from_an_older_pipeline(monkeypatch):
             "run_id": "run-old",
             "document_id": "document-a",
             "provider": "extractive",
-            "model_name": "extractive-v2",
+            "model_name": "extractive-v3",
             "prompt_version": "medical-insights-v3",
             "schema_version": "medical-insights-v3",
         },
@@ -348,11 +348,11 @@ def test_run_detail_rejects_a_saved_report_from_an_older_pipeline(monkeypatch):
         },
     )
     monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_PROVIDER", "extractive")
-    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_MODEL", "extractive-v2")
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_MODEL", "extractive-v3")
     monkeypatch.setattr(
         medical_insights,
         "get_provider",
-        lambda *_args: SimpleNamespace(model_name="extractive-v2"),
+        lambda *_args: SimpleNamespace(model_name="extractive-v3"),
     )
 
     with pytest.raises(AppError) as exc:

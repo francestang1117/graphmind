@@ -1,6 +1,6 @@
-export const EXPECTED_PARSER_VERSION = "document-parser-pdf-readable-v2";
-export const EXPECTED_ANALYSIS_PIPELINE_VERSION = "medical-insights-readable-v2";
-export const EXPECTED_INSIGHT_CONTRACT_VERSION = "medical-insights-readable-v2";
+export const EXPECTED_PARSER_VERSION = "document-parser-pdf-readable-v3";
+export const EXPECTED_ANALYSIS_PIPELINE_VERSION = "medical-insights-readable-v3";
+export const EXPECTED_INSIGHT_CONTRACT_VERSION = "medical-insights-readable-v3";
 
 export interface MedicalRuntimeVersions {
   frontendCommit: string;
@@ -54,7 +54,7 @@ export function validateMedicalRuntimeHeaders(
     || versions.analysisPipelineVersion !== EXPECTED_ANALYSIS_PIPELINE_VERSION
     || versions.insightContractVersion !== EXPECTED_INSIGHT_CONTRACT_VERSION
     || (versions.analysisModel.startsWith("extractive-")
-      && versions.analysisModel !== "extractive-v2");
+      && versions.analysisModel !== "extractive-v3");
 
   if (commitMismatch || contractMismatch) {
     throw new ApplicationUpdateIncompleteError(versions);

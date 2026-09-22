@@ -17,6 +17,14 @@ _REFERENCE_SECTION_TYPES = {
     "reference_list",
     "references_and_bibliography",
 }
+_NON_MEDICAL_SECTION_TYPES = _REFERENCE_SECTION_TYPES | {
+    "supplementary",
+    "acknowledgements",
+    "acknowledgments",
+    "funding",
+    "author_contributions",
+    "conflicts_of_interest",
+}
 
 
 @dataclass
@@ -53,8 +61,13 @@ def validate_citations(
                 item_valid = False
                 continue
             cited.add(evidence_id)
-            if _section_key(source.section_type) in _REFERENCE_SECTION_TYPES:
-                errors.append(f"{label} cites a references section")
+            source_section = _section_key(source.section_type)
+            if source_section in _NON_MEDICAL_SECTION_TYPES:
+                errors.append(
+                    f"{label} cites a references section"
+                    if source_section in _REFERENCE_SECTION_TYPES
+                    else f"{label} cites a non-medical section"
+                )
                 item_valid = False
         if item_valid:
             supported_items += 1
@@ -86,7 +99,7 @@ def evidence_rows(
     for finding_id, evidence_ids in _report_citations(report):
         for evidence_id in evidence_ids:
             item = by_id.get(evidence_id)
-            if not item or _section_key(item.section_type) in _REFERENCE_SECTION_TYPES:
+            if not item or _section_key(item.section_type) in _NON_MEDICAL_SECTION_TYPES:
                 continue
             key = (finding_id, evidence_id)
             if key in seen:
@@ -105,6 +118,8 @@ def evidence_rows(
                     "quoted_text": item.text,
                     "character_start": item.character_start,
                     "character_end": item.character_end,
+                    "quality_score": item.quality_score,
+                    "quality_flags": list(item.quality_flags),
                 }
             )
     return rows

@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     # after the deployment has reviewed privacy and cost settings.
     MEDICAL_AI_ENABLED: bool = True
     MEDICAL_AI_PROVIDER: str = "extractive"
-    MEDICAL_AI_MODEL: str = "extractive-v2"
+    MEDICAL_AI_MODEL: str = "extractive-v3"
     MEDICAL_AI_TIMEOUT_SECONDS: int = 30
     MEDICAL_AI_MAX_INPUT_TOKENS: int = 12000
     MEDICAL_AI_MAX_OUTPUT_TOKENS: int = 5000

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
@@ -509,6 +510,11 @@ class AnalysisRepository:
                             quoted_text=evidence["quoted_text"],
                             character_start=evidence.get("character_start"),
                             character_end=evidence.get("character_end"),
+                            quality_score=int(evidence.get("quality_score", 100) or 0),
+                            quality_flags_json=json.dumps(
+                                evidence.get("quality_flags", []),
+                                ensure_ascii=False,
+                            ),
                         )
                     )
 
@@ -948,8 +954,11 @@ def _run_payload(db, row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
             "page_start": item.page_start,
             "page_end": item.page_end,
             "quote": item.quoted_text,
+            "excerpt": _evidence_excerpt(item.quoted_text),
             "character_start": item.character_start,
             "character_end": item.character_end,
+            "quality_score": item.quality_score,
+            "quality_flags": _loads_json(item.quality_flags_json, []),
         }
         for item in evidence
     ]
@@ -994,6 +1003,15 @@ def _run_dict(row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
 def _evidence_id(run_id: str, evidence: dict[str, Any]) -> str:
     raw = f"{run_id}|{evidence['finding_id']}|{evidence['evidence_id']}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _evidence_excerpt(text: str) -> str:
+    """Keep source browsing readable while retaining the full quote in storage."""
+    value = " ".join(str(text or "").split()).strip()
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?。！？])\s+", value) if part.strip()]
+    if len(sentences) <= 3:
+        return value
+    return " ".join(sentences[:3])
 
 
 def _loads_json(value: str, default: Any) -> Any:

@@ -96,6 +96,12 @@ function warningLabel(warning: string) {
       return "Some PDF text was reconstructed from its word layout.";
     case "analysis_report_unavailable":
       return "The analysis report is unavailable and cannot be used as evidence.";
+    case "no_reliable_key_findings":
+      return "No reliable key findings could be extracted from this document.";
+    case "evidence_quality_filtered":
+      return "Some passages were excluded because their text quality was not reliable enough for medical evidence.";
+    case "pdf_layout_ambiguous":
+      return "The PDF column layout could not be read reliably; analysis was stopped for safety.";
     case "table_location_unavailable":
       return "A table was found, but its exact source location could not be confirmed.";
     case "figure_location_unavailable":
@@ -113,6 +119,15 @@ function locationLabel(evidence: MedicalInsightEvidence) {
     : "Page unavailable";
   const section = evidence.section_title || evidence.section_type?.replaceAll("_", " ");
   return `${page}${section ? ` · ${section}` : ""}`;
+}
+
+function passageExcerpt(evidence: MedicalInsightEvidence) {
+  if (evidence.excerpt?.trim()) return evidence.excerpt;
+  const sentences = evidence.quote
+    .split(/(?<=[.!?。！？])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return sentences.slice(0, 3).join(" ") || evidence.quote;
 }
 
 function findingEvidence(
@@ -278,6 +293,12 @@ function ReportView({
         evidenceById={evidenceById}
         onSelectEvidence={onSelectEvidence}
       />
+      {!report.key_findings.length && report.warnings.includes("no_reliable_key_findings") && (
+        <section className="insight-report-section insight-empty-findings" role="status">
+          <h3>Key findings</h3>
+          <p>No reliable key findings could be extracted from this document.</p>
+        </section>
+      )}
 
       <QuestionSuggestionList
         report={report}
@@ -327,7 +348,13 @@ function ReportView({
                 <button type="button" className="insight-source-link" onClick={() => onSelectEvidence(evidence)}>
                   {locationLabel(evidence)}
                 </button>
-                <p>{evidence.quote}</p>
+                <p>{passageExcerpt(evidence)}</p>
+                {passageExcerpt(evidence) !== evidence.quote && (
+                  <details className="insight-full-passage">
+                    <summary>View full passage</summary>
+                    <p>{evidence.quote}</p>
+                  </details>
+                )}
               </li>
             ))}
           </ol>
@@ -707,6 +734,11 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
   }, [analysisConfig, analysisOutdated, configLoading, executeAnalysis, loading, starting]);
 
   const report = run?.report;
+  const hasValidatedSourcePassages =
+    typeof run?.citation_coverage === "number"
+    && run.citation_coverage >= 1
+    && evidenceById.size > 0
+    && [...evidenceById.values()].every((item) => (item.quality_score ?? 100) >= 60);
 
   if (applicationUpdateIncomplete && runtimeErrorState) {
     const versions = runtimeErrorState.versions;
@@ -896,11 +928,13 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
         <>
           <div className="insight-meta">
             <span className="insight-meta-source">
-              <CheckCircle2 size={14} />
-              {typeof run.citation_coverage === "number" && run.citation_coverage >= 1
-                ? "All displayed items source-linked"
+              {hasValidatedSourcePassages
+                ? <CheckCircle2 size={14} />
+                : <AlertCircle size={14} />}
+              {hasValidatedSourcePassages
+                ? "All displayed claims have validated source passages"
                 : typeof run.citation_coverage === "number"
-                  ? `${Math.round(run.citation_coverage * 100)}% source-linked`
+                  ? `${Math.round(run.citation_coverage * 100)}% of displayed claims linked; some passages need review`
                   : "Source-linked report"}
             </span>
             <span className="insight-meta-local">
@@ -922,7 +956,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
                   <div><dt>Backend commit</dt><dd>{run.runtime_versions.backendCommit}</dd></div>
                 )}
                 {typeof run.citation_coverage === "number" && (
-                  <div><dt>Source coverage</dt><dd>{Math.round(run.citation_coverage * 100)}% of displayed items linked to source passages</dd></div>
+                  <div><dt>Source coverage</dt><dd>{Math.round(run.citation_coverage * 100)}% of displayed claims linked to source passages; quality checks are shown separately</dd></div>
                 )}
                 {(run.warnings?.length ?? 0) > 0 && (
                   <div><dt>Processing notes</dt><dd>{(run.warnings ?? []).map(warningLabel).join(" ")}</dd></div>

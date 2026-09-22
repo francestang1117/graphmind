@@ -92,10 +92,17 @@ class MedicalInsightAnalyzer:
             max_input_tokens=self.max_input_tokens,
             redact_pii=self.redact_pii,
         )
-        if "pdf_text_unreadable" in context.warnings:
+        if any(
+            warning in context.warnings
+            for warning in ("pdf_text_unreadable", "pdf_layout_ambiguous")
+        ):
             raise MedicalInsightError(
-                "This PDF could not be read reliably. Choose a text-selectable PDF or run OCR before analysis.",
-                code="source_text_unreadable",
+                "This PDF layout could not be read reliably. Choose a text-selectable PDF or run OCR before analysis.",
+                code=(
+                    "source_layout_ambiguous"
+                    if "pdf_layout_ambiguous" in context.warnings
+                    else "source_text_unreadable"
+                ),
                 details={"warnings": context.warnings},
             )
         if not context.evidence:
@@ -215,6 +222,8 @@ class MedicalInsightAnalyzer:
         context: AnalysisContext,
     ) -> MedicalInsightReport:
         warnings = _unique([*context.warnings, *report.warnings, "not_medical_advice"])
+        if not report.key_findings:
+            warnings.append("no_reliable_key_findings")
         coverage = report.coverage.model_copy(
             update={
                 "complete": context.coverage_complete,

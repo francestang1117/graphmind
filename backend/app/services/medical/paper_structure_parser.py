@@ -68,6 +68,28 @@ class PaperStructureParser:
         re.I,
     )
     _SENTENCE_END = re.compile(r"[.!?。！？](?=\s|$)|\n{2,}")
+    _REFERENCE_LINE = re.compile(
+        r"^\s*(?:\[?\d{1,3}\]?\s*[.)]|"
+        r"(?:doi\s*:\s*10\.|https?://doi\.org/10\.)|"
+        r"[A-Z][^\n]{3,100}\b(?:19|20)\d{2}\b[^\n]{0,80}"
+        r"\b\d{1,4}\s*[:;]\s*\d{1,5})",
+        re.I,
+    )
+    _REFERENCE_AUTHOR_LINE = re.compile(
+        r"\b(?:et\s+al\.?|[A-Z][a-z]+\s+[A-Z](?:\.|\b))\b.*\b(?:19|20)\d{2}\b",
+        re.I,
+    )
+    _NON_MEDICAL_TYPES = frozenset(
+        {
+            "references",
+            "supplementary",
+            "acknowledgements",
+            "acknowledgments",
+            "funding",
+            "author_contributions",
+            "conflicts_of_interest",
+        }
+    )
 
     def __init__(self, chunk_size: int = 1200, overlap: int = 160) -> None:
         self.chunk_size = max(200, chunk_size)
@@ -217,6 +239,12 @@ class PaperStructureParser:
         for index, heading in enumerate(headings):
             content_start = heading.end
             content_end = headings[index + 1].start if index + 1 < len(headings) else len(text)
+            content_end = self._non_medical_tail_start(
+                text,
+                content_start,
+                content_end,
+                heading.section_type,
+            )
             content_start, content_end, section_text = self._trim_range(
                 text, content_start, content_end
             )
@@ -235,6 +263,47 @@ class PaperStructureParser:
                 )
             )
         return sections
+
+    def _non_medical_tail_start(
+        self,
+        text: str,
+        start: int,
+        end: int,
+        section_type: str,
+    ) -> int:
+        """Stop medical sections before acknowledgements and bibliography tails."""
+        if section_type in self._NON_MEDICAL_TYPES:
+            return end
+        value = text[start:end]
+        cursor = 0
+        lines = value.splitlines(keepends=True)
+        for line in lines:
+            title = clean_heading(line.strip())
+            normalized = normalize_section_title(title)
+            if normalized.primary in self._NON_MEDICAL_TYPES:
+                return start + cursor
+            cursor += len(line)
+
+        # When a PDF loses the References heading, require two independent
+        # bibliography-shaped lines before cutting anything. One in-text
+        # citation must never erase the end of a conclusion or result.
+        candidates: list[int] = []
+        offsets: list[int] = []
+        cursor = 0
+        for line in lines:
+            stripped = line.strip()
+            if stripped and (
+                self._REFERENCE_LINE.search(stripped)
+                or self._REFERENCE_AUTHOR_LINE.search(stripped)
+            ):
+                candidates.append(len(offsets))
+            offsets.append(cursor)
+            cursor += len(line)
+        for index in candidates:
+            nearby = [candidate for candidate in candidates if index <= candidate <= index + 8]
+            if len(nearby) >= 2 and index > 0:
+                return start + offsets[index]
+        return end
 
     def _expand_structured_abstracts(
         self,
@@ -823,6 +892,11 @@ class PaperStructureParser:
             "limitations": "study_limitation",
             "references": "reference",
             "supplementary": "supplementary_material",
+            "acknowledgements": "non_medical_metadata",
+            "acknowledgments": "non_medical_metadata",
+            "funding": "non_medical_metadata",
+            "author_contributions": "non_medical_metadata",
+            "conflicts_of_interest": "non_medical_metadata",
             "table": "table",
             "figure_caption": "figure_caption",
         }.get(section_type, "context")

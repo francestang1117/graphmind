@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import uuid
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -104,6 +105,15 @@ def _report(*evidence_ids: str) -> MedicalInsightReport:
             "warnings": [],
         }
     )
+
+
+@pytest.mark.parametrize("statement", [".", "•", "...", "()", " - "])
+def test_finding_schema_rejects_non_substantive_statements(statement: str):
+    payload = _report("EVIDENCE_001").model_dump()
+    payload["key_findings"][0]["statement"] = statement
+
+    with pytest.raises(ValidationError, match="finding statement"):
+        MedicalInsightReport.model_validate(payload)
 
 
 def test_citations_require_current_evidence_and_reject_references():

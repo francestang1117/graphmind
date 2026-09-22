@@ -563,6 +563,8 @@ def _ensure_medical_ai_tables(connection) -> None:
                 quoted_text TEXT NOT NULL,
                 character_start INTEGER,
                 character_end INTEGER,
+                quality_score INTEGER NOT NULL DEFAULT 100,
+                quality_flags_json TEXT NOT NULL DEFAULT '[]',
                 CONSTRAINT fk_medical_analysis_evidence_run
                     FOREIGN KEY (run_id) REFERENCES medical_analysis_runs(id) ON DELETE CASCADE
             )
@@ -575,6 +577,8 @@ def _ensure_medical_ai_tables(connection) -> None:
             ("evidence_id", "VARCHAR(64)"),
             ("section_type", "VARCHAR(64) NOT NULL DEFAULT 'unknown'"),
             ("section_title", "VARCHAR(255) NOT NULL DEFAULT ''"),
+            ("quality_score", "INTEGER NOT NULL DEFAULT 100"),
+            ("quality_flags_json", "TEXT NOT NULL DEFAULT '[]'"),
         )
         for column, definition in missing_columns:
             if not _has_column(connection, "medical_analysis_evidence", column):

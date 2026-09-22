@@ -502,6 +502,8 @@ class MedicalAnalysisEvidenceRecord(Base):
     quoted_text: Mapped[str] = mapped_column(Text)
     character_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     character_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    quality_score: Mapped[int] = mapped_column(Integer, default=100)
+    quality_flags_json: Mapped[str] = mapped_column(Text, default="[]")
 
 
 class ClinicianQuestionRecord(Base):

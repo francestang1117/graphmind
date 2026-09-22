@@ -150,6 +150,9 @@ export interface MedicalInsightEvidence {
   quote: string;
   character_start?: number | null;
   character_end?: number | null;
+  excerpt?: string;
+  quality_score?: number;
+  quality_flags?: string[];
 }
 
 export interface MedicalInsightFinding {

@@ -30,7 +30,7 @@ class ExtractiveMedicalAIProvider:
 
     name = "extractive"
 
-    def __init__(self, model_name: str = "extractive-v2") -> None:
+    def __init__(self, model_name: str = "extractive-v3") -> None:
         self.model_name = model_name
 
     def generate(self, _prompt: str, context: AnalysisContext) -> dict[str, Any]:
@@ -124,6 +124,8 @@ class ExtractiveMedicalAIProvider:
             )
 
         warnings = ["not_medical_advice", "extractive_output", *context.warnings]
+        if not findings:
+            warnings.append("no_reliable_key_findings")
         return {
             "schema_version": "medical-insights-v3",
             "document_kind": context.document_kind,
@@ -182,7 +184,7 @@ class OpenAIMedicalAIProvider:
                 "OpenAI is not configured for medical insights.",
                 details={"provider": self.name},
             )
-        if not model_name or model_name in {"extractive-v1", "extractive-v2"}:
+        if not model_name or model_name in {"extractive-v1", "extractive-v2", "extractive-v3"}:
             raise ProviderUnavailable(
                 "Set MEDICAL_AI_MODEL before enabling the OpenAI provider.",
                 details={"provider": self.name},
@@ -305,7 +307,7 @@ def get_provider(
 ) -> MedicalAIProvider:
     provider_name = (name or "extractive").strip().lower()
     if provider_name == "extractive":
-        return ExtractiveMedicalAIProvider(model_name or "extractive-v2")
+        return ExtractiveMedicalAIProvider(model_name or "extractive-v3")
     if provider_name == "fake":
         return FakeMedicalAIProvider(model_name=model_name or "fake-v1")
     if provider_name == "openai":
@@ -518,7 +520,7 @@ def _method_excerpt(item: EvidenceItem, field: str) -> str:
 
 def _method_attribute(evidence: list[EvidenceItem], field: str) -> dict[str, Any]:
     item = _method_evidence(evidence, field)
-    if item is None:
+    if item is None or item.quality_score < 60:
         return {}
     value = _method_excerpt(item, field)
     if not value:
@@ -540,6 +542,11 @@ def _take_distinct(
     seen: set[str] = set()
     for item in evidence:
         if item.section_type not in section_types:
+            continue
+        if item.quality_score < 60 or any(
+            flag in {"broken_word_hyphen", "inserted_heading", "citation_density", "combined_quality_risk"}
+            for flag in item.quality_flags
+        ):
             continue
         section_title = str(item.section_title or "").strip().lower()
         if re.match(r"^(?:study\s+)?(?:objectives?|aims?)(?:\b|$)", section_title):
@@ -628,7 +635,14 @@ def _overview_summary(text: str) -> str:
         normalized,
         flags=re.I,
     )
-    return _summary(normalized)
+    sentences = _sentence_parts(normalized)
+    objective_markers = re.compile(
+        r"\b(?:this\s+study|we)\s+(?:examined|determined|investigated|evaluated|assessed|aimed\s+to)\b|"
+        r"\b(?:objective|purpose|aim)\s*(?:was|is|:)",
+        re.I,
+    )
+    preferred = next((sentence for sentence in sentences if objective_markers.search(sentence)), None)
+    return _summary(preferred or (sentences[0] if sentences else normalized))
 
 
 def _study_type(document_kind: str) -> str:

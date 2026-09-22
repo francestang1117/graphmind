@@ -35,7 +35,7 @@ const localConfig = {
   enabled: true,
   configured: true,
   provider: "extractive",
-  model_name: "extractive-v2",
+  model_name: "extractive-v3",
   external_processing: false,
   requires_confirmation: false,
   sends_selected_excerpts: false,
@@ -62,8 +62,8 @@ function queuedRun() {
     source_hash: "source-new",
     parsed_source_hash: "parsed-new",
     provider: "extractive",
-    model_name: "extractive-v2",
-    prompt_version: "medical-insights-v3+medical-insights-readable-v2",
+    model_name: "extractive-v3",
+    prompt_version: "medical-insights-v3+medical-insights-readable-v3",
     schema_version: "medical-insights-v3",
   };
 }
@@ -243,5 +243,49 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
     const unavailableDetails = screen.getByText("View unavailable fields").closest("details");
     expect(unavailableDetails).not.toHaveAttribute("open");
     expect(screen.getByText(/Study design · Not found in analyzed text/)).not.toBeVisible();
+  });
+
+  it("does not show a green validation signal for low-quality source passages", async () => {
+    api.getCurrentMedicalInsights.mockResolvedValue({
+      ...queuedRun(),
+      status: "succeeded",
+      citation_coverage: 1,
+      report: {
+        schema_version: "medical-insights-v3",
+        document_kind: "research_paper",
+        language: "en",
+        overview: {
+          title: "Fabry disease biomarker study",
+          summary: "The study examined biomarkers in adults with Fabry disease.",
+          study_type: "Research paper",
+          evidence_ids: ["EVIDENCE_001"],
+        },
+        study_methods: {},
+        key_findings: [],
+        limitations: [],
+        medical_terms: [],
+        what_it_means: [],
+        what_it_does_not_mean: [],
+        applicability: [],
+        future_research: [],
+        question_suggestions: [],
+        questions_for_professional: [],
+        warnings: ["evidence_quality_filtered"],
+      },
+      evidence: [{
+        evidence_id: "EVIDENCE_001",
+        quote: "A damaged source passage.",
+        page_start: 1,
+        section_type: "results",
+        quality_score: 35,
+        quality_flags: ["obvious_column_interleave"],
+      }],
+    });
+    api.getMedicalInsightConfig.mockResolvedValue(localConfig);
+
+    renderPanel();
+
+    expect(await screen.findByText("100% of displayed claims linked; some passages need review")).toBeInTheDocument();
+    expect(screen.queryByText("All displayed claims have validated source passages")).not.toBeInTheDocument();
   });
 });

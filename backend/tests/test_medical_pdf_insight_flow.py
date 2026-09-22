@@ -26,7 +26,7 @@ from app.tasks import medical_analysis
 USER_ID = "readability-test-user"
 WORKSPACE_ID = "readability-test-workspace"
 DOCUMENT_ID = "readability-test-document"
-MODEL_NAME = "extractive-v2"
+MODEL_NAME = "extractive-v3"
 
 
 def _write_text_pdf(path: Path, lines: list[str]) -> None:

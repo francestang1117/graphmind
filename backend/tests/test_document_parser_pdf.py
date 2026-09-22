@@ -92,6 +92,59 @@ def test_pdf_word_reconstruction_keeps_full_width_header_before_columns():
     assert reconstructed == "Full width title here\nLeft body\ncontinues\nRight body\ncontinues"
 
 
+def test_pdf_parser_forces_coordinate_order_for_normal_spaced_two_columns(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "normal-columns.pdf"
+    pdf_path.write_bytes(b"%PDF fake")
+
+    class InterleavedPage(FakePDFPage):
+        def extract_text(self, **_kwargs):
+            return "Left one Right one\nLeft two Right two"
+
+    page = InterleavedPage(
+        "",
+        words=[
+            {"text": "Left", "x0": 20, "x1": 45, "top": 20},
+            {"text": "one", "x0": 50, "x1": 70, "top": 20},
+            {"text": "Right", "x0": 330, "x1": 360, "top": 20},
+            {"text": "one", "x0": 365, "x1": 385, "top": 20},
+            {"text": "Left", "x0": 20, "x1": 45, "top": 35},
+            {"text": "two", "x0": 50, "x1": 70, "top": 35},
+            {"text": "Right", "x0": 330, "x1": 360, "top": 35},
+            {"text": "two", "x0": 365, "x1": 385, "top": 35},
+        ],
+    )
+    page.width = 600
+    monkeypatch.setitem(sys.modules, "pdfplumber", SimpleNamespace(open=lambda _path: FakePDF([page])))
+
+    parsed = PDFParser().parse(pdf_path)
+
+    assert parsed.raw_text == "Left one\nLeft two\nRight one\nRight two"
+    assert parsed.metadata["extraction_method"] == "pdfplumber-coordinate-columns"
+    assert parsed.metadata["page_layouts"][0]["mode"] == "columns"
+    assert parsed.metadata["page_layouts"][0]["column_boundary"] is not None
+
+
+def test_pdf_coordinate_reconstruction_repairs_only_safe_line_break_hyphens():
+    page = FakePDFPage(
+        "",
+        words=[
+            {"text": "anti-drug", "x0": 20, "top": 10},
+            {"text": "LC-MS/MS", "x0": 90, "top": 10},
+            {"text": "signifi-", "x0": 20, "top": 25},
+            {"text": "cance", "x0": 20, "top": 40},
+            {"text": "10–20", "x0": 90, "top": 40},
+        ],
+    )
+
+    reconstructed = _reconstruct_pdf_words(page)
+
+    assert "anti-drug" in reconstructed
+    assert "LC-MS/MS" in reconstructed
+    assert "significance" in reconstructed
+    assert "10–20" in reconstructed
+    assert "signifi-cance" not in reconstructed
+
+
 def test_pdfplumber_parser_extracts_pages_and_tables(tmp_path, monkeypatch):
     pdf_path = tmp_path / "report.pdf"
     pdf_path.write_bytes(b"%PDF fake")

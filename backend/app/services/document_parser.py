@@ -32,7 +32,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
-PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v2"
+PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v3"
 
 
 # Parsed document shape
@@ -85,6 +85,28 @@ class ParsedDocument:
     metadata: dict       = field(default_factory=dict)
     word_count: int = 0
     reading_time_min: int = 0
+
+
+@dataclass(frozen=True)
+class PdfLayoutRegion:
+    """A visually coherent region of one PDF page."""
+
+    top: float
+    bottom: float
+    mode: str
+    column_boundary: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "top": round(self.top, 2),
+            "bottom": round(self.bottom, 2),
+            "mode": self.mode,
+            "column_boundary": (
+                round(self.column_boundary, 2)
+                if self.column_boundary is not None
+                else None
+            ),
+        }
 
 
 # Shared chunking
@@ -254,22 +276,7 @@ def _pdf_candidate_rank(text: str, candidate_priority: int = 0) -> tuple[int, in
 
 def _reconstruct_pdf_words(page: Any) -> str:
     """Rebuild lines from pdfplumber word boxes when text extraction glues words."""
-    try:
-        words = page.extract_words(keep_blank_chars=False, use_text_flow=False)
-    except TypeError:
-        try:
-            words = page.extract_words()
-        except (AttributeError, ValueError, TypeError):
-            return ""
-    except (AttributeError, ValueError):
-        return ""
-
-    if not isinstance(words, list):
-        return ""
-    usable = [
-        word for word in words
-        if isinstance(word, dict) and str(word.get("text") or "").strip()
-    ]
+    usable = _extract_pdf_words(page)
     if not usable:
         return ""
 
@@ -299,8 +306,8 @@ def _reconstruct_pdf_words(page: Any) -> str:
     right_column: list[list[dict[str, Any]]] = []
 
     def flush_columns() -> None:
-        output.extend(_pdf_render_line(line) for line in left_column)
-        output.extend(_pdf_render_line(line) for line in right_column)
+        output.extend(_pdf_render_lines(left_column))
+        output.extend(_pdf_render_lines(right_column))
         left_column.clear()
         right_column.clear()
 
@@ -356,6 +363,129 @@ def _pdf_line_groups(words: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
         else:
             lines[line_index].append(word)
     return lines
+
+
+def _extract_pdf_words(page: Any) -> list[dict[str, Any]]:
+    """Read positioned words once, while supporting small test doubles."""
+    try:
+        words = page.extract_words(keep_blank_chars=False, use_text_flow=False)
+    except TypeError:
+        try:
+            words = page.extract_words()
+        except (AttributeError, ValueError, TypeError):
+            return []
+    except (AttributeError, ValueError):
+        return []
+    if not isinstance(words, list):
+        return []
+    return [
+        word
+        for word in words
+        if isinstance(word, dict) and str(word.get("text") or "").strip()
+    ]
+
+
+def _pdf_layout_info(page: Any) -> dict[str, Any]:
+    """Detect a stable two-column layout without guessing from text alone."""
+    words = _extract_pdf_words(page)
+    positioned = [
+        word
+        for word in words
+        if "top" in word or "doctop" in word
+    ]
+    if not positioned:
+        return {
+            "mode": "full_width",
+            "column_count": 1,
+            "column_boundary": None,
+            "confidence": 0.0,
+            "stable": False,
+            "regions": [],
+        }
+
+    lines = _pdf_line_groups(positioned)
+    boundary = _pdf_column_boundary(positioned, page)
+    if boundary is None:
+        return {
+            "mode": "full_width",
+            "column_count": 1,
+            "column_boundary": None,
+            "confidence": 0.55,
+            "stable": True,
+            "regions": [
+                region.to_dict()
+                for region in _pdf_regions(lines, None, page)
+            ],
+        }
+
+    split_indices = [
+        index
+        for index, line in enumerate(lines)
+        if _pdf_line_has_gutter(line, boundary, page)
+    ]
+    stable = len(split_indices) >= 2
+    if not stable:
+        return {
+            "mode": "ambiguous",
+            "column_count": 2,
+            "column_boundary": boundary,
+            "confidence": 0.35,
+            "stable": False,
+            "regions": [],
+        }
+
+    confidence = min(0.99, 0.65 + min(len(split_indices), 6) * 0.05)
+    return {
+        "mode": "columns",
+        "column_count": 2,
+        "column_boundary": boundary,
+        "confidence": confidence,
+        "stable": True,
+        "regions": [
+            region.to_dict()
+            for region in _pdf_regions(lines, boundary, page)
+        ],
+    }
+
+
+def _pdf_regions(
+    lines: list[list[dict[str, Any]]],
+    boundary: float | None,
+    page: Any,
+) -> list[PdfLayoutRegion]:
+    """Describe full-width separators and the column body for metadata."""
+    if not lines:
+        return []
+    modes: list[str] = []
+    for line in lines:
+        modes.append(
+            "columns"
+            if boundary is not None and _pdf_line_has_gutter(line, boundary, page)
+            else "full_width"
+        )
+
+    regions: list[PdfLayoutRegion] = []
+    start = 0
+    for index in range(1, len(lines) + 1):
+        if index < len(lines) and modes[index] == modes[start]:
+            continue
+        first = lines[start]
+        last = lines[index - 1]
+        top = min(float(word.get("top", word.get("doctop", 0)) or 0) for word in first)
+        bottom = max(
+            float(word.get("bottom", word.get("top", word.get("doctop", 0))) or 0)
+            for word in last
+        )
+        regions.append(
+            PdfLayoutRegion(
+                top=top,
+                bottom=bottom,
+                mode=modes[start],
+                column_boundary=boundary if modes[start] == "columns" else None,
+            )
+        )
+        start = index
+    return regions
 
 
 def _pdf_line_has_gutter(
@@ -447,10 +577,19 @@ def _pdf_column_boundary(
 
 
 def _pdf_word_lines(words: list[dict[str, Any]]) -> list[str]:
+    return _pdf_render_lines(_pdf_line_groups(words))
+
+
+def _pdf_render_lines(lines: list[list[dict[str, Any]]]) -> list[str]:
+    """Render lines and repair only safe visual line-ending hyphenation."""
     output: list[str] = []
-    for line in _pdf_line_groups(words):
+    for line in lines:
         rendered = _pdf_render_line(line)
-        if rendered:
+        if not rendered:
+            continue
+        if output and output[-1].endswith("-") and rendered[:1].islower():
+            output[-1] = f"{output[-1][:-1]}{rendered}"
+        else:
             output.append(rendered)
     return output
 
@@ -686,6 +825,7 @@ class PDFParser:
         unreadable_pages: list[int] = []
         reconstructed_pages: list[int] = []
         extraction_warnings: list[str] = []
+        page_layouts: list[dict[str, Any]] = []
 
         with pdfplumber.open(str(path)) as pdf:
             pdf_title = self._metadata_title(getattr(pdf, "metadata", None))
@@ -695,6 +835,8 @@ class PDFParser:
                     unreadable_pages.append(page_num)
                 if "pdf_text_reconstructed" in page_warnings:
                     reconstructed_pages.append(page_num)
+                layout = getattr(self, "_last_pdf_layout", None) or _pdf_layout_info(page)
+                page_layouts.append({"page": page_num, **layout})
                 extraction_warnings.extend(
                     f"{warning}_page_{page_num}" if warning == "pdf_text_unreadable" else warning
                     for warning in page_warnings
@@ -736,8 +878,11 @@ class PDFParser:
             "extraction_warnings": list(dict.fromkeys(extraction_warnings)),
             "unreadable_pages": unreadable_pages,
             "reconstructed_pages": reconstructed_pages,
+            "page_layouts": page_layouts,
             "extraction_method": (
-                "pdfplumber-mixed"
+                "pdfplumber-coordinate-columns"
+                if any(layout.get("mode") == "columns" for layout in page_layouts)
+                else "pdfplumber-mixed"
                 if reconstructed_pages
                 else "pdfplumber-text"
             ),
@@ -786,6 +931,8 @@ class PDFParser:
         to rebuild lines. If neither path produces readable text, the page is
         marked unreadable so downstream medical analysis can stop safely.
         """
+        layout = _pdf_layout_info(page)
+        self._last_pdf_layout = layout
         candidates: list[str] = []
         try:
             candidates.append(
@@ -815,7 +962,21 @@ class PDFParser:
         )[1]
         warnings: list[str] = []
 
-        if not best or _glued_text_score(best) >= 2:
+        # A normal-spaced text extraction can still interleave two columns.
+        # Coordinate reconstruction therefore wins whenever the layout detector
+        # has enough repeated gutter evidence, before text-candidate ranking.
+        if layout.get("column_count", 1) >= 2 and layout.get("stable"):
+            reconstructed = _reconstruct_pdf_words(page)
+            if reconstructed:
+                best = _normalise_pdf_text(reconstructed)
+                warnings.append("pdf_text_reconstructed")
+            else:
+                warnings.append("pdf_layout_ambiguous")
+                return best, "unreadable", warnings
+        elif layout.get("mode") == "ambiguous":
+            warnings.append("pdf_layout_ambiguous")
+            return best, "unreadable", warnings
+        elif not best or _glued_text_score(best) >= 2:
             reconstructed = _reconstruct_pdf_words(page)
             if reconstructed and (
                 not best or _glued_text_score(reconstructed) < _glued_text_score(best)
@@ -885,6 +1046,7 @@ class PDFParser:
             ],
             "unreadable_pages": unreadable_pages,
             "reconstructed_pages": [],
+            "page_layouts": [],
             "extraction_method": "PyPDF2-text",
         }
         if pdf_title:

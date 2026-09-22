@@ -2,6 +2,7 @@
 
 from app.services.medical.models import MedicalDocumentAnalysis
 from app.services.medical.paper_structure_parser import PaperStructureParser
+from app.services.medical.ai.context_builder import ContextBuilder
 
 
 def _analysis(
@@ -258,6 +259,48 @@ def test_structured_abstract_labels_get_distinct_semantic_sections():
         chunk["section_type"] == "results" and "Objectives" in chunk["text"]
         for chunk in result.chunks
     )
+
+
+def test_non_medical_tail_stops_conclusion_before_acknowledgements_and_funding():
+    text = (
+        "Conclusion\nThe reported association should be interpreted cautiously.\n\n"
+        "Acknowledgements\nWe thank the participating clinics.\n\n"
+        "Funding\nSupported by a research grant.\n\n"
+        "References\n1. Smith J. Fabry disease. 2020;12:34."
+    )
+    parsed = {"content": text, "metadata": {"format": "pdf"}, "extra": {"sections": [], "tables": []}}
+
+    result = PaperStructureParser().parse(parsed, _analysis())
+
+    conclusion = next(section for section in result.sections if section.section_type == "conclusion")
+    assert "Acknowledgements" not in conclusion.text
+    assert "Funding" not in conclusion.text
+    assert {section.section_type for section in result.sections} >= {
+        "conclusion",
+        "acknowledgements",
+        "funding",
+        "references",
+    }
+    context = ContextBuilder().build(result.chunks)
+    assert not any(
+        item.section_type in {"acknowledgements", "funding", "references"}
+        for item in context.evidence
+    )
+
+
+def test_content_based_reference_tail_requires_more_than_one_bibliographic_line():
+    text = (
+        "Conclusion\nThe finding is consistent with one prior report (Smith, 2020).\n\n"
+        "1. Smith J. Fabry disease. 2020;12:34.\n"
+        "2. Jones A. Biomarkers in Fabry disease. 2021;13:45."
+    )
+    parsed = {"content": text, "metadata": {"format": "pdf"}, "extra": {"sections": [], "tables": []}}
+
+    result = PaperStructureParser().parse(parsed, _analysis())
+    conclusion = next(section for section in result.sections if section.section_type == "conclusion")
+
+    assert "consistent with one prior report" in conclusion.text
+    assert "Smith J. Fabry disease" not in conclusion.text
 
 
 def test_table_section_keeps_exact_text_location():

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 InterpretationType = Literal[
@@ -68,6 +69,18 @@ class EvidenceFinding(_StrictModel):
     evidence_ids: list[str] = Field(default_factory=list)
     evidence_level: str = "reported_in_document"
     interpretation_type: InterpretationType = "summary"
+
+    @field_validator("statement")
+    @classmethod
+    def validate_substantive_statement(cls, value: str) -> str:
+        normalized = " ".join(str(value or "").split()).strip()
+        meaningful = re.findall(
+            r"[A-Za-zÀ-ÖØ-öø-ÿ\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]",
+            normalized,
+        )
+        if len(meaningful) < 8:
+            raise ValueError("finding statement must contain at least 8 meaningful characters")
+        return normalized
 
 
 class MedicalTermExplanation(_StrictModel):

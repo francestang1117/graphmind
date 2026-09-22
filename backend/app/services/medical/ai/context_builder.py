@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from app.services.medical.text_quality import assess_passage
+
 
 _REFERENCE_SECTION_TYPES = frozenset(
     {
@@ -15,6 +17,16 @@ _REFERENCE_SECTION_TYPES = frozenset(
         "works_cited",
         "reference_list",
         "references_and_bibliography",
+    }
+)
+_NON_MEDICAL_SECTION_TYPES = _REFERENCE_SECTION_TYPES | frozenset(
+    {
+        "supplementary",
+        "acknowledgements",
+        "acknowledgments",
+        "funding",
+        "author_contributions",
+        "conflicts_of_interest",
     }
 )
 
@@ -34,6 +46,8 @@ class EvidenceItem:
     token_count: int
     source_index: int
     truncated: bool = False
+    quality_score: int = 100
+    quality_flags: tuple[str, ...] = ()
 
 
 @dataclass
@@ -128,6 +142,7 @@ class ContextBuilder:
         section_map = self._section_map(sections or [])
         candidates: list[tuple[int, int, dict[str, Any]]] = []
         seen: set[tuple[str, str]] = set()
+        quality_filtered = False
 
         safe_title = title or "Untitled medical document"
         title_redacted = False
@@ -151,9 +166,27 @@ class ContextBuilder:
                     section,
                     section.get("metadata") if isinstance(section.get("metadata"), dict) else {},
                 )
-            if section_type in _REFERENCE_SECTION_TYPES:
-                # References remain available in the document browser, but
-                # bibliographic entries are not analysis evidence.
+            if section_type in _NON_MEDICAL_SECTION_TYPES:
+                # These sections remain available in the document browser,
+                # but acknowledgements and bibliographic material are not
+                # medical evidence for a report.
+                continue
+            section_title = str(
+                raw_chunk.get("section_title")
+                or metadata.get("section_title")
+                or metadata.get("section")
+                or section.get("original_title")
+                or ""
+            )
+            quality = assess_passage(
+                text,
+                section_type=section_type,
+                section_title=section_title,
+                metadata=metadata,
+                source_warnings=source_warnings or (),
+            )
+            if not quality.usable:
+                quality_filtered = True
                 continue
             chunk_id = str(raw_chunk.get("id") or f"chunk:{index}")
             dedupe_key = (chunk_id, text)
@@ -168,6 +201,7 @@ class ContextBuilder:
                 "section_type": section_type,
                 "section": section,
                 "index": index,
+                "quality": quality,
             }
             candidates.append((self.PRIORITY.get(section_type, 10), index, normalized))
 
@@ -191,7 +225,7 @@ class ContextBuilder:
             first_by_section: dict[str, dict[str, Any]] = {}
             for _priority, _index, candidate in candidates:
                 section_type = candidate["section_type"]
-                if section_type in _REFERENCE_SECTION_TYPES:
+                if section_type in _NON_MEDICAL_SECTION_TYPES:
                     continue
                 first_by_section.setdefault(section_type, candidate)
             section_candidates = list(first_by_section.values())
@@ -278,6 +312,8 @@ class ContextBuilder:
                     token_count=_estimate_tokens(text),
                     source_index=index,
                     truncated=item_truncated,
+                    quality_score=candidate["quality"].score,
+                    quality_flags=candidate["quality"].reasons,
                 )
             )
 
@@ -299,6 +335,8 @@ class ContextBuilder:
                 token_count=item.token_count,
                 source_index=item.source_index,
                 truncated=item.truncated,
+                quality_score=item.quality_score,
+                quality_flags=item.quality_flags,
             )
             for index, item in enumerate(selected, start=1)
         ]
@@ -307,6 +345,8 @@ class ContextBuilder:
             warnings.append("pii_redacted")
         if any(item.truncated for item in selected) or len(selected) < len(candidates):
             warnings.append("context_truncated")
+        if quality_filtered:
+            warnings.append("evidence_quality_filtered")
         all_sections = list(dict.fromkeys(candidate[2]["section_type"] for candidate in candidates))
         included_sections = list(dict.fromkeys(item.section_type for item in selected))
         omitted_sections = [value for value in all_sections if value not in included_sections]

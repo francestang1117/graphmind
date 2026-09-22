@@ -18,6 +18,14 @@ _REFERENCE_SECTION_TYPES = {
     "reference_list",
     "references_and_bibliography",
 }
+_NON_MEDICAL_SECTION_TYPES = _REFERENCE_SECTION_TYPES | {
+    "supplementary",
+    "acknowledgements",
+    "acknowledgments",
+    "funding",
+    "author_contributions",
+    "conflicts_of_interest",
+}
 
 _QUESTION_MARK = re.compile(r"[?？]$")
 _ENGLISH_QUESTION_START = re.compile(
@@ -88,8 +96,13 @@ def validate_questions(
                 errors.append(f"{label} cites unknown evidence id {evidence_id}")
                 item_valid = False
                 continue
-            if _section_key(source.section_type) in _REFERENCE_SECTION_TYPES:
-                errors.append(f"{label} cites a references section")
+            source_section = _section_key(source.section_type)
+            if source_section in _NON_MEDICAL_SECTION_TYPES:
+                errors.append(
+                    f"{label} cites a references section"
+                    if source_section in _REFERENCE_SECTION_TYPES
+                    else f"{label} cites a non-medical section"
+                )
                 item_valid = False
         if not item_valid:
             continue
