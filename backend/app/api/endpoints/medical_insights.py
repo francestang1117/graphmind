@@ -18,6 +18,7 @@ from app.api.endpoints.documents_with_markdown import (
 from app.api.workspace_scope import normalize_workspace_id, resolve_workspace_id
 from app.core.config import settings
 from app.core.errors import AppError, ParseError, ParsePersistenceError
+from app.services.document_parser import PDF_TEXT_PARSER_VERSION
 from app.services.document_service import document_service
 from app.services.medical.ai.analysis_repository import (
     external_processing_fingerprint,
@@ -32,6 +33,7 @@ router = APIRouter()
 
 SUPPORTED_DOCUMENT_KINDS = {"research_paper", "guideline"}
 EXTERNAL_PROVIDERS = {"openai"}
+ANALYSIS_PIPELINE_VERSION = "medical-insights-readable-v2"
 
 
 class MedicalInsightStartRequest(BaseModel):
@@ -136,6 +138,9 @@ async def get_medical_insight_run(
     run = medical_analysis_repository.get_run(run_id, user_id, scope)
     if not run:
         raise HTTPException(status_code=404, detail="Medical insight run not found")
+    metadata = _get_scoped_document(run["document_id"], user_id, scope)
+    _ensure_current_analysis(run, metadata, user_id=user_id, workspace_id=scope)
+    run["parser_version"] = metadata.get("parser_version")
     return run
 
 
@@ -148,11 +153,16 @@ async def get_latest_medical_insights(
     """Return the latest validated report for the live document version."""
     user_id = _user_id(user)
     scope = resolve_workspace_id(user_id, normalize_workspace_id(workspace_id))
-    _get_scoped_document(document_id, user_id, scope)
+    metadata = _get_scoped_document(document_id, user_id, scope)
     _require_repository()
+    if _refresh_stale_pdf_if_needed(metadata, user_id=user_id, workspace_id=scope):
+        raise _analysis_outdated_error(reason="parser_version_changed")
     report = medical_analysis_repository.get_latest(document_id, user_id, scope)
     if not report:
         raise HTTPException(status_code=404, detail="No completed medical insight found")
+    _ensure_current_analysis(
+        report, metadata, user_id=user_id, workspace_id=scope, check_parser=False
+    )
     return report
 
 
@@ -162,14 +172,22 @@ async def get_current_medical_insights(
     workspace_id: str | None = Query(None),
     user: UserRecord = Depends(current_user_or_dev),
 ) -> dict[str, Any]:
-    """Return the latest run state so the UI can recover after a refresh."""
+    """Return only a run produced by the current parser and analysis pipeline."""
     user_id = _user_id(user)
     scope = resolve_workspace_id(user_id, normalize_workspace_id(workspace_id))
-    _get_scoped_document(document_id, user_id, scope)
+    metadata = _get_scoped_document(document_id, user_id, scope)
     _require_repository()
+    if _refresh_stale_pdf_if_needed(metadata, user_id=user_id, workspace_id=scope):
+        raise _analysis_outdated_error(reason="parser_version_changed")
+
     run = medical_analysis_repository.get_current(document_id, user_id, scope)
     if not run:
         raise HTTPException(status_code=404, detail="No medical insight run found")
+
+    _ensure_current_analysis(
+        run, metadata, user_id=user_id, workspace_id=scope, check_parser=False
+    )
+    run["parser_version"] = metadata.get("parser_version")
     return run
 
 
@@ -263,7 +281,7 @@ async def _start_analysis(
             requested_by=user_id,
             provider=provider_name,
             model_name=configured_provider.model_name,
-            prompt_version=settings.MEDICAL_AI_PROMPT_VERSION,
+            prompt_version=_effective_prompt_version(),
             schema_version=settings.MEDICAL_AI_SCHEMA_VERSION,
             parsed_source_hash=source.get("parsed_source_hash"),
             redact_pii=settings.MEDICAL_AI_REDACT_PII,
@@ -291,6 +309,7 @@ async def _start_analysis(
 
     if created:
         _enqueue(run["run_id"], background_tasks)
+    run["parser_version"] = metadata.get("parser_version")
 
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK,
@@ -326,15 +345,15 @@ def _refresh_stale_pdf_if_needed(
     *,
     user_id: str,
     workspace_id: str,
-) -> None:
+) -> bool:
     """Refresh old PDF artifacts before the analysis source is snapshotted."""
     filename = str(metadata.get("filename") or "")
     parsed = get_cached_parse(filename, user_id, workspace_id)
     if not pdf_parser_refresh_required(filename, metadata, parsed):
-        return
+        return False
 
     try:
-        parse_document_file(
+        refreshed = parse_document_file(
             filename,
             metadata["file_path"],
             metadata.get("original_filename", ""),
@@ -342,6 +361,16 @@ def _refresh_stale_pdf_if_needed(
             document_id=str(metadata.get("document_id") or ""),
             workspace_id=workspace_id,
         )
+        refreshed_metadata = refreshed.get("metadata") if isinstance(refreshed, dict) else None
+        if (
+            not isinstance(refreshed_metadata, dict)
+            or refreshed_metadata.get("parser_version") != PDF_TEXT_PARSER_VERSION
+            or refreshed_metadata.get("persistence_status") != "persisted"
+        ):
+            raise ParsePersistenceError(
+                "The updated PDF source was not committed to persistent storage."
+            )
+        return True
     except ParsePersistenceError:
         raise
     except Exception as exc:
@@ -352,6 +381,55 @@ def _refresh_stale_pdf_if_needed(
                 "reason": str(exc),
             }
         ) from exc
+
+
+def _effective_prompt_version() -> str:
+    """Include semantic extraction changes in the persisted run identity."""
+    return f"{settings.MEDICAL_AI_PROMPT_VERSION}+{ANALYSIS_PIPELINE_VERSION}"
+
+
+def _analysis_outdated_error(*, reason: str) -> AppError:
+    return AppError(
+        "The saved medical analysis predates the current source or analysis pipeline.",
+        code="analysis_outdated",
+        status_code=status.HTTP_409_CONFLICT,
+        details={
+            "requires_reanalysis": True,
+            "reason": reason,
+            "analysis_pipeline_version": ANALYSIS_PIPELINE_VERSION,
+        },
+    )
+
+
+def _ensure_current_analysis(
+    run: dict[str, Any],
+    metadata: dict[str, Any],
+    *,
+    user_id: str,
+    workspace_id: str,
+    check_parser: bool = True,
+) -> None:
+    """Reject saved reports whose source parser or extraction pipeline is stale."""
+    if check_parser and _refresh_stale_pdf_if_needed(
+        metadata, user_id=user_id, workspace_id=workspace_id
+    ):
+        raise _analysis_outdated_error(reason="parser_version_changed")
+
+    expected_provider = settings.MEDICAL_AI_PROVIDER.strip().lower()
+    try:
+        expected_model = get_provider(
+            expected_provider,
+            settings.MEDICAL_AI_MODEL,
+        ).model_name
+    except MedicalInsightError:
+        expected_model = settings.MEDICAL_AI_MODEL
+    if (
+        run.get("provider") != expected_provider
+        or run.get("model_name") != expected_model
+        or run.get("prompt_version") != _effective_prompt_version()
+        or run.get("schema_version") != settings.MEDICAL_AI_SCHEMA_VERSION
+    ):
+        raise _analysis_outdated_error(reason="analysis_pipeline_changed")
 
 
 def _get_scoped_document(document_id: str, user_id: str, workspace_id: str) -> dict[str, Any]:

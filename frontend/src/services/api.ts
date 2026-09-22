@@ -238,6 +238,7 @@ export interface MedicalInsightRun {
   citation_coverage?: number;
   validation_status?: string;
   warnings?: string[];
+  parser_version?: string;
   evidence?: MedicalInsightEvidence[];
 }
 

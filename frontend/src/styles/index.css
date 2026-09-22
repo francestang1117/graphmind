@@ -1872,8 +1872,73 @@ button {
 
 .insight-meta {
   flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  gap: 8px 14px;
   margin-top: 11px;
+}
+
+.insight-meta-source,
+.insight-meta-local {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.insight-meta-source svg {
+  color: var(--green);
+}
+
+.insight-meta-local {
+  color: var(--soft);
+  font-weight: 500;
+}
+
+.insight-analysis-details {
+  position: relative;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.insight-analysis-details > summary {
+  cursor: pointer;
+  color: var(--blue);
+  text-underline-offset: 3px;
+}
+
+.insight-analysis-details > dl {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(440px, calc(100vw - 40px));
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  background: #20211f;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.32);
+}
+
+.insight-analysis-details > dl > div {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.insight-analysis-details dt {
+  color: var(--soft);
+}
+
+.insight-analysis-details dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .insight-meta span,
@@ -1893,6 +1958,21 @@ button {
 .insight-meta span {
   padding: 5px 8px;
   background: rgba(255, 255, 255, 0.035);
+}
+
+.insight-meta > .insight-meta-source,
+.insight-meta > .insight-meta-local {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.insight-meta > span:not(.insight-meta-source):not(.insight-meta-local) {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .insight-meta svg {

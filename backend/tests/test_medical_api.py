@@ -133,7 +133,12 @@ def test_starting_medical_insights_reparses_stale_pdf_before_loading_source(monk
 
     def fake_parse(*_args, **_kwargs):
         events.append("parse")
-        return {"metadata": {"parser_version": PDF_TEXT_PARSER_VERSION}}
+        return {
+            "metadata": {
+                "parser_version": PDF_TEXT_PARSER_VERSION,
+                "persistence_status": "persisted",
+            }
+        }
 
     monkeypatch.setattr(medical_insights, "parse_document_file", fake_parse)
     monkeypatch.setattr(
@@ -172,6 +177,195 @@ def test_starting_medical_insights_reparses_stale_pdf_before_loading_source(monk
 
     assert result.status_code == 202
     assert events == ["parse", "source"]
+
+
+def test_current_insights_reparses_stale_pdf_and_never_returns_the_old_run(monkeypatch):
+    events = []
+
+    monkeypatch.setattr(medical_insights, "resolve_workspace_id", lambda *_: "workspace-a")
+    monkeypatch.setattr(
+        medical_insights,
+        "_get_scoped_document",
+        lambda *_args, **_kwargs: {
+            "document_id": "document-a",
+            "filename": "paper.pdf",
+            "file_path": "/tmp/paper.pdf",
+            "original_filename": "paper.pdf",
+            "file_extension": "pdf",
+            "parser_version": "document-parser-pdf-readable-v1",
+        },
+    )
+    monkeypatch.setattr(medical_insights, "_require_repository", lambda: None)
+    monkeypatch.setattr(medical_insights, "get_cached_parse", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        medical_insights,
+        "parse_document_file",
+        lambda *_args, **_kwargs: events.append("reparsed") or {
+            "metadata": {
+                "parser_version": PDF_TEXT_PARSER_VERSION,
+                "persistence_status": "persisted",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        medical_insights.medical_analysis_repository,
+        "get_current",
+        lambda *_args: pytest.fail("old parser run must not be returned"),
+    )
+
+    with pytest.raises(AppError) as exc:
+        asyncio.run(
+            medical_insights.get_current_medical_insights(
+                "document-a",
+                workspace_id="workspace-a",
+                user=SimpleNamespace(id="user-a"),
+            )
+        )
+
+    assert events == ["reparsed"]
+    assert exc.value.status_code == 409
+    assert exc.value.code == "analysis_outdated"
+    assert exc.value.details["requires_reanalysis"] is True
+    assert exc.value.details["reason"] == "parser_version_changed"
+
+
+def test_start_does_not_use_old_chunks_when_reparse_is_not_persisted(monkeypatch):
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_ENABLED", True)
+    monkeypatch.setattr(medical_insights, "resolve_workspace_id", lambda *_: "workspace-a")
+    monkeypatch.setattr(
+        medical_insights,
+        "_get_scoped_document",
+        lambda *_args, **_kwargs: {
+            "document_id": "document-a",
+            "filename": "paper.pdf",
+            "file_path": "/tmp/paper.pdf",
+            "original_filename": "paper.pdf",
+            "file_extension": "pdf",
+            "parser_version": "document-parser-pdf-readable-v1",
+        },
+    )
+    monkeypatch.setattr(medical_insights, "_require_repository", lambda: None)
+    monkeypatch.setattr(medical_insights, "get_cached_parse", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        medical_insights,
+        "parse_document_file",
+        lambda *_args, **_kwargs: {
+            "metadata": {
+                "parser_version": PDF_TEXT_PARSER_VERSION,
+                "persistence_status": "cache_only",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        medical_insights.medical_analysis_repository,
+        "get_source",
+        lambda *_args, **_kwargs: pytest.fail("old chunks must not be analyzed"),
+    )
+
+    with pytest.raises(AppError) as exc:
+        asyncio.run(
+            medical_insights._start_analysis(
+                "document-a",
+                BackgroundTasks(),
+                SimpleNamespace(id="user-a"),
+                workspace_id="workspace-a",
+                external_processing_confirmed=False,
+                external_processing_config_fingerprint=None,
+                force=False,
+            )
+        )
+
+    assert exc.value.code == "parse_persistence_failed"
+
+
+def test_current_insights_rejects_runs_from_an_older_analysis_pipeline(monkeypatch):
+    monkeypatch.setattr(medical_insights, "resolve_workspace_id", lambda *_: "workspace-a")
+    monkeypatch.setattr(
+        medical_insights,
+        "_get_scoped_document",
+        lambda *_args, **_kwargs: {
+            "document_id": "document-a",
+            "filename": "paper.pdf",
+            "file_extension": "pdf",
+            "parser_version": PDF_TEXT_PARSER_VERSION,
+        },
+    )
+    monkeypatch.setattr(medical_insights, "_require_repository", lambda: None)
+    monkeypatch.setattr(medical_insights, "get_cached_parse", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_PROVIDER", "extractive")
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_MODEL", "extractive-v2")
+    monkeypatch.setattr(
+        medical_insights,
+        "get_provider",
+        lambda *_args: SimpleNamespace(model_name="extractive-v2"),
+    )
+    monkeypatch.setattr(
+        medical_insights.medical_analysis_repository,
+        "get_current",
+        lambda *_args: {
+            "provider": "extractive",
+            "model_name": "extractive-v2",
+            "prompt_version": "medical-insights-v3",
+            "schema_version": "medical-insights-v3",
+        },
+    )
+
+    with pytest.raises(AppError) as exc:
+        asyncio.run(
+            medical_insights.get_current_medical_insights(
+                "document-a",
+                workspace_id="workspace-a",
+                user=SimpleNamespace(id="user-a"),
+            )
+        )
+
+    assert exc.value.code == "analysis_outdated"
+    assert exc.value.details["reason"] == "analysis_pipeline_changed"
+
+
+def test_run_detail_rejects_a_saved_report_from_an_older_pipeline(monkeypatch):
+    monkeypatch.setattr(medical_insights, "resolve_workspace_id", lambda *_: "workspace-a")
+    monkeypatch.setattr(medical_insights, "_require_repository", lambda: None)
+    monkeypatch.setattr(
+        medical_insights.medical_analysis_repository,
+        "get_run",
+        lambda *_args: {
+            "run_id": "run-old",
+            "document_id": "document-a",
+            "provider": "extractive",
+            "model_name": "extractive-v2",
+            "prompt_version": "medical-insights-v3",
+            "schema_version": "medical-insights-v3",
+        },
+    )
+    monkeypatch.setattr(
+        medical_insights,
+        "_get_scoped_document",
+        lambda *_args: {
+            "filename": "paper.txt",
+            "file_extension": ".txt",
+            "parser_version": PDF_TEXT_PARSER_VERSION,
+        },
+    )
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_PROVIDER", "extractive")
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_MODEL", "extractive-v2")
+    monkeypatch.setattr(
+        medical_insights,
+        "get_provider",
+        lambda *_args: SimpleNamespace(model_name="extractive-v2"),
+    )
+
+    with pytest.raises(AppError) as exc:
+        asyncio.run(
+            medical_insights.get_medical_insight_run(
+                "run-old",
+                workspace_id="workspace-a",
+                user=SimpleNamespace(id="user-a"),
+            )
+        )
+
+    assert exc.value.code == "analysis_outdated"
+    assert exc.value.details["reason"] == "analysis_pipeline_changed"
 
 
 def test_medical_analysis_route_returns_404_for_missing_analysis(monkeypatch):

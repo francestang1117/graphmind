@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { AlertCircle, CheckCircle2, FileSearch, Loader2, RefreshCw, X } from "lucide-react";
 import {
@@ -379,12 +379,35 @@ function ReportView({
 }
 
 export default function MedicalInsightPanel({ documentId, title, workspaceId, onClose }: Props) {
-  const [run, setRun] = useState<MedicalInsightRun | null>(null);
+  const contextKey = `${workspaceId || "default"}:${documentId}`;
+  const [runState, setRunState] = useState<{
+    contextKey: string;
+    value: MedicalInsightRun | null;
+  }>({ contextKey: "", value: null });
+  const run = runState.contextKey === contextKey ? runState.value : null;
+  const setCurrentRun = useCallback(
+    (value: MedicalInsightRun | null) => setRunState({ contextKey, value }),
+    [contextKey],
+  );
   const [analysisConfig, setAnalysisConfig] = useState<MedicalInsightConfig | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadedContextKey, setLoadedContextKey] = useState("");
+  const loading = loadedContextKey !== contextKey;
   const [configLoading, setConfigLoading] = useState(true);
   const [starting, setStarting] = useState(false);
-  const [error, setError] = useState("");
+  const [errorState, setErrorState] = useState({ contextKey: "", value: "" });
+  const error = errorState.contextKey === contextKey ? errorState.value : "";
+  const setError = useCallback(
+    (value: string) => setErrorState({ contextKey, value }),
+    [contextKey],
+  );
+  const [outdatedContextKey, setOutdatedContextKey] = useState("");
+  const analysisOutdated = outdatedContextKey === contextKey;
+  const outdatedNeedsConfirmation = Boolean(
+    analysisOutdated
+      && analysisConfig?.enabled
+      && analysisConfig.configured
+      && analysisConfig.requires_confirmation,
+  );
   const [selectedEvidence, setSelectedEvidence] = useState<MedicalInsightEvidence | null>(null);
   const [externalConsent, setExternalConsent] = useState(false);
   const [showExternalConfirmation, setShowExternalConfirmation] = useState(false);
@@ -413,29 +436,46 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     return () => {
       active = false;
     };
-  }, [documentId, workspaceId]);
+  }, [documentId, setError, workspaceId]);
 
   useEffect(() => {
     let active = true;
-
     getCurrentMedicalInsights(documentId, workspaceId)
       .then((result) => {
-        if (active) setRun(result);
+        if (!active) return;
+        if (result.status === "succeeded" && (result.outdated || result.is_current === false)) {
+          setCurrentRun(null);
+          setSelectedEvidence(null);
+          setError("");
+          setOutdatedContextKey(contextKey);
+          return;
+        }
+        setCurrentRun(result);
       })
       .catch((requestError: unknown) => {
         if (!active) return;
+        const code = axios.isAxiosError(requestError)
+          ? requestError.response?.data?.code
+          : undefined;
+        if (code === "analysis_outdated") {
+          setCurrentRun(null);
+          setSelectedEvidence(null);
+          setError("");
+          setOutdatedContextKey(contextKey);
+          return;
+        }
         if (!axios.isAxiosError(requestError) || requestError.response?.status !== 404) {
           setError("Could not load the current medical insight.");
         }
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) setLoadedContextKey(contextKey);
       });
 
     return () => {
       active = false;
     };
-  }, [documentId, workspaceId]);
+  }, [contextKey, documentId, setCurrentRun, setError, workspaceId]);
 
   useEffect(() => {
     const runId = run?.run_id;
@@ -450,10 +490,27 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
       try {
         const nextRun = await getMedicalInsightRun(runId, workspaceId);
         if (!active) return;
-        setRun(nextRun);
+        if (nextRun.outdated || nextRun.is_current === false) {
+          setCurrentRun(null);
+          setSelectedEvidence(null);
+          setOutdatedContextKey(contextKey);
+          setError("");
+          return;
+        }
+        setCurrentRun(nextRun);
         if (nextRun.status !== "queued" && nextRun.status !== "running") return;
-      } catch {
+      } catch (requestError: unknown) {
         if (!active) return;
+        const code = axios.isAxiosError(requestError)
+          ? requestError.response?.data?.code
+          : undefined;
+        if (code === "analysis_outdated") {
+          setCurrentRun(null);
+          setSelectedEvidence(null);
+          setOutdatedContextKey(contextKey);
+          setError("");
+          return;
+        }
         setError("Could not refresh the medical insight status.");
       }
 
@@ -468,18 +525,19 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
       active = false;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
-  }, [run?.run_id, run?.status, workspaceId]);
+  }, [contextKey, run?.run_id, run?.status, setCurrentRun, setError, workspaceId]);
 
   const evidenceById = useMemo(
     () => new Map((run?.evidence ?? []).map((evidence) => [evidence.evidence_id, evidence])),
     [run?.evidence],
   );
 
-  const executeAnalysis = async (
+  const executeAnalysis = useCallback(async (
     reanalyze: boolean,
     confirmed: boolean,
     configFingerprint?: string,
   ) => {
+    setOutdatedContextKey("");
     setStarting(true);
     setError("");
     setSelectedEvidence(null);
@@ -497,7 +555,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
             confirmed,
             configFingerprint,
           );
-      setRun(nextRun);
+      setCurrentRun(nextRun);
     } catch (requestError) {
       const code = axios.isAxiosError(requestError)
         ? requestError.response?.data?.code
@@ -519,7 +577,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     } finally {
       setStarting(false);
     }
-  };
+  }, [documentId, setCurrentRun, setError, workspaceId]);
 
   const runAnalysis = (reanalyze = false) => {
     if (!analysisConfig?.enabled || !analysisConfig.configured) {
@@ -544,11 +602,27 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     setExternalConsent(true);
     setShowExternalConfirmation(false);
     void executeAnalysis(
-      pendingReanalysis,
+      analysisOutdated || pendingReanalysis,
       true,
       analysisConfig.config_fingerprint,
     );
   };
+
+  useEffect(() => {
+    if (!analysisOutdated || loading || configLoading || !analysisConfig || starting) return;
+
+    if (!analysisConfig.enabled || !analysisConfig.configured) {
+      return;
+    }
+    if (analysisConfig.requires_confirmation) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void executeAnalysis(false, false, analysisConfig.config_fingerprint);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [analysisConfig, analysisOutdated, configLoading, executeAnalysis, loading, starting]);
 
   const report = run?.report;
 
@@ -589,7 +663,35 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
         </div>
       )}
 
-      {showExternalConfirmation && analysisConfig && (
+      {analysisOutdated
+        && analysisConfig?.enabled
+        && analysisConfig.configured
+        && !showExternalConfirmation
+        && !outdatedNeedsConfirmation
+        && !error && (
+        <div className="insight-status" role="status">
+          <Loader2 className="spin" size={18} />
+          <div>
+            <strong>Updating analysis</strong>
+            <p>The saved result used an older source or analysis version and is hidden until it is refreshed.</p>
+          </div>
+        </div>
+      )}
+
+      {analysisOutdated
+        && analysisConfig
+        && (!analysisConfig.enabled || !analysisConfig.configured)
+        && !error && (
+        <div className="parsed-state error" role="alert">
+          <AlertCircle size={17} />
+          <span>The saved analysis is outdated, and analysis is not available on the server.</span>
+          <button className="insight-retry" type="button" onClick={() => runAnalysis()}>
+            Try again
+          </button>
+        </div>
+      )}
+
+      {(showExternalConfirmation || outdatedNeedsConfirmation) && analysisConfig && (
         <div
           className="insight-external-confirmation"
           role="dialog"
@@ -603,7 +705,10 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
             <button
               type="button"
               className="insight-retry"
-              onClick={() => setShowExternalConfirmation(false)}
+              onClick={() => {
+                setShowExternalConfirmation(false);
+                setOutdatedContextKey("");
+              }}
             >
               Cancel
             </button>
@@ -674,15 +779,33 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
       {run?.status === "succeeded" && report && (
         <>
           <div className="insight-meta">
-            <span><CheckCircle2 size={13} /> Source links attached</span>
-            <span>{run.provider === "extractive" ? "Local extractive analysis" : `${readable(run.provider)} AI analysis`}</span>
-            <span>{run.model_name}</span>
-            {run.parsed_source_hash && <span>Source {run.parsed_source_hash.slice(0, 8)}</span>}
-            <span>{readable(report.document_kind)}</span>
-            <span>{report.language}</span>
-            {typeof run.citation_coverage === "number" && (
-              <span>{Math.round(run.citation_coverage * 100)}% of displayed items linked to source passages</span>
-            )}
+            <span className="insight-meta-source">
+              <CheckCircle2 size={14} />
+              {typeof run.citation_coverage === "number" && run.citation_coverage >= 1
+                ? "All displayed items source-linked"
+                : typeof run.citation_coverage === "number"
+                  ? `${Math.round(run.citation_coverage * 100)}% source-linked`
+                  : "Source-linked report"}
+            </span>
+            <span className="insight-meta-local">
+              {run.provider === "extractive" ? "Runs locally" : "External AI processing"}
+            </span>
+            <details className="insight-analysis-details">
+              <summary>Analysis details</summary>
+              <dl>
+                <div><dt>Provider</dt><dd>{readable(run.provider)}</dd></div>
+                <div><dt>Model</dt><dd>{run.model_name}</dd></div>
+                <div><dt>Analysis pipeline</dt><dd>{run.prompt_version}</dd></div>
+                <div><dt>Report schema</dt><dd>{run.schema_version}</dd></div>
+                <div><dt>Document type</dt><dd>{readable(report.document_kind)}</dd></div>
+                <div><dt>Language</dt><dd>{report.language}</dd></div>
+                {run.parser_version && <div><dt>PDF parser</dt><dd>{run.parser_version}</dd></div>}
+                {run.parsed_source_hash && <div><dt>Source snapshot</dt><dd>{run.parsed_source_hash}</dd></div>}
+                {typeof run.citation_coverage === "number" && (
+                  <div><dt>Source coverage</dt><dd>{Math.round(run.citation_coverage * 100)}% of displayed items linked to source passages</dd></div>
+                )}
+              </dl>
+            </details>
           </div>
           {run.provider !== "extractive" && (
             <div className="insight-provider-notice">
