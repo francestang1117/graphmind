@@ -457,6 +457,35 @@ def test_extractive_provider_skips_fragmented_source_text():
     ]
 
 
+def test_extractive_provider_does_not_mark_a_damaged_method_passage_supported():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "methods",
+            "The clinical signifi- classified into three clinical types.",
+        )
+    )
+
+    methods = ExtractiveMedicalAIProvider().generate("prompt", context)["study_methods"]
+
+    assert methods["comparator"] == {}
+    assert methods["human_animal_in_vitro"] == {}
+
+
+def test_extractive_provider_marks_background_when_no_study_aim_is_found():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "abstract",
+            "Fabry disease is characterized by systemic accumulation of biomarkers.",
+        )
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert "study_aim_unavailable" in output["warnings"]
+
+
 def test_extractive_provider_uses_field_matching_sentences_for_method_attributes():
     context = _context(
         (

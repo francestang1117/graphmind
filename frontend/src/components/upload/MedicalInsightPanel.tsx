@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
-import { AlertCircle, CheckCircle2, FileSearch, Loader2, RefreshCw, X } from "lucide-react";
+import { AlertCircle, FileSearch, Loader2, RefreshCw, X } from "lucide-react";
 import {
   getCurrentMedicalInsights,
   getMedicalInsightConfig,
@@ -100,6 +100,8 @@ function warningLabel(warning: string) {
       return "No reliable key findings could be extracted from this document.";
     case "evidence_quality_filtered":
       return "Some passages were excluded because their text quality was not reliable enough for medical evidence.";
+    case "study_aim_unavailable":
+      return "The study aim was not clearly identified in the analyzed text; the overview is shown as background.";
     case "pdf_layout_ambiguous":
       return "The PDF column layout could not be read reliably; analysis was stopped for safety.";
     case "table_location_unavailable":
@@ -249,7 +251,7 @@ function ReportView({
   const methodFields = [
     ["Study design", report.study_methods?.design],
     ["Population", report.study_methods?.population],
-    ["Study subject", report.study_methods?.human_animal_in_vitro],
+    ["What was measured", report.study_methods?.human_animal_in_vitro],
     ["Sample size", report.study_methods?.sample_size],
     ["Comparator", report.study_methods?.comparator],
   ] as const;
@@ -260,6 +262,9 @@ function ReportView({
     !item?.value?.trim() || item?.support_status === "not_reported",
   );
   const sourcePassages = [...evidenceById.values()];
+  const processingWarnings = (run.warnings ?? []).filter(
+    (warning) => !["not_medical_advice", "extractive_output", "pii_redacted"].includes(warning),
+  );
   const hasAdditionalAnalysis = Boolean(
     report.limitations.length
     || report.what_it_means.length
@@ -271,8 +276,11 @@ function ReportView({
   return (
     <div className="insight-report">
       <section className="insight-report-section insight-overview">
-        <h3>About this paper</h3>
+        <h3>{report.warnings.includes("study_aim_unavailable") ? "Background" : "About this paper"}</h3>
         <p className="insight-readable-content">{report.overview.summary}</p>
+        {report.warnings.includes("study_aim_unavailable") && (
+          <p className="insight-muted-note">Study aim was not clearly identified in the analyzed text.</p>
+        )}
         {findingEvidence(
           {
             id: "overview",
@@ -441,11 +449,11 @@ function ReportView({
         </details>
       )}
 
-      {(run.warnings?.length ?? 0) > 0 && (
+      {processingWarnings.length > 0 && (
         <details className="insight-report-section insight-details">
           <summary>Processing notes</summary>
           <ul className="insight-processing-notes">
-            {(run.warnings ?? []).map((warning) => <li key={warning}>{warningLabel(warning)}</li>)}
+            {processingWarnings.map((warning) => <li key={warning}>{warningLabel(warning)}</li>)}
           </ul>
         </details>
       )}
@@ -734,12 +742,6 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
   }, [analysisConfig, analysisOutdated, configLoading, executeAnalysis, loading, starting]);
 
   const report = run?.report;
-  const hasValidatedSourcePassages =
-    typeof run?.citation_coverage === "number"
-    && run.citation_coverage >= 1
-    && evidenceById.size > 0
-    && [...evidenceById.values()].every((item) => (item.quality_score ?? 100) >= 60);
-
   if (applicationUpdateIncomplete && runtimeErrorState) {
     const versions = runtimeErrorState.versions;
     return (
@@ -928,14 +930,8 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
         <>
           <div className="insight-meta">
             <span className="insight-meta-source">
-              {hasValidatedSourcePassages
-                ? <CheckCircle2 size={14} />
-                : <AlertCircle size={14} />}
-              {hasValidatedSourcePassages
-                ? "All displayed claims have validated source passages"
-                : typeof run.citation_coverage === "number"
-                  ? `${Math.round(run.citation_coverage * 100)}% of displayed claims linked; some passages need review`
-                  : "Source-linked report"}
+              <FileSearch size={14} />
+              Source passages attached
             </span>
             <span className="insight-meta-local">
               {run.provider === "extractive" ? "Runs locally" : "External AI processing"}
@@ -956,7 +952,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
                   <div><dt>Backend commit</dt><dd>{run.runtime_versions.backendCommit}</dd></div>
                 )}
                 {typeof run.citation_coverage === "number" && (
-                  <div><dt>Source coverage</dt><dd>{Math.round(run.citation_coverage * 100)}% of displayed claims linked to source passages; quality checks are shown separately</dd></div>
+                  <div><dt>Source coverage</dt><dd>{Math.round(run.citation_coverage * 100)}% of displayed claims linked to source passages; passage quality is checked separately</dd></div>
                 )}
                 {(run.warnings?.length ?? 0) > 0 && (
                   <div><dt>Processing notes</dt><dd>{(run.warnings ?? []).map(warningLabel).join(" ")}</dd></div>

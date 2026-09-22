@@ -32,7 +32,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
-PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v3"
+PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v4"
 
 
 # Parsed document shape
@@ -503,77 +503,108 @@ def _pdf_line_has_gutter(
     gap = right_edge - left_edge
     page_width = float(getattr(page, "width", 0) or 0)
     if page_width:
-        return gap >= max(18.0, page_width * 0.03)
+        # Real journal PDFs often leave only 1.5-2% of the page width between
+        # columns. The old 3%/18pt threshold missed those pages and let
+        # pdfplumber's interleaved text order reach the medical pipeline.
+        return gap >= max(8.0, page_width * 0.015)
     line_span = max(float(word.get("x0", 0) or 0) for word in line) - min(
         float(word.get("x0", 0) or 0) for word in line
     )
-    return gap >= max(18.0, line_span * 0.1)
+    return gap >= max(8.0, line_span * 0.05)
 
 
 def _pdf_column_boundary(
     words: list[dict[str, Any]], page: Any
 ) -> float | None:
-    """Find an obvious two-column gutter without guessing normal word spacing."""
-    positions = sorted({float(word.get("x0", 0) or 0) for word in words})
-    if len(positions) < 4:
-        return None
-    gaps = [
-        (positions[index + 1] - positions[index], index)
-        for index in range(len(positions) - 1)
+    """Find a repeated central gutter in the page's visual text lines.
+
+    A whole-page ``x0`` gap is not reliable: every line in a real two-column
+    paper starts at a slightly different word position, so the gutter may be
+    only an 11pt gap while the set of all x positions has no large hole. A
+    repeated line-level gap is a much stronger signal and also avoids treating
+    one wide word space in a single-column heading as a column boundary.
+    """
+    positioned = [
+        word for word in words
+        if "top" in word or "doctop" in word
     ]
-    gap, gap_index = max(gaps, default=(0.0, -1))
-    if gap_index < 0:
-        return None
-
-    minimum_position = positions[0]
-    maximum_position = positions[-1]
-    span = maximum_position - minimum_position
-    if span <= 0:
-        return None
+    lines = _pdf_line_groups(positioned or words)
     page_width = float(getattr(page, "width", 0) or 0)
-    boundary = (positions[gap_index] + positions[gap_index + 1]) / 2
+    minimum_boundary = page_width * 0.25 if page_width else None
+    maximum_boundary = page_width * 0.75 if page_width else None
     if page_width:
-        if not page_width * 0.25 <= boundary <= page_width * 0.75:
-            return None
-        if gap < max(18.0, page_width * 0.03):
-            return None
-    elif gap < max(72.0, span * 0.2):
+        minimum_gap = max(8.0, page_width * 0.015)
+    else:
+        positions = [float(word.get("x0", 0) or 0) for word in words]
+        span = max(positions, default=0.0) - min(positions, default=0.0)
+        # Without a page width there is not enough geometry to recognize a
+        # narrow real gutter. Keep the conservative sparse-page fallback.
+        minimum_gap = max(72.0, span * 0.2)
+
+    # Each candidate is the midpoint of an actual word gap within one visual
+    # line. Cluster nearby midpoints so a stable gutter wins over incidental
+    # spacing elsewhere on a page.
+    candidates: list[tuple[float, float, int]] = []
+    for line_index, line in enumerate(lines):
+        ordered = sorted(line, key=lambda word: float(word.get("x0", 0) or 0))
+        for previous, following in zip(ordered, ordered[1:]):
+            previous_end = float(
+                previous.get("x1", previous.get("x0", 0)) or 0
+            )
+            following_start = float(following.get("x0", 0) or 0)
+            gap = following_start - previous_end
+            boundary = (previous_end + following_start) / 2
+            if gap < minimum_gap:
+                continue
+            if minimum_boundary is not None and not (
+                minimum_boundary <= boundary <= maximum_boundary
+            ):
+                continue
+            candidates.append((boundary, gap, line_index))
+
+    if not candidates:
         return None
 
-    left = [word for word in words if float(word.get("x0", 0) or 0) <= boundary]
-    right = [word for word in words if float(word.get("x0", 0) or 0) > boundary]
-    if len(left) < 2 or len(right) < 2:
-        return None
-
-    # A normal single-column page can contain a large incidental x gap. A
-    # repeated split across text lines is stronger evidence of a page gutter;
-    # a very large gap is enough for small synthetic or sparse pages.
-    top_groups: list[list[dict[str, Any]]] = []
-    for word in sorted(
-        words,
-        key=lambda value: float(value.get("top", value.get("doctop", 0)) or 0),
-    ):
-        top = float(word.get("top", word.get("doctop", 0)) or 0)
-        group = next(
-            (
-                group
-                for group in top_groups
-                if abs(
-                    top
-                    - float(group[0].get("top", group[0].get("doctop", 0)) or 0)
-                )
-                <= 3
-            ),
-            None,
-        )
-        if group is None:
-            top_groups.append([word])
+    candidates.sort(key=lambda candidate: candidate[0])
+    clusters: list[list[tuple[float, float, int]]] = []
+    for candidate in candidates:
+        if not clusters or candidate[0] - clusters[-1][-1][0] > 14.0:
+            clusters.append([candidate])
         else:
-            group.append(word)
-    split_lines = sum(_pdf_line_has_gutter(group, boundary, page) for group in top_groups)
-    if split_lines < 2 and gap < span * 0.25:
-        return None
-    return boundary
+            clusters[-1].append(candidate)
+
+    best_score: tuple[int, int, float, float] | None = None
+    best_boundary: float | None = None
+    for cluster in clusters:
+        line_indexes = {candidate[2] for candidate in cluster}
+        boundary = sorted(candidate[0] for candidate in cluster)[len(cluster) // 2]
+        split_lines = sum(
+            _pdf_line_has_gutter(line, boundary, page)
+            for line in lines
+        )
+        if split_lines < 1:
+            continue
+        # A real page needs repeated support. Keep two-line synthetic fixtures
+        # useful for unit tests, while requiring more evidence on dense pages.
+        minimum_support = 2 if len(lines) <= 8 else max(4, len(lines) // 20)
+        if len(lines) == 1 and max(candidate[1] for candidate in cluster) >= (
+            max(72.0, page_width * 0.25) if page_width else minimum_gap
+        ):
+            minimum_support = 1
+        if split_lines < minimum_support:
+            continue
+        distance_from_center = (
+            -abs(boundary - page_width / 2)
+            if page_width
+            else 0.0
+        )
+        median_gap = sorted(candidate[1] for candidate in cluster)[len(cluster) // 2]
+        support = (split_lines, len(line_indexes), distance_from_center, median_gap)
+        if best_score is None or support > best_score:
+            best_score = support
+            best_boundary = boundary
+
+    return best_boundary
 
 
 def _pdf_word_lines(words: list[dict[str, Any]]) -> list[str]:

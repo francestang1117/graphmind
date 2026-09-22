@@ -113,7 +113,11 @@ def assess_passage(
 
     soft_flags: list[str] = []
     if _BROKEN_HYPHEN.search(value):
+        # An unrepaired line-ending hyphen is unsafe evidence. In a two-column
+        # PDF the next word may belong to the other column, so do not let this
+        # passage reach the medical report as a supported field.
         soft_flags.append("broken_word_hyphen")
+        hard_reject = True
     if _INSERTED_HEADING.search(value):
         soft_flags.append("inserted_heading")
     if not _balanced_brackets(value):

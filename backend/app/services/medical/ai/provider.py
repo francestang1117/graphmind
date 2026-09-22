@@ -15,6 +15,7 @@ from typing import Any, Protocol
 from app.services.medical.ai.context_builder import AnalysisContext, EvidenceItem
 from app.services.medical.ai.exceptions import MedicalInsightError, ProviderUnavailable
 from app.services.medical.ai.models import MedicalInsightReport
+from app.services.medical.text_quality import assess_passage
 
 
 class MedicalAIProvider(Protocol):
@@ -45,7 +46,8 @@ class ExtractiveMedicalAIProvider:
             "conclusion",
             "introduction",
         ) or (evidence[0] if evidence else None)
-        summary = _overview_summary(overview_item.text if overview_item else "")
+        overview_text = overview_item.text if overview_item else ""
+        summary, summary_is_study_aim = _overview_summary_details(overview_text)
         if not summary:
             summary = "The document contains no extractable passage for a summary."
 
@@ -124,6 +126,8 @@ class ExtractiveMedicalAIProvider:
             )
 
         warnings = ["not_medical_advice", "extractive_output", *context.warnings]
+        if overview_item and not summary_is_study_aim:
+            warnings.append("study_aim_unavailable")
         if not findings:
             warnings.append("no_reliable_key_findings")
         return {
@@ -417,6 +421,8 @@ def _population_sentence_supported(text: str) -> bool:
 def _population_evidence(evidence: list[EvidenceItem]) -> EvidenceItem | None:
     """Return only a passage that can plausibly describe study participants."""
     for item in evidence:
+        if not _evidence_is_reliable(item):
+            continue
         section_type = str(item.section_type or "").strip().lower()
         if section_type not in {"abstract", "population", "methods"}:
             continue
@@ -471,6 +477,8 @@ def _method_evidence(evidence: list[EvidenceItem], field: str) -> EvidenceItem |
         for item in evidence:
             if str(item.section_type or "").strip().lower() != section_type:
                 continue
+            if not _evidence_is_reliable(item):
+                continue
             if _method_marker_found(item.text or "", field, marker):
                 return item
     return None
@@ -520,7 +528,7 @@ def _method_excerpt(item: EvidenceItem, field: str) -> str:
 
 def _method_attribute(evidence: list[EvidenceItem], field: str) -> dict[str, Any]:
     item = _method_evidence(evidence, field)
-    if item is None or item.quality_score < 60:
+    if item is None or not _evidence_is_reliable(item):
         return {}
     value = _method_excerpt(item, field)
     if not value:
@@ -543,10 +551,7 @@ def _take_distinct(
     for item in evidence:
         if item.section_type not in section_types:
             continue
-        if item.quality_score < 60 or any(
-            flag in {"broken_word_hyphen", "inserted_heading", "citation_density", "combined_quality_risk"}
-            for flag in item.quality_flags
-        ):
+        if not _evidence_is_reliable(item):
             continue
         section_title = str(item.section_title or "").strip().lower()
         if re.match(r"^(?:study\s+)?(?:objectives?|aims?)(?:\b|$)", section_title):
@@ -585,6 +590,19 @@ def _finding(
         "evidence_level": "reported_in_document",
         "interpretation_type": interpretation_type,
     }
+
+
+def _evidence_is_reliable(item: EvidenceItem) -> bool:
+    """Re-run the passage gate for older persisted chunks as a last defense."""
+    if item.quality_score < 60:
+        return False
+    quality = assess_passage(
+        item.text,
+        section_type=item.section_type,
+        section_title=item.section_title,
+        metadata={"quality_flags": item.quality_flags},
+    )
+    return quality.usable and quality.score >= 60
 
 
 def _question_suggestion(
@@ -628,6 +646,10 @@ def _summary(text: str, max_chars: int = 360) -> str:
 
 
 def _overview_summary(text: str) -> str:
+    return _overview_summary_details(text)[0]
+
+
+def _overview_summary_details(text: str) -> tuple[str, bool]:
     normalized = " ".join(str(text or "").split()).strip()
     normalized = re.sub(
         r"^(?:objectives?|background|aims?|purpose|methods|results|conclusions?)\s*[:\-–]?\s+",
@@ -642,7 +664,10 @@ def _overview_summary(text: str) -> str:
         re.I,
     )
     preferred = next((sentence for sentence in sentences if objective_markers.search(sentence)), None)
-    return _summary(preferred or (sentences[0] if sentences else normalized))
+    return (
+        _summary(preferred or (sentences[0] if sentences else normalized)),
+        preferred is not None,
+    )
 
 
 def _study_type(document_kind: str) -> str:

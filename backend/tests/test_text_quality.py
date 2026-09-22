@@ -29,3 +29,13 @@ def test_quality_gate_requires_two_soft_signals_to_reject():
 
     assert result.usable
     assert "no_sentence_boundary" in result.reasons
+
+
+def test_quality_gate_rejects_unrepaired_hyphenated_column_splice():
+    result = assess_passage(
+        "The clinical signifi- classified into three clinical types.",
+        section_type="methods",
+    )
+
+    assert not result.usable
+    assert "broken_word_hyphen" in result.reasons

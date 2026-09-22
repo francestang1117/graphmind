@@ -1888,7 +1888,7 @@ button {
 }
 
 .insight-meta-source svg {
-  color: var(--green);
+  color: var(--blue);
 }
 
 .insight-meta-local {
@@ -1976,7 +1976,7 @@ button {
 }
 
 .insight-meta svg {
-  color: #34d399;
+  color: var(--blue);
 }
 
 .insight-report {

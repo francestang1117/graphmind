@@ -63,7 +63,7 @@ function queuedRun() {
     parsed_source_hash: "parsed-new",
     provider: "extractive",
     model_name: "extractive-v3",
-    prompt_version: "medical-insights-v3+medical-insights-readable-v3",
+    prompt_version: "medical-insights-v3+medical-insights-readable-v4",
     schema_version: "medical-insights-v3",
   };
 }
@@ -285,7 +285,7 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
 
     renderPanel();
 
-    expect(await screen.findByText("100% of displayed claims linked; some passages need review")).toBeInTheDocument();
+    expect(await screen.findByText("Source passages attached")).toBeInTheDocument();
     expect(screen.queryByText("All displayed claims have validated source passages")).not.toBeInTheDocument();
   });
 });

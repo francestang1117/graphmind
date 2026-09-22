@@ -124,6 +124,43 @@ def test_pdf_parser_forces_coordinate_order_for_normal_spaced_two_columns(tmp_pa
     assert parsed.metadata["page_layouts"][0]["column_boundary"] is not None
 
 
+def test_pdf_parser_detects_narrow_repeated_gutter_in_realistic_journal_layout(tmp_path, monkeypatch):
+    pdf_path = tmp_path / "narrow-gutter.pdf"
+    pdf_path.write_bytes(b"%PDF fake")
+
+    words = []
+    for index in range(5):
+        top = 40 + index * 14
+        words.extend(
+            [
+                {"text": "Left", "x0": 44, "x1": 72, "top": top},
+                {"text": "column", "x0": 80, "x1": 120, "top": top},
+                {"text": "tail", "x0": 250, "x1": 291, "top": top},
+                {"text": "Right", "x0": 303, "x1": 335, "top": top},
+                {"text": "column", "x0": 343, "x1": 385, "top": top},
+            ]
+        )
+
+    class InterleavedNarrowPage(FakePDFPage):
+        def extract_text(self, **_kwargs):
+            return "\n".join(
+                f"Left column tail Right column"
+                for _ in range(5)
+            )
+
+    page = InterleavedNarrowPage("", words=words)
+    page.width = 595
+    monkeypatch.setitem(sys.modules, "pdfplumber", SimpleNamespace(open=lambda _path: FakePDF([page])))
+
+    parsed = PDFParser().parse(pdf_path)
+
+    assert parsed.metadata["page_layouts"][0]["mode"] == "columns"
+    assert parsed.raw_text == (
+        "Left column tail\n" * 5
+        + "Right column\n" * 5
+    ).rstrip()
+
+
 def test_pdf_coordinate_reconstruction_repairs_only_safe_line_break_hyphens():
     page = FakePDFPage(
         "",

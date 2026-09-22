@@ -6,9 +6,9 @@ import {
 
 const currentHeaders = {
   "x-graphmind-backend-commit": "abc123",
-  "x-graphmind-parser-version": "document-parser-pdf-readable-v3",
-  "x-graphmind-analysis-pipeline": "medical-insights-readable-v3",
-  "x-graphmind-insight-contract": "medical-insights-readable-v3",
+  "x-graphmind-parser-version": "document-parser-pdf-readable-v4",
+  "x-graphmind-analysis-pipeline": "medical-insights-readable-v4",
+  "x-graphmind-insight-contract": "medical-insights-readable-v4",
   "x-graphmind-analysis-model": "extractive-v3",
 };
 
@@ -16,8 +16,8 @@ describe("medical runtime version gate", () => {
   it("accepts a backend with the current parser and analysis contract", () => {
     expect(validateMedicalRuntimeHeaders(currentHeaders)).toMatchObject({
       backendCommit: "abc123",
-      parserVersion: "document-parser-pdf-readable-v3",
-      analysisPipelineVersion: "medical-insights-readable-v3",
+      parserVersion: "document-parser-pdf-readable-v4",
+      analysisPipelineVersion: "medical-insights-readable-v4",
       analysisModel: "extractive-v3",
     });
   });
