@@ -189,11 +189,11 @@ describe("LiteratureEvidencePanel", () => {
     const user = userEvent.setup();
     renderPanel();
 
-    const searchDisclosure = screen.getByText("Find related research").closest("details");
+    const searchDisclosure = screen.getByText("Search PubMed for related studies").closest("details");
     expect(searchDisclosure).not.toHaveAttribute("open");
     expect(screen.queryByText("Before you search")).not.toBeInTheDocument();
 
-    await user.click(screen.getByText("Find related research"));
+    await user.click(screen.getByText("Search PubMed for related studies"));
     expect(searchDisclosure).toHaveAttribute("open");
     expect(screen.getByText(/Only normalized medical terms are sent to PubMed/)).toBeInTheDocument();
 

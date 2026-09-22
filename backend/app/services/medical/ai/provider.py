@@ -30,7 +30,7 @@ class ExtractiveMedicalAIProvider:
 
     name = "extractive"
 
-    def __init__(self, model_name: str = "extractive-v1") -> None:
+    def __init__(self, model_name: str = "extractive-v2") -> None:
         self.model_name = model_name
 
     def generate(self, _prompt: str, context: AnalysisContext) -> dict[str, Any]:
@@ -45,20 +45,19 @@ class ExtractiveMedicalAIProvider:
             "conclusion",
             "introduction",
         ) or (evidence[0] if evidence else None)
-        summary = _summary(overview_item.text if overview_item else "")
+        summary = _overview_summary(overview_item.text if overview_item else "")
         if not summary:
             summary = "The document contains no extractable passage for a summary."
 
+        finding_sections = (
+            {"results", "conclusion"}
+            if context.document_kind == "research_paper"
+            else {"results", "evidence", "conclusion", "recommendations"}
+        )
         findings = []
         for item in _take_distinct(
             evidence,
-            {
-                "results",
-                "evidence",
-                "conclusion",
-                "adverse_events",
-                "recommendations",
-            },
+            finding_sections,
             limit=3,
         ):
             if overview_item and item.evidence_id == overview_item.evidence_id:
@@ -183,7 +182,7 @@ class OpenAIMedicalAIProvider:
                 "OpenAI is not configured for medical insights.",
                 details={"provider": self.name},
             )
-        if not model_name or model_name == "extractive-v1":
+        if not model_name or model_name in {"extractive-v1", "extractive-v2"}:
             raise ProviderUnavailable(
                 "Set MEDICAL_AI_MODEL before enabling the OpenAI provider.",
                 details={"provider": self.name},
@@ -306,7 +305,7 @@ def get_provider(
 ) -> MedicalAIProvider:
     provider_name = (name or "extractive").strip().lower()
     if provider_name == "extractive":
-        return ExtractiveMedicalAIProvider(model_name or "extractive-v1")
+        return ExtractiveMedicalAIProvider(model_name or "extractive-v2")
     if provider_name == "fake":
         return FakeMedicalAIProvider(model_name=model_name or "fake-v1")
     if provider_name == "openai":
@@ -542,8 +541,19 @@ def _take_distinct(
     for item in evidence:
         if item.section_type not in section_types:
             continue
+        section_title = str(item.section_title or "").strip().lower()
+        if re.match(r"^(?:study\s+)?(?:objectives?|aims?)(?:\b|$)", section_title):
+            continue
         statement = _summary(item.text)
-        if not statement or statement in seen:
+        if (
+            not statement
+            or re.match(
+                r"^(?:(?:study|research)\s+)?(?:objectives?|aims?|purposes?)\b",
+                statement,
+                re.I,
+            )
+            or statement in seen
+        ):
             continue
         seen.add(statement)
         result.append(item)
@@ -608,6 +618,17 @@ def _summary(text: str, max_chars: int = 360) -> str:
         return normalized
     shortened = normalized[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:")
     return f"{shortened}..."
+
+
+def _overview_summary(text: str) -> str:
+    normalized = " ".join(str(text or "").split()).strip()
+    normalized = re.sub(
+        r"^(?:objectives?|background|aims?|purpose|methods|results|conclusions?)\s*[:\-–]?\s+",
+        "",
+        normalized,
+        flags=re.I,
+    )
+    return _summary(normalized)
 
 
 def _study_type(document_kind: str) -> str:

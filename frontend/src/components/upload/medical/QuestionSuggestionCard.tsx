@@ -80,6 +80,27 @@ export default function QuestionSuggestionCard({
         <span className="insight-question-category">
           {CATEGORY_LABELS[suggestion.category] || "Discussion question"}
         </span>
+      </div>
+      <h4 className="insight-question-text">{suggestion.question}</h4>
+      <p className="insight-question-rationale"><strong>Why ask:</strong> {suggestion.rationale}</p>
+      <div className="insight-question-footer">
+        {evidence.length > 0 && (
+          <div className="insight-question-evidence">
+            <span className="insight-question-evidence-label">Source</span>
+            {evidence.map((item) => (
+              <button
+                className="insight-evidence-button"
+                key={item.id || item.evidence_id}
+                type="button"
+                onClick={() => onSelectEvidence(item)}
+                title="Show the source passage"
+              >
+                <FileText size={12} />
+                {locationLabel(item)}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="insight-question-actions">
           <button
             className="insight-question-copy"
@@ -106,25 +127,6 @@ export default function QuestionSuggestionCard({
           )}
         </div>
       </div>
-      <h4 className="insight-question-text">{suggestion.question}</h4>
-      <p className="insight-question-rationale">{suggestion.rationale}</p>
-      {evidence.length > 0 && (
-        <div className="insight-question-evidence">
-          <span className="insight-question-evidence-label">Source</span>
-          {evidence.map((item) => (
-            <button
-              className="insight-evidence-button"
-              key={item.id || item.evidence_id}
-              type="button"
-              onClick={() => onSelectEvidence(item)}
-              title="Show the source passage"
-            >
-              <FileText size={12} />
-              {locationLabel(item)}
-            </button>
-          ))}
-        </div>
-      )}
       {copyError && (
         <p className="insight-question-error">
           Could not copy this question. Please select the text manually.

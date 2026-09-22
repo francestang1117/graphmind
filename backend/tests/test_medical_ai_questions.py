@@ -433,6 +433,7 @@ def test_extractive_provider_rejects_author_names_as_population_evidence():
 def test_extractive_provider_does_not_turn_objectives_into_findings():
     context = _context(
         ("EVIDENCE_001", "abstract", "Objectives The study assessed a biomarker."),
+        ("EVIDENCE_003", "results", "Objective: To assess biomarkers in the cohort."),
         ("EVIDENCE_002", "results", "Results Fabry patients had higher biomarker levels."),
     )
 

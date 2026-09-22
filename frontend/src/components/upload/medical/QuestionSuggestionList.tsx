@@ -33,10 +33,10 @@ export default function QuestionSuggestionList({
   return (
     <section className="insight-report-section insight-question-list">
       <div className="insight-section-heading">
-        <h3>Questions to discuss with a healthcare professional</h3>
+        <h3>Questions for your clinician</h3>
       </div>
       <p className="insight-question-safety">
-        These questions help you discuss the document with a healthcare professional. They are not a diagnosis, test, or treatment recommendation.
+        Research discussion only; these are not diagnosis or treatment advice.
       </p>
       {suggestions.length > 0 ? (
         <div className="insight-question-grid">

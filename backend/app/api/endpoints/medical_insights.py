@@ -26,6 +26,10 @@ from app.services.medical.ai.analysis_repository import (
 )
 from app.services.medical.ai.exceptions import MedicalInsightError
 from app.services.medical.ai.provider import get_provider
+from app.services.medical.ai.versions import (
+    ANALYSIS_PIPELINE_VERSION,
+    MEDICAL_INSIGHT_API_CONTRACT_VERSION,
+)
 from app.tasks.medical_analysis import run_medical_analysis_once, run_medical_insight
 
 log = logging.getLogger(__name__)
@@ -33,7 +37,6 @@ router = APIRouter()
 
 SUPPORTED_DOCUMENT_KINDS = {"research_paper", "guideline"}
 EXTERNAL_PROVIDERS = {"openai"}
-ANALYSIS_PIPELINE_VERSION = "medical-insights-readable-v2"
 
 
 class MedicalInsightStartRequest(BaseModel):
@@ -141,6 +144,7 @@ async def get_medical_insight_run(
     metadata = _get_scoped_document(run["document_id"], user_id, scope)
     _ensure_current_analysis(run, metadata, user_id=user_id, workspace_id=scope)
     run["parser_version"] = metadata.get("parser_version")
+    run["analysis_pipeline_version"] = ANALYSIS_PIPELINE_VERSION
     return run
 
 
@@ -163,6 +167,8 @@ async def get_latest_medical_insights(
     _ensure_current_analysis(
         report, metadata, user_id=user_id, workspace_id=scope, check_parser=False
     )
+    report["analysis_pipeline_version"] = ANALYSIS_PIPELINE_VERSION
+    report["parser_version"] = metadata.get("parser_version")
     return report
 
 
@@ -188,6 +194,7 @@ async def get_current_medical_insights(
         run, metadata, user_id=user_id, workspace_id=scope, check_parser=False
     )
     run["parser_version"] = metadata.get("parser_version")
+    run["analysis_pipeline_version"] = ANALYSIS_PIPELINE_VERSION
     return run
 
 
@@ -310,6 +317,7 @@ async def _start_analysis(
     if created:
         _enqueue(run["run_id"], background_tasks)
     run["parser_version"] = metadata.get("parser_version")
+    run["analysis_pipeline_version"] = ANALYSIS_PIPELINE_VERSION
 
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK,

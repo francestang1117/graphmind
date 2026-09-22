@@ -17,6 +17,11 @@ import {
 import LiteratureEvidencePanel from "./literature/LiteratureEvidencePanel";
 import QuestionSuggestionList from "./medical/QuestionSuggestionList";
 import { useClinicianQuestions } from "../../hooks/useClinicianQuestions";
+import {
+  ApplicationUpdateIncompleteError,
+  frontendRuntimeCommit,
+  type MedicalRuntimeVersions,
+} from "../../services/runtimeVersion";
 
 function consentStorageKey(
   config: MedicalInsightConfig,
@@ -71,16 +76,10 @@ function readable(value: string) {
   return value.replaceAll("_", " ");
 }
 
-function methodValue(item: MedicalInsightAttribute) {
-  if (item.support_status !== "not_reported") return item.value;
-  switch (item.missing_reason) {
-    case "not_reported_in_source":
-      return "The source evidence states that this field was not reported.";
-    case "source_unreadable":
-      return "This field could not be checked because the source text was not readable.";
-    default:
-      return "This field was not confirmed in the analyzed text.";
-  }
+function isApplicationVersionError(
+  error: unknown,
+): error is ApplicationUpdateIncompleteError {
+  return error instanceof ApplicationUpdateIncompleteError;
 }
 
 function warningLabel(warning: string) {
@@ -167,9 +166,10 @@ function FindingList({
           <article className="insight-finding" key={finding.id}>
             <div className="insight-finding-heading">
               <strong>{finding.statement}</strong>
-              <span className="insight-type">{readable(finding.interpretation_type)}</span>
             </div>
-            <p>{finding.plain_explanation}</p>
+            {finding.interpretation_type !== "direct_statement" && finding.plain_explanation && (
+              <p>{finding.plain_explanation}</p>
+            )}
             {findingEvidence(finding, evidenceById, onSelectEvidence)}
           </article>
         ))}
@@ -192,8 +192,7 @@ function MethodItem({
   return (
     <div className="insight-method-item">
       <span>{label}</span>
-      <strong>{methodValue(item)}</strong>
-      <span className="insight-type">{readable(item.support_status)}</span>
+      <strong>{item.value}</strong>
       {item.evidence_ids.length > 0 && findingEvidence(
         {
           id: `method-${label}`,
@@ -229,22 +228,36 @@ function ReportView({
   staleSuggestionIds?: ReadonlySet<string>;
   savingSuggestionId?: string | null;
 }) {
-  // Older extractive runs predate the report warning. Use the persisted
-  // provider identity as a compatibility fallback so they are not shown as
-  // generated plain-language explanations after a frontend upgrade.
   const isExtractive =
     run.provider === "extractive"
-    || run.model_name === "extractive-v1"
     || report.warnings.includes("extractive_output");
-
+  const methodFields = [
+    ["Study design", report.study_methods?.design],
+    ["Population", report.study_methods?.population],
+    ["Study subject", report.study_methods?.human_animal_in_vitro],
+    ["Sample size", report.study_methods?.sample_size],
+    ["Comparator", report.study_methods?.comparator],
+  ] as const;
+  const availableMethods = methodFields.filter(([, item]) =>
+    Boolean(item?.value?.trim()) && item?.support_status !== "not_reported",
+  );
+  const unavailableMethods = methodFields.filter(([, item]) =>
+    !item?.value?.trim() || item?.support_status === "not_reported",
+  );
+  const sourcePassages = [...evidenceById.values()];
+  const hasAdditionalAnalysis = Boolean(
+    report.limitations.length
+    || report.what_it_means.length
+    || report.what_it_does_not_mean.length
+    || report.applicability?.length
+    || report.future_research?.length
+    || report.medical_terms.length,
+  );
   return (
     <div className="insight-report">
       <section className="insight-report-section insight-overview">
-        <div className="insight-section-heading">
-          <h3>{isExtractive ? "Selected source passages" : "Plain-language overview"}</h3>
-          <span className="insight-type">{readable(report.overview.study_type)}</span>
-        </div>
-        <p>{report.overview.summary}</p>
+        <h3>About this paper</h3>
+        <p className="insight-readable-content">{report.overview.summary}</p>
         {findingEvidence(
           {
             id: "overview",
@@ -259,19 +272,8 @@ function ReportView({
         )}
       </section>
 
-      {run.warnings && run.warnings.length > 0 && (
-        <div className="insight-warning insight-warning-neutral">
-          <AlertCircle size={16} />
-          <div>
-            {run.warnings.map((warning) => (
-              <p key={warning}>{warningLabel(warning)}</p>
-            ))}
-          </div>
-        </div>
-      )}
-
       <FindingList
-        title={isExtractive ? "Source-reported findings" : "Key findings"}
+        title="Key findings"
         items={report.key_findings}
         evidenceById={evidenceById}
         onSelectEvidence={onSelectEvidence}
@@ -289,76 +291,47 @@ function ReportView({
 
       {report.study_methods && (
         <details className="insight-report-section insight-details">
-          <summary>Study methods</summary>
+          <summary>
+            Study details
+            {unavailableMethods.length > 0 && (
+              <span className="insight-summary-count">
+                {availableMethods.length} found · {unavailableMethods.length} not identified
+              </span>
+            )}
+          </summary>
           <div className="insight-method-list">
-            <MethodItem label="Design" item={report.study_methods.design} {...{ evidenceById, onSelectEvidence }} />
-            <MethodItem label="Population" item={report.study_methods.population} {...{ evidenceById, onSelectEvidence }} />
-            <MethodItem label="Evidence subject" item={report.study_methods.human_animal_in_vitro} {...{ evidenceById, onSelectEvidence }} />
-            <MethodItem label="Sample size" item={report.study_methods.sample_size} {...{ evidenceById, onSelectEvidence }} />
-            <MethodItem label="Comparator" item={report.study_methods.comparator} {...{ evidenceById, onSelectEvidence }} />
+            {availableMethods.map(([label, item]) => item && (
+              <MethodItem key={label} label={label} item={item} {...{ evidenceById, onSelectEvidence }} />
+            ))}
           </div>
+          {availableMethods.length === 0 && (
+            <p className="insight-muted-note">No study details were identified in the analyzed text.</p>
+          )}
+          {unavailableMethods.length > 0 && (
+            <details className="insight-unavailable-methods">
+              <summary>View unavailable fields</summary>
+              <ul>
+                {unavailableMethods.map(([label]) => <li key={label}>{label} · Not found in analyzed text</li>)}
+              </ul>
+            </details>
+          )}
         </details>
       )}
 
-      {!isExtractive && (
-        <>
-          <FindingList
-            title="What this means"
-            items={report.what_it_means}
-            evidenceById={evidenceById}
-            onSelectEvidence={onSelectEvidence}
-          />
-          <FindingList
-            title="What this does not mean"
-            items={report.what_it_does_not_mean}
-            evidenceById={evidenceById}
-            onSelectEvidence={onSelectEvidence}
-          />
-        </>
-      )}
-      <FindingList
-        title="Limitations"
-        items={report.limitations}
-        evidenceById={evidenceById}
-        onSelectEvidence={onSelectEvidence}
-      />
-      <FindingList
-        title="Where the findings may apply"
-        items={report.applicability ?? []}
-        evidenceById={evidenceById}
-        onSelectEvidence={onSelectEvidence}
-      />
-      <FindingList
-        title="Questions for further research"
-        items={report.future_research ?? []}
-        evidenceById={evidenceById}
-        onSelectEvidence={onSelectEvidence}
-      />
-
-      {report.medical_terms.length > 0 && (
-        <section className="insight-report-section">
-          <h3>Medical terms</h3>
-          <div className="insight-term-list">
-            {report.medical_terms.map((term) => (
-              <article className="insight-term" key={term.term}>
-                <strong>{term.term}</strong>
-                <p>{term.explanation}</p>
-                {findingEvidence(
-                  {
-                    id: `term-${term.term}`,
-                    statement: term.term,
-                    plain_explanation: term.explanation,
-                    evidence_ids: term.evidence_ids,
-                    evidence_level: "reported_in_document",
-                    interpretation_type: "summary",
-                  },
-                  evidenceById,
-                  onSelectEvidence,
-                )}
-              </article>
+      {sourcePassages.length > 0 && (
+        <details className="insight-report-section insight-details">
+          <summary>Source passages <span className="insight-summary-count">{sourcePassages.length}</span></summary>
+          <ol className="insight-source-passages">
+            {sourcePassages.map((evidence) => (
+              <li key={evidence.evidence_id}>
+                <button type="button" className="insight-source-link" onClick={() => onSelectEvidence(evidence)}>
+                  {locationLabel(evidence)}
+                </button>
+                <p>{evidence.quote}</p>
+              </li>
             ))}
-          </div>
-        </section>
+          </ol>
+        </details>
       )}
 
       {report.coverage && (
@@ -374,6 +347,81 @@ function ReportView({
           </div>
         </details>
       )}
+
+      {hasAdditionalAnalysis && (
+        <details className="insight-report-section insight-details">
+          <summary>Additional analysis</summary>
+          {!isExtractive && (
+            <>
+              <FindingList
+                title="What this means"
+                items={report.what_it_means}
+                evidenceById={evidenceById}
+                onSelectEvidence={onSelectEvidence}
+              />
+              <FindingList
+                title="What this does not mean"
+                items={report.what_it_does_not_mean}
+                evidenceById={evidenceById}
+                onSelectEvidence={onSelectEvidence}
+              />
+            </>
+          )}
+          <FindingList
+            title="Limitations"
+            items={report.limitations}
+            evidenceById={evidenceById}
+            onSelectEvidence={onSelectEvidence}
+          />
+          <FindingList
+            title="Where the findings may apply"
+            items={report.applicability ?? []}
+            evidenceById={evidenceById}
+            onSelectEvidence={onSelectEvidence}
+          />
+          <FindingList
+            title="Questions for further research"
+            items={report.future_research ?? []}
+            evidenceById={evidenceById}
+            onSelectEvidence={onSelectEvidence}
+          />
+
+          {report.medical_terms.length > 0 && (
+            <section className="insight-report-section">
+              <h3>Medical terms</h3>
+              <div className="insight-term-list">
+                {report.medical_terms.map((term) => (
+                  <article className="insight-term" key={term.term}>
+                    <strong>{term.term}</strong>
+                    <p>{term.explanation}</p>
+                    {findingEvidence(
+                      {
+                        id: `term-${term.term}`,
+                        statement: term.term,
+                        plain_explanation: term.explanation,
+                        evidence_ids: term.evidence_ids,
+                        evidence_level: "reported_in_document",
+                        interpretation_type: "summary",
+                      },
+                      evidenceById,
+                      onSelectEvidence,
+                    )}
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
+        </details>
+      )}
+
+      {(run.warnings?.length ?? 0) > 0 && (
+        <details className="insight-report-section insight-details">
+          <summary>Processing notes</summary>
+          <ul className="insight-processing-notes">
+            {(run.warnings ?? []).map((warning) => <li key={warning}>{warningLabel(warning)}</li>)}
+          </ul>
+        </details>
+      )}
     </div>
   );
 }
@@ -384,7 +432,14 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     contextKey: string;
     value: MedicalInsightRun | null;
   }>({ contextKey: "", value: null });
-  const run = runState.contextKey === contextKey ? runState.value : null;
+  const [runtimeErrorState, setRuntimeErrorState] = useState<{
+    contextKey: string;
+    versions: MedicalRuntimeVersions;
+  } | null>(null);
+  const applicationUpdateIncomplete = runtimeErrorState?.contextKey === contextKey;
+  const run = !applicationUpdateIncomplete && runState.contextKey === contextKey
+    ? runState.value
+    : null;
   const setCurrentRun = useCallback(
     (value: MedicalInsightRun | null) => setRunState({ contextKey, value }),
     [contextKey],
@@ -426,8 +481,15 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
           && savedExternalConsent(config, documentId, workspaceId),
         );
       })
-      .catch(() => {
-        if (active) setError("Could not load the medical analysis configuration.");
+      .catch((requestError: unknown) => {
+        if (!active) return;
+        if (isApplicationVersionError(requestError)) {
+          setRuntimeErrorState({ contextKey, versions: requestError.versions });
+          setCurrentRun(null);
+          setError("");
+          return;
+        }
+        setError("Could not load the medical analysis configuration.");
       })
       .finally(() => {
         if (active) setConfigLoading(false);
@@ -436,7 +498,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     return () => {
       active = false;
     };
-  }, [documentId, setError, workspaceId]);
+  }, [contextKey, documentId, setCurrentRun, setError, workspaceId]);
 
   useEffect(() => {
     let active = true;
@@ -454,6 +516,13 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
       })
       .catch((requestError: unknown) => {
         if (!active) return;
+        if (isApplicationVersionError(requestError)) {
+          setRuntimeErrorState({ contextKey, versions: requestError.versions });
+          setCurrentRun(null);
+          setSelectedEvidence(null);
+          setError("");
+          return;
+        }
         const code = axios.isAxiosError(requestError)
           ? requestError.response?.data?.code
           : undefined;
@@ -501,6 +570,13 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
         if (nextRun.status !== "queued" && nextRun.status !== "running") return;
       } catch (requestError: unknown) {
         if (!active) return;
+        if (isApplicationVersionError(requestError)) {
+          setRuntimeErrorState({ contextKey, versions: requestError.versions });
+          setCurrentRun(null);
+          setSelectedEvidence(null);
+          setError("");
+          return;
+        }
         const code = axios.isAxiosError(requestError)
           ? requestError.response?.data?.code
           : undefined;
@@ -557,6 +633,12 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
           );
       setCurrentRun(nextRun);
     } catch (requestError) {
+      if (isApplicationVersionError(requestError)) {
+        setRuntimeErrorState({ contextKey, versions: requestError.versions });
+        setCurrentRun(null);
+        setError("");
+        return;
+      }
       const code = axios.isAxiosError(requestError)
         ? requestError.response?.data?.code
         : undefined;
@@ -577,7 +659,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     } finally {
       setStarting(false);
     }
-  }, [documentId, setCurrentRun, setError, workspaceId]);
+  }, [contextKey, documentId, setCurrentRun, setError, workspaceId]);
 
   const runAnalysis = (reanalyze = false) => {
     if (!analysisConfig?.enabled || !analysisConfig.configured) {
@@ -625,6 +707,40 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
   }, [analysisConfig, analysisOutdated, configLoading, executeAnalysis, loading, starting]);
 
   const report = run?.report;
+
+  if (applicationUpdateIncomplete && runtimeErrorState) {
+    const versions = runtimeErrorState.versions;
+    return (
+      <section className="medical-insight-panel">
+        <header className="medical-insight-header">
+          <div>
+            <span className="section-heading">Medical insight</span>
+            <strong>{title}</strong>
+          </div>
+          <button className="row-action" type="button" onClick={onClose} aria-label="Close medical insight">
+            <X size={17} />
+          </button>
+        </header>
+        <div className="insight-version-mismatch" role="alert">
+          <AlertCircle size={19} />
+          <div>
+            <strong>Application update incomplete</strong>
+            <p>The frontend and backend versions do not match. This report is hidden to prevent showing stale analysis.</p>
+            <dl>
+              <div><dt>Frontend</dt><dd>{frontendRuntimeCommit()}</dd></div>
+              <div><dt>Backend</dt><dd>{versions.backendCommit}</dd></div>
+              <div><dt>PDF parser</dt><dd>{versions.parserVersion}</dd></div>
+              <div><dt>Analysis pipeline</dt><dd>{versions.analysisPipelineVersion}</dd></div>
+              <div><dt>Analysis model</dt><dd>{versions.analysisModel}</dd></div>
+            </dl>
+            <button className="insight-retry" type="button" onClick={() => window.location.reload()}>
+              Reload application
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="medical-insight-panel">
@@ -795,24 +911,36 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
               <dl>
                 <div><dt>Provider</dt><dd>{readable(run.provider)}</dd></div>
                 <div><dt>Model</dt><dd>{run.model_name}</dd></div>
-                <div><dt>Analysis pipeline</dt><dd>{run.prompt_version}</dd></div>
+                <div><dt>Analysis pipeline</dt><dd>{run.analysis_pipeline_version || run.prompt_version}</dd></div>
                 <div><dt>Report schema</dt><dd>{run.schema_version}</dd></div>
                 <div><dt>Document type</dt><dd>{readable(report.document_kind)}</dd></div>
                 <div><dt>Language</dt><dd>{report.language}</dd></div>
                 {run.parser_version && <div><dt>PDF parser</dt><dd>{run.parser_version}</dd></div>}
                 {run.parsed_source_hash && <div><dt>Source snapshot</dt><dd>{run.parsed_source_hash}</dd></div>}
+                <div><dt>Frontend commit</dt><dd>{run.runtime_versions?.frontendCommit || frontendRuntimeCommit()}</dd></div>
+                {run.runtime_versions?.backendCommit && (
+                  <div><dt>Backend commit</dt><dd>{run.runtime_versions.backendCommit}</dd></div>
+                )}
                 {typeof run.citation_coverage === "number" && (
                   <div><dt>Source coverage</dt><dd>{Math.round(run.citation_coverage * 100)}% of displayed items linked to source passages</dd></div>
+                )}
+                {(run.warnings?.length ?? 0) > 0 && (
+                  <div><dt>Processing notes</dt><dd>{(run.warnings ?? []).map(warningLabel).join(" ")}</dd></div>
+                )}
+                {run.provider !== "extractive" && (
+                  <div><dt>Data handling</dt><dd>
+                    Selected {run.redact_pii ? "redacted " : "unredacted "}document excerpts were sent to the configured provider. API keys stay on the server.
+                  </dd></div>
                 )}
               </dl>
             </details>
           </div>
-          {run.provider !== "extractive" && (
-            <div className="insight-provider-notice">
-              Selected {run.redact_pii ? "redacted " : ""}document excerpts were sent to the configured AI provider.
-              {run.redact_pii === false && " PII redaction was disabled for this run."} API keys stay on the server.
-            </div>
-          )}
+          <p className="insight-safety-line">
+            {run.provider === "extractive" ? "Local source-based analysis" : "External AI processing"}
+            {run.provider !== "extractive" && run.warnings?.includes("pii_redacted") && " · Personal information removed"}
+            {run.provider !== "extractive" && run.redact_pii === false && " · Personal information redaction off"}
+            {" · Research support only; not medical advice"}
+          </p>
           <ReportView
             report={report}
             run={run}

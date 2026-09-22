@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertCircle, BookOpen, Loader2, RefreshCw, Search } from "lucide-react";
+import { AlertCircle, Loader2, RefreshCw, Search } from "lucide-react";
 import { useLiteratureEvidence } from "../../../hooks/useLiteratureEvidence";
 import LiteratureEvidenceAlerts from "./LiteratureEvidenceAlerts";
 import LiteratureFindingGroup from "./LiteratureFindingGroup";
@@ -36,26 +36,16 @@ export default function LiteratureEvidencePanel({
 
   return (
     <section className="literature-evidence-panel" aria-labelledby="literature-evidence-heading">
-      <header className="literature-panel-header">
-        <div>
-          <span className="section-heading">Evidence matching</span>
-          <h3 id="literature-evidence-heading">Find related PubMed literature</h3>
-          <p>Compare saved findings with retrieved articles. A match is a retrieval signal, not proof of effectiveness.</p>
-        </div>
-        <BookOpen size={20} aria-hidden="true" />
-      </header>
-
       <details
         className="literature-search-disclosure"
         open={searchOpen}
         onToggle={(event) => setSearchOpen(event.currentTarget.open)}
       >
         <summary>
-          <div>
-            <strong>Find related research</strong>
-            <span>Compare these findings with PubMed literature.</span>
+          <div id="literature-evidence-heading">
+            <strong>Search PubMed for related studies</strong>
+            <span>Compare this paper’s findings with other research.</span>
           </div>
-          <span className="literature-search-disclosure-hint">Search after reviewing the analysis</span>
         </summary>
         <div className="literature-search-disclosure-content">
           <LiteratureSearchForm

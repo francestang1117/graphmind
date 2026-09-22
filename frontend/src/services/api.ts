@@ -6,6 +6,12 @@ import {
   getAccessToken,
   saveAccessToken,
 } from "./authSession";
+import {
+  ApplicationUpdateIncompleteError,
+  frontendRuntimeCommit,
+  validateMedicalRuntimeHeaders,
+  type MedicalRuntimeVersions,
+} from "./runtimeVersion";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 export const AUTH_REQUIRED_EVENT = "graphmind:auth-required";
@@ -14,6 +20,43 @@ const http = axios.create({
   baseURL: `${API_BASE}/api/v1`,
   timeout: 30_000,
   withCredentials: true,
+});
+
+function isMedicalInsightRequest(url?: string) {
+  return Boolean(url && /medical-insights|medical-analysis-runs/.test(url));
+}
+
+function annotateMedicalInsightResponse<T>(response: import("axios").AxiosResponse<T>) {
+  if (isMedicalInsightRequest(response.config.url)) {
+    const versions = validateMedicalRuntimeHeaders(response.headers as Record<string, unknown>);
+    if (response.data && typeof response.data === "object" && "run_id" in response.data) {
+      response.data = {
+        ...response.data,
+        runtime_versions: versions,
+      } as T;
+    }
+  }
+  return response;
+}
+
+http.interceptors.request.use((config) => {
+  if (isMedicalInsightRequest(config.url)) {
+    config.headers.set("X-GraphMind-Frontend-Commit", frontendRuntimeCommit());
+  }
+  return config;
+});
+
+http.interceptors.response.use(annotateMedicalInsightResponse, async (error) => {
+  if (axios.isAxiosError(error) && isMedicalInsightRequest(error.config?.url) && error.response) {
+    try {
+      validateMedicalRuntimeHeaders(error.response.headers as Record<string, unknown>);
+    } catch (versionError) {
+      if (versionError instanceof ApplicationUpdateIncompleteError) {
+        return Promise.reject(versionError);
+      }
+    }
+  }
+  return Promise.reject(error);
 });
 
 http.interceptors.request.use((config) => {
@@ -239,6 +282,8 @@ export interface MedicalInsightRun {
   validation_status?: string;
   warnings?: string[];
   parser_version?: string;
+  analysis_pipeline_version?: string;
+  runtime_versions?: MedicalRuntimeVersions;
   evidence?: MedicalInsightEvidence[];
 }
 

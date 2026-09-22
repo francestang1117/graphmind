@@ -2,6 +2,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import MedicalInsightPanel from "../components/upload/MedicalInsightPanel";
+import { ApplicationUpdateIncompleteError } from "../services/runtimeVersion";
 
 const api = vi.hoisted(() => ({
   getCurrentMedicalInsights: vi.fn(),
@@ -154,5 +155,93 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
     ), { timeout: 4000 });
     expect(screen.queryByText("LEGACY FINDING MUST STAY HIDDEN")).not.toBeInTheDocument();
     expect(await screen.findByText("Waiting to analyze")).toBeInTheDocument();
+  });
+
+  it("blocks reports and explains a mixed frontend/backend deployment", async () => {
+    api.getCurrentMedicalInsights.mockRejectedValue(new ApplicationUpdateIncompleteError({
+      frontendCommit: "frontend-new",
+      backendCommit: "backend-old",
+      parserVersion: "document-parser-v1",
+      analysisPipelineVersion: "medical-insights-v1",
+      insightContractVersion: "medical-insights-v1",
+      analysisModel: "extractive-v1",
+    }));
+    api.getMedicalInsightConfig.mockResolvedValue(localConfig);
+
+    renderPanel();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Application update incomplete");
+    expect(screen.getByText("backend-old")).toBeInTheDocument();
+    expect(screen.getByText("document-parser-v1")).toBeInTheDocument();
+    expect(screen.queryByText("About this paper")).not.toBeInTheDocument();
+    expect(screen.queryByText(/ary Gb3/)).not.toBeInTheDocument();
+  });
+
+  it("prioritizes reader content and keeps unavailable study fields collapsed", async () => {
+    api.getCurrentMedicalInsights.mockResolvedValue({
+      ...queuedRun(),
+      status: "succeeded",
+      report: {
+        schema_version: "medical-insights-v3",
+        document_kind: "research_paper",
+        language: "en",
+        overview: {
+          title: "Fabry disease biomarker study",
+          summary: "The study examined biomarkers in adults with Fabry disease.",
+          study_type: "Research paper",
+          evidence_ids: [],
+        },
+        study_methods: {
+          design: {},
+          population: {},
+          human_animal_in_vitro: {},
+          sample_size: {},
+          comparator: {},
+        },
+        key_findings: [{
+          id: "finding-1",
+          statement: "The measured biomarker differed between groups.",
+          plain_explanation: "This is directly reported.",
+          evidence_ids: [],
+          evidence_level: "reported_in_document",
+          interpretation_type: "direct_statement",
+        }],
+        limitations: [],
+        medical_terms: [],
+        what_it_means: [],
+        what_it_does_not_mean: [],
+        applicability: [],
+        future_research: [],
+        question_suggestions: [{
+          id: "question-1",
+          question: "Who was included in this study?",
+          rationale: "The study population affects who the findings describe.",
+          category: "applicability",
+          evidence_ids: [],
+          interpretation_type: "inference",
+        }],
+        questions_for_professional: [],
+        warnings: ["extractive_output"],
+      },
+      evidence: [],
+    });
+    api.getMedicalInsightConfig.mockResolvedValue(localConfig);
+
+    renderPanel();
+
+    const about = await screen.findByRole("heading", { name: "About this paper" });
+    const findings = screen.getByRole("heading", { name: "Key findings" });
+    const question = screen.getByRole("heading", { name: "Questions for your clinician" });
+    expect(about.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(findings.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("The measured biomarker differed between groups.")).toBeInTheDocument();
+    expect(screen.queryByText("Supported")).not.toBeInTheDocument();
+    expect(screen.queryByText("Direct Statement")).not.toBeInTheDocument();
+
+    const studyDetails = screen.getByText(/Study details/).closest("details");
+    expect(studyDetails).not.toHaveAttribute("open");
+    const unavailableDetails = screen.getByText("View unavailable fields").closest("details");
+    expect(unavailableDetails).not.toHaveAttribute("open");
+    expect(screen.getByText(/Study design · Not found in analyzed text/)).not.toBeVisible();
   });
 });

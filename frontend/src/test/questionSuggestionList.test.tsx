@@ -184,14 +184,14 @@ describe("QuestionSuggestionList", () => {
     }));
 
     expect(screen.getByText("What should I discuss with a professional?")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Questions to discuss with a healthcare professional" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Questions for your clinician" })).toBeInTheDocument();
   });
 
   it("does not show legacy questions in a V3 report", () => {
     renderList(report({ questions_for_professional: ["Uncited legacy question."] }));
 
     expect(screen.queryByText("Uncited legacy question.")).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Questions to discuss with a healthcare professional" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Questions for your clinician" })).not.toBeInTheDocument();
   });
 
   it("returns no section when both question formats are empty", () => {
