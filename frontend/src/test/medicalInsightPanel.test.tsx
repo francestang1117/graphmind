@@ -63,7 +63,7 @@ function queuedRun() {
     parsed_source_hash: "parsed-new",
     provider: "extractive",
     model_name: "extractive-v3",
-    prompt_version: "medical-insights-v3+medical-insights-readable-v4",
+    prompt_version: "medical-insights-v3+medical-insights-readable-v5",
     schema_version: "medical-insights-v3",
   };
 }
@@ -287,5 +287,46 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
 
     expect(await screen.findByText("Source passages attached")).toBeInTheDocument();
     expect(screen.queryByText("All displayed claims have validated source passages")).not.toBeInTheDocument();
+  });
+
+  it("shows each processing note only once", async () => {
+    api.getCurrentMedicalInsights.mockResolvedValue({
+      ...queuedRun(),
+      status: "succeeded",
+      warnings: ["evidence_quality_filtered", "evidence_quality_filtered"],
+      report: {
+        schema_version: "medical-insights-v3",
+        document_kind: "research_paper",
+        language: "en",
+        overview: {
+          title: "Fabry disease biomarker study",
+          summary: "The study examined biomarkers in adults with Fabry disease.",
+          study_type: "Research paper",
+          evidence_ids: [],
+        },
+        study_methods: {},
+        key_findings: [],
+        limitations: [],
+        medical_terms: [],
+        what_it_means: [],
+        what_it_does_not_mean: [],
+        applicability: [],
+        future_research: [],
+        question_suggestions: [],
+        questions_for_professional: [],
+        warnings: ["evidence_quality_filtered"],
+      },
+      evidence: [],
+    });
+    api.getMedicalInsightConfig.mockResolvedValue(localConfig);
+
+    renderPanel();
+
+    expect(await screen.findAllByText("Processing notes")).toHaveLength(2);
+    const noteText =
+      "Some passages were excluded because their text quality was not reliable enough for medical evidence.";
+    const notes = screen.getAllByText(noteText);
+    expect(notes).toHaveLength(2);
+    expect(notes.every((note) => note.textContent === noteText)).toBe(true);
   });
 });

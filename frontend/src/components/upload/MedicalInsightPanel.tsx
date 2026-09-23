@@ -113,13 +113,23 @@ function warningLabel(warning: string) {
   }
 }
 
+function visibleProcessingWarnings(warnings: string[] | undefined) {
+  return [...new Set(warnings ?? [])].filter(
+    (warning) => !["not_medical_advice", "extractive_output", "pii_redacted"].includes(warning),
+  );
+}
+
 function locationLabel(evidence: MedicalInsightEvidence) {
   const page = evidence.page_start
     ? evidence.page_end && evidence.page_end !== evidence.page_start
       ? `Pages ${evidence.page_start}-${evidence.page_end}`
       : `Page ${evidence.page_start}`
     : "Page unavailable";
-  const section = evidence.section_title || evidence.section_type?.replaceAll("_", " ");
+  const rawSectionType = evidence.section_type?.replaceAll("_", " ").trim();
+  const sectionType = rawSectionType && rawSectionType !== "unknown"
+    ? `${rawSectionType.slice(0, 1).toUpperCase()}${rawSectionType.slice(1)}`
+    : "";
+  const section = sectionType || evidence.section_title;
   return `${page}${section ? ` · ${section}` : ""}`;
 }
 
@@ -262,9 +272,7 @@ function ReportView({
     !item?.value?.trim() || item?.support_status === "not_reported",
   );
   const sourcePassages = [...evidenceById.values()];
-  const processingWarnings = (run.warnings ?? []).filter(
-    (warning) => !["not_medical_advice", "extractive_output", "pii_redacted"].includes(warning),
-  );
+  const processingWarnings = visibleProcessingWarnings(run.warnings);
   const hasAdditionalAnalysis = Boolean(
     report.limitations.length
     || report.what_it_means.length
@@ -742,6 +750,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
   }, [analysisConfig, analysisOutdated, configLoading, executeAnalysis, loading, starting]);
 
   const report = run?.report;
+  const processingWarnings = visibleProcessingWarnings(run?.warnings);
   if (applicationUpdateIncomplete && runtimeErrorState) {
     const versions = runtimeErrorState.versions;
     return (
@@ -954,8 +963,8 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
                 {typeof run.citation_coverage === "number" && (
                   <div><dt>Source coverage</dt><dd>{Math.round(run.citation_coverage * 100)}% of displayed claims linked to source passages; passage quality is checked separately</dd></div>
                 )}
-                {(run.warnings?.length ?? 0) > 0 && (
-                  <div><dt>Processing notes</dt><dd>{(run.warnings ?? []).map(warningLabel).join(" ")}</dd></div>
+                {processingWarnings.length > 0 && (
+                  <div><dt>Processing notes</dt><dd>{processingWarnings.map(warningLabel).join(" ")}</dd></div>
                 )}
                 {run.provider !== "extractive" && (
                   <div><dt>Data handling</dt><dd>
