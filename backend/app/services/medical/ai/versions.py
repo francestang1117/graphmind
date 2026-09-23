@@ -1,4 +1,4 @@
 """Version identifiers for persisted medical insight output."""
 
-ANALYSIS_PIPELINE_VERSION = "medical-insights-readable-v5"
-MEDICAL_INSIGHT_API_CONTRACT_VERSION = "medical-insights-readable-v5"
+ANALYSIS_PIPELINE_VERSION = "medical-insights-readable-v6"
+MEDICAL_INSIGHT_API_CONTRACT_VERSION = "medical-insights-readable-v6"

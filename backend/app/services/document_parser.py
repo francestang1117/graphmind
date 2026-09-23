@@ -32,7 +32,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
-PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v5"
+PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v6"
 
 
 # Parsed document shape
@@ -174,10 +174,20 @@ def _normalise_pdf_text(text: str) -> str:
     """Apply only layout-safe PDF cleanup before chunking and citation."""
     normalized = unicodedata.normalize("NFKC", str(text or ""))
     normalized = normalized.replace("\u00a0", " ").replace("\u200b", "")
-    # Do not guess whether a line-ending hyphen is typography or part of a
-    # medical compound. Keeping it lets later readers verify the source text.
     lines = [re.sub(r"[ \t]+", " ", line).strip() for line in normalized.splitlines()]
-    return "\n".join(lines).strip()
+    # Repair only known line-ending forms. Semantic compounds such as
+    # ``later-onset`` and ``non-small-cell`` keep their hyphen, while visible
+    # PDF artifacts such as ``informa- tion`` are normalized before chunking.
+    repaired: list[str] = []
+    for line in lines:
+        line = _repair_inline_pdf_hyphenation(line)
+        if repaired:
+            joined = _join_pdf_line_ending(repaired[-1], line)
+            if joined is not None:
+                repaired[-1] = joined
+                continue
+        repaired.append(line)
+    return "\n".join(repaired).strip()
 
 
 def _glued_text_score(text: str) -> int:
@@ -667,11 +677,95 @@ def _pdf_render_lines(lines: list[list[dict[str, Any]]]) -> list[str]:
 
 
 _SAFE_LINE_BREAK_WORDS = {
+    "accumulation",
+    "analysis",
+    "analogs",
+    "although",
     "attenuation",
+    "associated",
+    "automatic",
+    "adversely",
+    "antibodies",
+    "basis",
+    "biomarkers",
+    "characterized",
+    "classification",
+    "classified",
+    "concentration",
+    "concentrations",
+    "consent",
+    "considered",
+    "controls",
+    "creatinine",
     "columns",
+    "comprising",
+    "challenges",
+    "detected",
+    "determined",
+    "diagnosis",
+    "diagnostic",
+    "deviation",
+    "decrease",
+    "decreased",
+    "detection",
+    "differentiated",
+    "disease",
+    "disorder",
+    "dramatically",
+    "endothelium",
+    "enzyme",
+    "evaluation",
+    "examination",
+    "examinations",
+    "excessive",
+    "expected",
+    "expressed",
+    "facilitating",
+    "findings",
+    "frequently",
+    "heterogeneous",
+    "hypohidrosis",
+    "identification",
+    "increases",
+    "individual",
     "information",
+    "indicating",
+    "isoforms",
+    "labelled",
+    "manifestations",
+    "measured",
+    "measurement",
+    "metabolic",
+    "monitoring",
+    "mixtures",
+    "mobile",
+    "neutralizing",
+    "neurons",
+    "pathogenesis",
+    "participants",
+    "patients",
+    "performed",
+    "phenotype",
+    "proliferation",
+    "profiles",
+    "quantified",
+    "quantification",
     "randomized",
+    "regarding",
+    "replacement",
+    "related",
+    "reports",
+    "respectively",
+    "reveals",
+    "samples",
     "significance",
+    "spectrometry",
+    "substrates",
+    "systematic",
+    "therapeutic",
+    "using",
+    "various",
+    "warrant",
 }
 _HYPHENATED_WORD_PREFIXES = {
     "anti",
@@ -692,7 +786,11 @@ _HYPHENATED_WORD_PREFIXES = {
 
 def _join_pdf_line_ending(previous: str, following: str) -> str | None:
     """Join a visual line break without destroying scientific compounds."""
-    if not previous.endswith("-") or not following[:1].islower():
+    if not previous.endswith("-"):
+        return None
+    if not following[:1].islower():
+        if any(ord(char) > 127 for char in previous):
+            return f"{previous}{following}"
         return None
 
     match = re.search(r"([A-Za-z]+)-$", previous)
@@ -709,14 +807,43 @@ def _join_pdf_line_ending(previous: str, following: str) -> str | None:
     if "-" in suffix or prefix in _HYPHENATED_WORD_PREFIXES:
         return f"{previous}{following}"
 
-    if f"{prefix}{suffix}" in _SAFE_LINE_BREAK_WORDS or (
-        len(prefix) >= 3 and len(suffix) >= 3
-    ):
+    if f"{prefix}{suffix}" in _SAFE_LINE_BREAK_WORDS:
         return f"{previous[:-1]}{following}"
 
     # Unknown short fragments stay visibly hyphenated so the evidence gate can
     # reject them instead of silently inventing a word boundary.
     return f"{previous}{following}"
+
+
+_INLINE_PDF_HYPHENATION = re.compile(
+    r"(?P<left>[A-Za-z\u0370-\u03ff]+)-\s+(?P<right>[A-Za-z][A-Za-z-]*)"
+)
+
+
+def _repair_inline_pdf_hyphenation(text: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        if any(ord(char) > 127 for char in match.group("left")):
+            return f"{match.group('left')}-{match.group('right')}"
+        joined = _join_pdf_line_ending(
+            f"{match.group('left')}-",
+            match.group("right"),
+        )
+        return joined or match.group(0)
+
+    repaired = _INLINE_PDF_HYPHENATION.sub(replace, text)
+
+    def join_known_fragment(match: re.Match[str]) -> str:
+        left = match.group("left")
+        right = match.group("right")
+        if f"{left}{right}".lower() in _SAFE_LINE_BREAK_WORDS:
+            return f"{left}{right}"
+        return match.group(0)
+
+    return re.sub(
+        r"(?P<left>[A-Za-z]{2,})-(?P<right>[a-z]{2,})",
+        join_known_fragment,
+        repaired,
+    )
 
 
 def _pdf_render_line(line: list[dict[str, Any]]) -> str:
@@ -743,6 +870,7 @@ def _pdf_render_line(line: list[dict[str, Any]]) -> str:
 
 _PDF_CAPTION_LINE = re.compile(
     r"^(?:figure|fig\.?|table|scheme|chart)\s*\d+\s*[.:：-]?\s*\S|"
+    r"^(?:table|表)\s*[.:：-]\s*\S|"
     r"^(?:图|図|表)\s*\d+\s*[.:：-]?\s*\S",
     re.I,
 )
@@ -974,7 +1102,11 @@ def _pdf_extract_blocks(page: Any, page_number: int = 0) -> tuple[list[dict[str,
             )
             # Captions often wrap onto ordinary-looking lines. Keep those
             # lines together, but never let a caption absorb a new heading.
-            if current_kind in {"figure_caption", "table_caption"} and kind == "body":
+            if (
+                current_kind in {"figure_caption", "table_caption"}
+                and kind == "body"
+                and compatible
+            ):
                 kind = current_kind
             if not compatible or kind != current_kind:
                 flush()
@@ -1011,9 +1143,19 @@ def _pdf_extract_blocks(page: Any, page_number: int = 0) -> tuple[list[dict[str,
         else:
             repeated.append(block)
 
+    # Normalize each block before assigning offsets. The page text used by the
+    # medical structure parser is reconstructed from these same blocks; doing
+    # this before offset calculation keeps captions, headings, and footers
+    # aligned with the source ranges after hyphen repair.
+    normalized_blocks: list[PdfExtractedBlock] = []
+    for block in repeated:
+        text = _normalise_pdf_text(block.text)
+        if text:
+            normalized_blocks.append(replace(block, text=text))
+
     positioned_blocks: list[PdfExtractedBlock] = []
     cursor = 0
-    for block in repeated:
+    for block in normalized_blocks:
         if not block.text:
             continue
         positioned = replace(
@@ -1461,7 +1603,14 @@ class PDFParser:
         if layout.get("column_count", 1) >= 2 and layout.get("stable"):
             reconstructed = reconstructed_text or _reconstruct_pdf_words(page)
             if reconstructed:
-                best = _normalise_pdf_text(reconstructed)
+                # _pdf_extract_blocks() has already normalized each block and
+                # calculated offsets from those exact strings. Re-normalizing
+                # the joined page here could change block offsets again.
+                best = (
+                    reconstructed
+                    if reconstructed_text
+                    else _normalise_pdf_text(reconstructed)
+                )
                 warnings.append("pdf_text_reconstructed")
             else:
                 warnings.append("pdf_layout_ambiguous")

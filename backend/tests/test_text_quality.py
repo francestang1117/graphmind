@@ -39,3 +39,11 @@ def test_quality_gate_rejects_unrepaired_hyphenated_column_splice():
 
     assert not result.usable
     assert "broken_word_hyphen" in result.reasons
+
+
+def test_quality_gate_rejects_page_number_and_lowercase_body_fragments():
+    for text in ("revealed that the mean plasma value was higher.", "The results 1533"):
+        result = assess_passage(text, section_type="results")
+
+        assert not result.usable
+        assert any(reason in result.reasons for reason in ("incomplete_sentence", "page_number_fragment"))

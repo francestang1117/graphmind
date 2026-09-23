@@ -12,9 +12,9 @@ def test_metrics_endpoint_records_route_labels():
     response = client.get("/metrics")
 
     assert health.headers["x-graphmind-frontend-commit"] == "test-ui-sha"
-    assert health.headers["x-graphmind-parser-version"] == "document-parser-pdf-readable-v5"
-    assert health.headers["x-graphmind-analysis-pipeline"] == "medical-insights-readable-v5"
-    assert health.headers["x-graphmind-insight-contract"] == "medical-insights-readable-v5"
+    assert health.headers["x-graphmind-parser-version"] == "document-parser-pdf-readable-v6"
+    assert health.headers["x-graphmind-analysis-pipeline"] == "medical-insights-readable-v6"
+    assert health.headers["x-graphmind-insight-contract"] == "medical-insights-readable-v6"
     assert health.headers["x-graphmind-analysis-model"] == "extractive-v3"
     assert response.status_code == 200
     assert "graphmind_http_requests_total" in response.text

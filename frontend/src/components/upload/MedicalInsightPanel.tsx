@@ -90,6 +90,7 @@ function warningLabel(warning: string) {
       return "Sensitive personal information was removed before analysis.";
     case "extractive_output":
       return "This report is a source extract, not a generated plain-language explanation.";
+    case "pdf_layout_reconstructed":
     case "pdf_text_degraded":
       return "Some PDF text was reconstructed from its word layout; check the cited passage in the original document.";
     case "pdf_text_reconstructed":
@@ -114,7 +115,12 @@ function warningLabel(warning: string) {
 }
 
 function visibleProcessingWarnings(warnings: string[] | undefined) {
-  return [...new Set(warnings ?? [])].filter(
+  const normalized = (warnings ?? []).map((warning) => (
+    warning === "pdf_text_degraded" || warning === "pdf_text_reconstructed"
+      ? "pdf_layout_reconstructed"
+      : warning
+  ));
+  return [...new Set(normalized)].filter(
     (warning) => !["not_medical_advice", "extractive_output", "pii_redacted"].includes(warning),
   );
 }
@@ -750,7 +756,6 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
   }, [analysisConfig, analysisOutdated, configLoading, executeAnalysis, loading, starting]);
 
   const report = run?.report;
-  const processingWarnings = visibleProcessingWarnings(run?.warnings);
   if (applicationUpdateIncomplete && runtimeErrorState) {
     const versions = runtimeErrorState.versions;
     return (
@@ -962,9 +967,6 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
                 )}
                 {typeof run.citation_coverage === "number" && (
                   <div><dt>Source coverage</dt><dd>{Math.round(run.citation_coverage * 100)}% of displayed claims linked to source passages; passage quality is checked separately</dd></div>
-                )}
-                {processingWarnings.length > 0 && (
-                  <div><dt>Processing notes</dt><dd>{processingWarnings.map(warningLabel).join(" ")}</dd></div>
                 )}
                 {run.provider !== "extractive" && (
                   <div><dt>Data handling</dt><dd>

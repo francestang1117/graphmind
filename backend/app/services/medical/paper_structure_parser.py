@@ -205,10 +205,10 @@ class PaperStructureParser:
         if quality == "unreadable":
             warnings.append("pdf_text_unreadable")
         elif quality == "degraded":
-            warnings.append("pdf_text_degraded")
+            warnings.append("pdf_layout_reconstructed")
         for warning in metadata.get("extraction_warnings") or []:
             if warning == "pdf_text_reconstructed":
-                warnings.append(warning)
+                warnings.append("pdf_layout_reconstructed")
         return list(dict.fromkeys(warnings))
 
     def _sections_from_headings(

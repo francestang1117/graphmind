@@ -454,12 +454,13 @@ _SAMPLE_SIZE_EVIDENCE = re.compile(
     r"(?:\bn\s*[=:]\s*\d[\d,]*\b"
     r"|\b(?:sample size|enrolled|recruited|included)\b[^.!?。！？]{0,40}\b\d[\d,]*\b"
     r"|\b\d[\d,]*\s+(?:participants?|patients?|subjects?|adults?|children)\b"
+    r"|\b\d[\d,]*\s+(?:classic\s+Fabry\s+men|later[- ]onset\s+Fabry\s+men|Fabry\s+women|women|men|control(?:\s+subjects?|s?))\b"
     r"|\d[\d,]*(?:例|名(?:患者|受试者)?))",
     re.I,
 )
 _MEASUREMENT_EVIDENCE = re.compile(
     r"\b(?:measured|quantified|determined|analyzed|analysed|assessed|"
-    r"evaluated|tested|collected)\b|测量|定量|检测|测定|分析|评估|收集",
+    r"evaluated|tested|collected|quantification)\b|测量|定量|检测|测定|分析|评估|收集",
     re.I,
 )
 _MEASUREMENT_OBJECT = re.compile(
@@ -467,6 +468,11 @@ _MEASUREMENT_OBJECT = re.compile(
     r"expression|sample|specimen|isoform|isoforms|level|levels|outcome|"
     r"marker|markers|cells?|tissues?)\b|血浆|血清|尿液|生物标志物|"
     r"浓度|活性|表达|样本|标本|异构体|水平|指标|细胞|组织",
+    re.I,
+)
+_DIAGNOSTIC_CONTEXT = re.compile(
+    r"\b(?:diagnos(?:e|ed|is|tic)|screen(?:ed|ing)?|classif(?:y|ied|ication)|"
+    r"criteria|confirm(?:ed|ation)?)\b|诊断|筛查|分类|确诊",
     re.I,
 )
 _COMPARATOR_EVIDENCE = re.compile(
@@ -487,8 +493,8 @@ def _method_evidence(evidence: list[EvidenceItem], field: str) -> EvidenceItem |
     preferred_sections = {
         "design": ("design", "methods"),
         "human_animal_in_vitro": ("methods", "population"),
-        "sample_size": ("population", "methods", "results"),
-        "comparator": ("comparator", "methods", "design"),
+        "sample_size": ("methods",),
+        "comparator": ("comparator", "methods", "population", "design"),
     }.get(field, ("methods",))
     for section_type in preferred_sections:
         for item in evidence:
@@ -505,18 +511,9 @@ def _method_marker_found(text: str, field: str, marker: re.Pattern[str]) -> bool
     if field == "population":
         return any(_population_sentence_supported(sentence) for sentence in _sentence_parts(text))
     if field == "human_animal_in_vitro":
-        return bool(
-            (
-                _MEASUREMENT_EVIDENCE.search(text or "")
-                and _MEASUREMENT_OBJECT.search(text or "")
-            )
-            or (
-                not _looks_like_author_metadata(text)
-                and (
-                    _ENGLISH_SUBJECT_MARKERS.search(text or "")
-                    or _CJK_SUBJECT_MARKERS.search(text or "")
-                )
-            )
+        return any(
+            _measurement_sentence_supported(sentence)
+            for sentence in _sentence_parts(text)
         )
     if field == "comparator":
         return bool(_COMPARATOR_EVIDENCE.search(text or ""))
@@ -548,18 +545,156 @@ def _method_excerpt(item: EvidenceItem, field: str) -> str:
         if (
             _population_sentence_supported(sentence)
             if field == "population"
+            else _measurement_sentence_supported(sentence)
+            if field == "human_animal_in_vitro"
             else _method_marker_found(sentence, field, marker)
         )
     ]
     if field == "human_animal_in_vitro":
-        measured = [
-            sentence
-            for sentence in matching
-            if _MEASUREMENT_EVIDENCE.search(sentence)
-        ]
-        if measured:
-            matching = measured
+        return _measurement_excerpt(matching)
+    if field == "population":
+        return _compact_sample_size_excerpt(matching)
+    if field == "sample_size":
+        return _compact_sample_size_excerpt(matching)
+    if field == "comparator":
+        return _compact_comparator_excerpt(matching)
     return _summary(" ".join(matching[:2])) if matching else ""
+
+
+def _measurement_sentence_supported(text: str) -> bool:
+    """Require an explicit measurement action and a measured object.
+
+    A diagnostic or classification sentence can mention an assay and patients
+    without saying what was measured. It must not populate the UI's
+    ``What was measured`` field.
+    """
+    value = str(text or "").strip()
+    if not value or not _MEASUREMENT_EVIDENCE.search(value):
+        return False
+    if not _MEASUREMENT_OBJECT.search(value):
+        return False
+    if _DIAGNOSTIC_CONTEXT.search(value) and not re.search(
+        r"\b(?:concentration|activity|biomarker|biomarkers|isoforms?|levels?|"
+        r"expression|plasma|serum|urine)\b|血浆|血清|尿液|生物标志物|浓度|活性|异构体|水平|表达",
+        value,
+        re.I,
+    ):
+        return False
+    return True
+
+
+_CONTROL_COUNT = re.compile(
+    r"\b\d[\d,]*\s+(?:healthy\s+)?control(?:\s+subjects?|s?)\b",
+    re.I,
+)
+_SAMPLE_GROUP_COUNT = re.compile(
+    r"\b\d[\d,]*\s+(?:classic\s+Fabry\s+men|later[- ]onset\s+Fabry\s+men|"
+    r"Fabry\s+women|women|men|control(?:\s+subjects?|s?)|"
+    r"participants?|patients?|subjects?|adults?|children)\b",
+    re.I,
+)
+
+
+def _measurement_excerpt(sentences: list[str]) -> str:
+    """Describe the measured analytes without repeating cohort details."""
+    if not sentences:
+        return ""
+    first = sentences[0]
+    if len(first) <= 220:
+        return _summary(first)
+
+    subjects: list[str] = []
+    verbs: list[str] = []
+    pattern = re.compile(
+        r"(?P<subject>[A-Za-z][A-Za-z0-9α-]*(?:[ /(),:+-][A-Za-z0-9α-]+){1,12})\s+"
+        r"(?P<verb>were|was)\s+(?P<action>measured|quantified|determined|analyzed|analysed)",
+        re.I,
+    )
+    for sentence in sentences:
+        for match in pattern.finditer(sentence):
+            subject = re.sub(
+                r"^(?:while|and)\s+",
+                "",
+                match.group("subject").strip(),
+                flags=re.I,
+            )
+            if subject and subject not in subjects:
+                subjects.append(subject)
+            verbs.append(match.group("action").lower())
+    if not subjects:
+        return _summary(first)
+
+    action = verbs[0] if len(set(verbs)) == 1 else "measured"
+    method = ""
+    method_match = re.search(r"\b(?:using|by)\s+(.+?)(?:[.!?]|$)", first, re.I)
+    if method_match:
+        method_text = method_match.group(1).strip().rstrip(" ,;")
+        abbreviation = re.search(r"\(([A-Z][A-Z0-9/-]+)\)", method_text)
+        method = f" using {abbreviation.group(1)}" if abbreviation else f" using {method_text}"
+    return _summary(f"{' and '.join(subjects)} were {action}{method}.")
+
+
+def _cohort_count_groups(sentences: list[str]) -> list[tuple[str, list[str]]]:
+    groups: list[tuple[str, list[str]]] = []
+    for sentence in sentences:
+        parts = re.split(r"\b(?:while|whereas)\b", sentence, flags=re.I)
+        for part in parts:
+            counts = [match.group(0) for match in _SAMPLE_GROUP_COUNT.finditer(part)]
+            if not counts:
+                continue
+            lowered = part.lower()
+            label = (
+                "Plasma"
+                if "plasma" in lowered
+                else "Urine"
+                if "urine" in lowered or "urinary" in lowered
+                else ""
+            )
+            groups.append((label, list(dict.fromkeys(counts))))
+    return groups
+
+
+def _compact_sample_size_excerpt(sentences: list[str]) -> str:
+    groups = _cohort_count_groups(sentences)
+    if not groups:
+        return _summary(" ".join(sentences[:2])) if sentences else ""
+    if all(not label for label, _counts in groups):
+        return _summary(" ".join(sentences[:2]))
+    parts: list[str] = []
+    for label, counts in groups:
+        value = "; ".join(counts)
+        parts.append(f"{label}: {value}" if label else value)
+    return _summary("; ".join(dict.fromkeys(parts)))
+
+
+def _compact_comparator_excerpt(sentences: list[str]) -> str:
+    """Keep comparator spans concise without inventing a comparison result."""
+    if not sentences:
+        return ""
+    groups = _cohort_count_groups(sentences)
+    comparator_parts: list[str] = []
+    for label, counts in groups:
+        controls = [value for value in counts if _CONTROL_COUNT.fullmatch(value)]
+        if controls:
+            value = "; ".join(controls)
+            comparator_parts.append(f"{label}: {value}" if label else value)
+    if comparator_parts:
+        return _summary("; ".join(dict.fromkeys(comparator_parts)))
+
+    compact: list[str] = []
+    for sentence in sentences[:3]:
+        counts = [match.group(0) for match in _CONTROL_COUNT.finditer(sentence)]
+        if counts:
+            context = ""
+            lowered = sentence.lower()
+            if "plasma" in lowered:
+                context = "Plasma: "
+            elif "urine" in lowered or "urinary" in lowered:
+                context = "Urine: "
+            compact.append(context + ", ".join(counts))
+        elif len(sentence) <= 180:
+            compact.append(sentence)
+    return _summary("; ".join(dict.fromkeys(compact))) if compact else ""
 
 
 def _method_attribute(evidence: list[EvidenceItem], field: str) -> dict[str, Any]:
@@ -665,6 +800,26 @@ def _question_suggestion(
 def _summary(text: str, max_chars: int = 360) -> str:
     normalized = " ".join(str(text or "").split())
     if not normalized:
+        return ""
+    if any(
+        first.casefold() == second.casefold() and first != second
+        for first, second in re.findall(
+            r"\b([A-Za-z][A-Za-z'-]{2,})\s+([A-Za-z][A-Za-z'-]{2,})\b",
+            normalized,
+        )
+    ):
+        return ""
+    if re.search(r"\b[A-Za-z]{2,}-\s+[a-z]{2,}\b", normalized):
+        return ""
+    if re.match(r"^\d{1,3}[a-z]?\.\s", normalized, re.I):
+        return ""
+    if re.search(r"(?:^|\s)\d{3,5}$", normalized):
+        return ""
+    if re.search(
+        r"\b(?:figure|fig\.?|table)\s+\d+\b|\b(?:the\s+)?results\s+\d{3,5}$",
+        normalized,
+        re.I,
+    ):
         return ""
     # A fixed-size parser chunk can begin with the tail of a word or contain
     # a column/header splice. Such text is not safe to present as a finding.

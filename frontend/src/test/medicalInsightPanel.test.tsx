@@ -63,7 +63,7 @@ function queuedRun() {
     parsed_source_hash: "parsed-new",
     provider: "extractive",
     model_name: "extractive-v3",
-    prompt_version: "medical-insights-v3+medical-insights-readable-v5",
+    prompt_version: "medical-insights-v3+medical-insights-readable-v6",
     schema_version: "medical-insights-v3",
   };
 }
@@ -322,11 +322,11 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
 
     renderPanel();
 
-    expect(await screen.findAllByText("Processing notes")).toHaveLength(2);
+    expect(await screen.findAllByText("Processing notes")).toHaveLength(1);
     const noteText =
       "Some passages were excluded because their text quality was not reliable enough for medical evidence.";
     const notes = screen.getAllByText(noteText);
-    expect(notes).toHaveLength(2);
+    expect(notes).toHaveLength(1);
     expect(notes.every((note) => note.textContent === noteText)).toBe(true);
   });
 });

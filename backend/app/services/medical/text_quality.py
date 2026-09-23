@@ -46,6 +46,9 @@ _LOWERCASE_FRAGMENT = re.compile(
     r"^(?:ary|orm|tients?|cance|sults|troduction|nformation|ntervention|"
     r"ignifi|ethods?|esults?|onclusion)\b",
 )
+_UNFINISHED_FRAGMENT = re.compile(r"^(?:revealed|reported|continued)\b")
+_FIGURE_FRAGMENT = re.compile(r"^\d{1,3}[a-z]?\.\s", re.I)
+_PAGE_NUMBER_TAIL = re.compile(r"(?:^|\s)(?:\d{3,5})$")
 _REFERENCE_LIKE = re.compile(
     r"(?:\bdoi\s*:\s*10\.|https?://doi\.org/10\.|\b(?:pmid|issn)\s*[:#]?\s*\d+|"
     r"\b(?:intern\s+med|journal|vol(?:ume)?|suppl(?:ement)?)\b\s*\d{1,4}\s*[:;])",
@@ -165,8 +168,14 @@ def assess_passage(
     ):
         reasons.append("adjacent_duplicate_words")
         hard_reject = True
-    if _LOWERCASE_FRAGMENT.search(value):
+    if _LOWERCASE_FRAGMENT.search(value) or _UNFINISHED_FRAGMENT.search(value):
         reasons.append("incomplete_sentence")
+        hard_reject = True
+    if _FIGURE_FRAGMENT.search(value):
+        reasons.append("figure_body_fragment")
+        hard_reject = True
+    if _PAGE_NUMBER_TAIL.search(value):
+        reasons.append("page_number_fragment")
         hard_reject = True
     if _REFERENCE_LIKE.search(value) or len(_CITATION.findall(value)) >= 4:
         reasons.append("reference_like")

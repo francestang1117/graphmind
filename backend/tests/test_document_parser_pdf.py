@@ -9,6 +9,7 @@ from app.services.document_parser import (
     PDFParser,
     PDF_TEXT_PARSER_VERSION,
     _pdf_candidate_rank,
+    _pdf_extract_blocks,
     _pdf_line_kind,
     _reconstruct_pdf_words,
     _normalise_pdf_text,
@@ -47,9 +48,17 @@ class FakePDFPage:
 def test_pdf_text_cleanup_preserves_line_ending_medical_hyphens():
     text = _normalise_pdf_text("non-\nsmall-cell lung cancer\nrandom-\nized trial")
 
-    assert "non-\nsmall-cell" in text
-    assert "random-\nized" in text
+    assert "non-small-cell" in text
+    assert "randomized trial" in text
     assert "nonsmall-cell" not in text
+
+
+def test_pdf_text_cleanup_repairs_known_line_breaks_and_keeps_compounds():
+    text = _normalise_pdf_text(
+        "informa- tion at- tenuation per- formed α- Gal later- onset"
+    )
+
+    assert text == "information attenuation performed α-Gal later-onset"
 
 
 def test_pdf_word_reconstruction_keeps_obvious_columns_in_reading_order():
@@ -272,6 +281,58 @@ def test_pdf_parser_records_filterable_page_blocks_without_copying_source_text(
     assert any(block["kind"] == "body" and block["medical_evidence"] for block in blocks)
     assert all("text" not in block for block in blocks)
     assert all(block["char_end"] > block["char_start"] for block in blocks)
+
+
+def test_pdf_caption_does_not_absorb_body_after_a_visual_gap():
+    page = FakePDFPage(
+        "",
+        words=[
+            {"text": "Figure", "x0": 40, "x1": 80, "top": 100, "bottom": 110},
+            {"text": "2.", "x0": 85, "x1": 95, "top": 100, "bottom": 110},
+            {"text": "Study", "x0": 100, "x1": 130, "top": 100, "bottom": 110},
+            {"text": "flow", "x0": 135, "x1": 160, "top": 100, "bottom": 110},
+            {"text": "The", "x0": 40, "x1": 58, "top": 116, "bottom": 126},
+            {"text": "graph", "x0": 63, "x1": 93, "top": 116, "bottom": 126},
+            {"text": "shows", "x0": 98, "x1": 135, "top": 116, "bottom": 126},
+            {"text": "results.", "x0": 140, "x1": 190, "top": 116, "bottom": 126},
+            {"text": "The", "x0": 40, "x1": 58, "top": 160, "bottom": 170},
+            {"text": "study", "x0": 63, "x1": 95, "top": 160, "bottom": 170},
+            {"text": "found", "x0": 100, "x1": 135, "top": 160, "bottom": 170},
+            {"text": "an", "x0": 140, "x1": 155, "top": 160, "bottom": 170},
+            {"text": "effect.", "x0": 160, "x1": 205, "top": 160, "bottom": 170},
+        ],
+    )
+    page.width = 612
+    page.height = 792
+
+    blocks, _rendered = _pdf_extract_blocks(page, page_number=1)
+
+    assert [block["kind"] for block in blocks] == ["figure_caption", "body"]
+    assert "The study found an effect." in blocks[-1]["text"]
+    assert "The study found an effect." not in blocks[0]["text"]
+
+
+def test_pdf_block_offsets_match_normalized_reconstructed_text():
+    page = FakePDFPage(
+        "",
+        words=[
+            {"text": "Figure", "x0": 40, "x1": 80, "top": 100, "bottom": 110},
+            {"text": "1.", "x0": 85, "x1": 95, "top": 100, "bottom": 110},
+            {"text": "Caption", "x0": 100, "x1": 145, "top": 100, "bottom": 110},
+            {"text": "informa-", "x0": 40, "x1": 85, "top": 150, "bottom": 160},
+            {"text": "tion", "x0": 40, "x1": 75, "top": 165, "bottom": 175},
+            {"text": "reported.", "x0": 80, "x1": 135, "top": 165, "bottom": 175},
+            {"text": "2", "x0": 300, "x1": 306, "top": 760, "bottom": 770},
+        ],
+    )
+    page.width = 612
+    page.height = 792
+
+    blocks, rendered = _pdf_extract_blocks(page, page_number=1)
+
+    assert "information reported." in rendered
+    for block in blocks:
+        assert rendered[block["char_start"] : block["char_end"]] == block["text"]
 
 
 @pytest.mark.parametrize("page_label", ["Page 2", "2/8", "2"])

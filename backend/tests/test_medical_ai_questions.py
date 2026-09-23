@@ -522,12 +522,12 @@ def test_extractive_provider_detects_contiguous_chinese_population_terms(populat
 
 
 @pytest.mark.parametrize(
-    ("subject_text", "expected_value"),
+    ("measurement_text", "expected_value"),
     [
-        ("A total of 200 patients were enrolled.", True),
-        ("The experiment was performed in rats.", True),
-        ("本研究纳入1040名患者。", True),
-        ("该实验使用小鼠模型。", True),
+        ("A total of 200 patients were enrolled.", False),
+        ("The experiment was performed in rats.", False),
+        ("本研究纳入1040名患者。", False),
+        ("该实验使用小鼠模型。", False),
         ("检测肿瘤组织中的蛋白表达。", True),
         ("使用组织切片进行病理分析。", True),
         ("研究人员使用统计模型分析数据。", False),
@@ -535,19 +535,80 @@ def test_extractive_provider_detects_contiguous_chinese_population_terms(populat
         ("由两人独立审查研究质量。", False),
         ("该研究由医院组织开展。", False),
         ("研究团队组织实施随访。", False),
+        (
+            "Plasma Lyso-Gb3 and urinary Gb3 isoforms were measured using LC-MS/MS.",
+            True,
+        ),
+        (
+            "The diagnosis was performed using an assay, with patients classified into three types.",
+            False,
+        ),
     ],
 )
-def test_extractive_provider_requires_explicit_human_or_model_subject_terms(
-    subject_text, expected_value
+def test_extractive_provider_requires_a_measured_object_for_what_was_measured(
+    measurement_text, expected_value
 ):
     output = ExtractiveMedicalAIProvider().generate(
-        "prompt", _context(("EVIDENCE_001", "methods", subject_text))
+        "prompt", _context(("EVIDENCE_001", "methods", measurement_text))
     )
 
     attribute = output["study_methods"]["human_animal_in_vitro"]
     assert bool(attribute) is expected_value
     if expected_value:
-        assert attribute["value"] == subject_text
+        assert attribute["value"] == measurement_text
+
+
+def test_extractive_provider_keeps_method_fields_out_of_results_and_compacts_comparator():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "methods",
+            "Plasma analysis included 15 classic Fabry men and 36 control subjects. "
+            "Urine analysis included 5 classic Fabry men and 11 control subjects. "
+            "Plasma Lyso-Gb3 and urinary Gb3 isoforms were measured using LC-MS/MS. "
+            "The diagnosis was performed using an assay, with patients classified into three types.",
+        ),
+        (
+            "EVIDENCE_002",
+            "results",
+            "The mean plasma Lyso-Gb3 values were reported with the figure caption.",
+        ),
+    )
+
+    methods = ExtractiveMedicalAIProvider().generate("prompt", context)["study_methods"]
+
+    assert "15 classic Fabry men" in methods["sample_size"]["value"]
+    assert "5 classic Fabry men" in methods["sample_size"]["value"]
+    assert "mean plasma" not in methods["sample_size"]["value"]
+    assert methods["comparator"]["value"] == "Plasma: 36 control subjects; Urine: 11 control subjects"
+    assert methods["human_animal_in_vitro"]["value"] == (
+        "Plasma Lyso-Gb3 and urinary Gb3 isoforms were measured using LC-MS/MS."
+    )
+
+
+def test_extractive_provider_splits_mixed_plasma_and_urine_cohorts():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "methods",
+            "Plasma Lyso-Gb3 and related analogs were measured in 15 classic Fabry men, "
+            "6 later-onset Fabry men, 11 Fabry women, and 36 controls, while urinary "
+            "Gb3 isoforms were measured in 5 classic Fabry men, 5 later-onset Fabry men, "
+            "17 Fabry women, and 11 controls, using LC-MS/MS.",
+        ),
+        ("EVIDENCE_002", "results", "The results 1533"),
+    )
+
+    report = ExtractiveMedicalAIProvider().generate("prompt", context)
+    methods = report["study_methods"]
+
+    assert methods["sample_size"]["value"] == (
+        "Plasma: 15 classic Fabry men; 6 later-onset Fabry men; 11 Fabry women; "
+        "36 controls; Urine: 5 classic Fabry men; 5 later-onset Fabry men; "
+        "17 Fabry women; 11 controls"
+    )
+    assert methods["comparator"]["value"] == "Plasma: 36 controls; Urine: 11 controls"
+    assert all("1533" not in finding["statement"] for finding in report["key_findings"])
 
 
 def test_analyzer_deduplicates_multiple_sources_for_same_topic():
