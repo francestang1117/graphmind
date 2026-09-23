@@ -365,6 +365,66 @@ def test_figure_captions_are_kept_with_page_and_text_location():
     assert result.chunks[-1]["section_type"] == "figure_caption"
 
 
+def test_pdf_block_metadata_rejects_caption_and_reference_mixed_chunks():
+    text = (
+        "Results\n"
+        "Clean result sentence.\n"
+        "Figure 1. Study flow and participant exclusions.\n"
+        "Intern Med 63: 1531-1538, 2024\n"
+    )
+    caption_start = text.index("Figure 1")
+    citation_start = text.index("Intern Med")
+    parsed = {
+        "content": text,
+        "metadata": {
+            "format": "pdf",
+            "pdf_blocks": [
+                {
+                    "page": 1,
+                    "kind": "body",
+                    "block_type": "body",
+                    "column": "left",
+                    "char_start": text.index("Clean"),
+                    "char_end": caption_start,
+                    "medical_evidence": True,
+                    "quality_flags": [],
+                },
+                {
+                    "page": 1,
+                    "kind": "figure_caption",
+                    "block_type": "figure_caption",
+                    "column": "left",
+                    "char_start": caption_start,
+                    "char_end": citation_start,
+                    "medical_evidence": False,
+                    "quality_flags": ["caption_body_mixed"],
+                },
+                {
+                    "page": 1,
+                    "kind": "metadata",
+                    "block_type": "metadata",
+                    "column": "left",
+                    "char_start": citation_start,
+                    "char_end": len(text),
+                    "medical_evidence": False,
+                    "quality_flags": ["reference_like"],
+                },
+            ],
+        },
+        "extra": {
+            "sections": [{"title": "Page 1", "content": text}],
+            "tables": [],
+        },
+    }
+
+    result = PaperStructureParser().parse(parsed, _analysis())
+    result_chunks = [chunk for chunk in result.chunks if chunk["section_type"] == "results"]
+
+    assert [chunk["text"] for chunk in result_chunks] == ["Clean result sentence."]
+    assert result_chunks[0]["pdf_block_type"] == "body"
+    assert result_chunks[0]["medical_evidence"] is True
+
+
 def test_empty_pdf_reports_that_ocr_is_needed():
     parsed = {"content": "", "metadata": {"format": "pdf"}, "extra": {}}
 

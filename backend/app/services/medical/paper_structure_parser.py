@@ -112,6 +112,7 @@ class PaperStructureParser:
             )
 
         pages = self._page_ranges(parsed, text)
+        pdf_blocks = self._pdf_blocks(parsed)
         explicit = self._docx_sections(parsed)
         if explicit:
             sections = self._sections_from_explicit_blocks(explicit, text, analysis.language)
@@ -153,7 +154,9 @@ class PaperStructureParser:
         # Number sections first so the same number is stored on each chunk.
         chunks: list[dict[str, Any]] = []
         for section in sections:
-            section_chunks = self._section_chunks(section, analysis.document_kind, pages)
+            section_chunks = self._section_chunks(
+                section, analysis.document_kind, pages, pdf_blocks
+            )
             section.chunk_count = len(section_chunks)
             chunks.extend(section_chunks)
         for chunk_index, chunk in enumerate(chunks):
@@ -646,12 +649,14 @@ class PaperStructureParser:
         section: StructuredSection,
         document_kind: str,
         pages: list[_PageRange] | None = None,
+        pdf_blocks: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         if not section.text.strip() or section.metadata.get("structured_abstract_parent"):
             return []
         chunks: list[dict[str, Any]] = []
         text = section.text
         spans = self._sentence_spans(text)
+        location_exact = bool(section.metadata.get("location_exact", True))
         start_index = 0
         while start_index < len(spans):
             chunk_start = spans[start_index][0]
@@ -661,12 +666,21 @@ class PaperStructureParser:
                 end_index < len(spans)
                 and spans[end_index][1] - chunk_start <= self.chunk_size
             ):
+                if location_exact:
+                    candidate_start = section.char_start + chunk_start
+                    candidate_end = section.char_start + spans[end_index][1]
+                    if self._pdf_chunk_metadata(
+                        candidate_start,
+                        candidate_end,
+                        pdf_blocks or [],
+                        location_exact=True,
+                    ).get("reject"):
+                        break
                 chunk_end = spans[end_index][1]
                 end_index += 1
 
             piece = text[chunk_start:chunk_end]
             if piece:
-                location_exact = bool(section.metadata.get("location_exact", True))
                 if location_exact:
                     absolute_start = section.char_start + chunk_start
                     absolute_end = section.char_start + chunk_end
@@ -682,7 +696,16 @@ class PaperStructureParser:
                     if located_start is not None:
                         chunk_page_start = located_start
                         chunk_page_end = located_end
-                chunks.append({
+                block_metadata = self._pdf_chunk_metadata(
+                    absolute_start,
+                    absolute_end,
+                    pdf_blocks or [],
+                    location_exact=location_exact,
+                )
+                if block_metadata.get("reject"):
+                    start_index = end_index
+                    continue
+                chunk = {
                     "text": piece,
                     "type": "medical_section",
                     "start": absolute_start,
@@ -702,7 +725,15 @@ class PaperStructureParser:
                     "location_exact": location_exact,
                     "starts_at_sentence_boundary": True,
                     "ends_at_sentence_boundary": True,
-                })
+                }
+                chunk.update(
+                    {
+                        key: value
+                        for key, value in block_metadata.items()
+                        if key != "reject"
+                    }
+                )
+                chunks.append(chunk)
             if end_index >= len(spans):
                 break
             target = chunk_end - self.overlap
@@ -713,6 +744,75 @@ class PaperStructureParser:
                     break
             start_index = max(start_index + 1, next_index)
         return chunks
+
+    def _pdf_blocks(self, parsed: dict[str, Any]) -> list[dict[str, Any]]:
+        if self._format(parsed) != "pdf":
+            return []
+        metadata = parsed.get("metadata")
+        if not isinstance(metadata, dict):
+            return []
+        blocks = metadata.get("pdf_blocks")
+        if not isinstance(blocks, list):
+            return []
+        return [
+            block
+            for block in blocks
+            if isinstance(block, dict)
+            and int(block.get("char_end", 0) or 0) > int(block.get("char_start", 0) or 0)
+        ]
+
+    def _pdf_chunk_metadata(
+        self,
+        start: int,
+        end: int,
+        blocks: list[dict[str, Any]],
+        *,
+        location_exact: bool,
+    ) -> dict[str, Any]:
+        """Attach block provenance or reject mixed page furniture."""
+        if not blocks or not location_exact or end <= start:
+            return {}
+        overlaps = [
+            block
+            for block in blocks
+            if max(start, int(block.get("char_start", 0) or 0))
+            < min(end, int(block.get("char_end", 0) or 0))
+        ]
+        if not overlaps:
+            return {"reject": True, "quality_flags": ["mixed_page_regions"]}
+
+        kinds = {str(block.get("kind") or block.get("block_type") or "body") for block in overlaps}
+        if kinds != {"body"}:
+            flags: list[str] = []
+            for block in overlaps:
+                flags.extend(str(flag) for flag in block.get("quality_flags", []) if flag)
+            if "mixed_page_regions" not in flags:
+                flags.append("mixed_page_regions")
+            return {"reject": True, "quality_flags": list(dict.fromkeys(flags))}
+
+        pages = {int(block.get("page", 0) or 0) for block in overlaps}
+        columns = {str(block.get("column") or "full_width") for block in overlaps}
+        if len(pages) != 1 or len(columns) != 1:
+            return {
+                "reject": True,
+                "quality_flags": ["mixed_page_regions"],
+            }
+        block = overlaps[0]
+        return {
+            "pdf_block_type": "body",
+            "pdf_block_index": blocks.index(block),
+            "pdf_column": next(iter(columns)),
+            "pdf_reconstructed": any(bool(item.get("reconstructed")) for item in overlaps),
+            "pdf_quality_flags": list(
+                dict.fromkeys(
+                    str(flag)
+                    for item in overlaps
+                    for flag in item.get("quality_flags", [])
+                    if flag
+                )
+            ),
+            "medical_evidence": True,
+        }
 
     def _sentence_spans(self, text: str) -> list[tuple[int, int]]:
         """Return trimmed, punctuation-aware spans for stable chunk boundaries."""

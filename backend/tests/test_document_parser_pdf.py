@@ -9,6 +9,7 @@ from app.services.document_parser import (
     PDFParser,
     PDF_TEXT_PARSER_VERSION,
     _pdf_candidate_rank,
+    _pdf_line_kind,
     _reconstruct_pdf_words,
     _normalise_pdf_text,
 )
@@ -182,6 +183,27 @@ def test_pdf_coordinate_reconstruction_repairs_only_safe_line_break_hyphens():
     assert "signifi-cance" not in reconstructed
 
 
+def test_pdf_coordinate_reconstruction_preserves_scientific_compound_hyphens():
+    page = FakePDFPage(
+        "",
+        words=[
+            {"text": "non-", "x0": 20, "top": 10},
+            {"text": "small-cell", "x0": 20, "top": 25},
+            {"text": "later-", "x0": 20, "top": 40},
+            {"text": "onset", "x0": 20, "top": 55},
+            {"text": "informa-", "x0": 20, "top": 70},
+            {"text": "tion", "x0": 20, "top": 85},
+        ],
+    )
+
+    reconstructed = _reconstruct_pdf_words(page)
+
+    assert "non-small-cell" in reconstructed
+    assert "later-onset" in reconstructed
+    assert "information" in reconstructed
+    assert "nonsmall-cell" not in reconstructed
+
+
 def test_pdfplumber_parser_extracts_pages_and_tables(tmp_path, monkeypatch):
     pdf_path = tmp_path / "report.pdf"
     pdf_path.write_bytes(b"%PDF fake")
@@ -215,6 +237,46 @@ def test_pdfplumber_parser_extracts_pages_and_tables(tmp_path, monkeypatch):
     assert parsed.tables[0].rows == [["Revenue", "$10"]]
     assert any(chunk["type"] == "page" and chunk["page"] == 1 for chunk in parsed.chunks)
     assert any(chunk["type"] == "table" and "Revenue | $10" in chunk["text"] for chunk in parsed.chunks)
+
+
+def test_pdf_parser_records_filterable_page_blocks_without_copying_source_text(
+    tmp_path, monkeypatch
+):
+    pdf_path = tmp_path / "blocks.pdf"
+    pdf_path.write_bytes(b"%PDF fake")
+    page = FakePDFPage(
+        "Results\nClean result sentence.\nFigure 1. Study flow\n2",
+        words=[
+            {"text": "Results", "x0": 48, "x1": 85, "top": 30, "bottom": 40},
+            {"text": "Clean", "x0": 48, "x1": 78, "top": 55, "bottom": 65},
+            {"text": "result", "x0": 84, "x1": 116, "top": 55, "bottom": 65},
+            {"text": "sentence.", "x0": 122, "x1": 176, "top": 55, "bottom": 65},
+            {"text": "Figure", "x0": 48, "x1": 84, "top": 90, "bottom": 100},
+            {"text": "1.", "x0": 90, "x1": 100, "top": 90, "bottom": 100},
+            {"text": "Study", "x0": 106, "x1": 138, "top": 90, "bottom": 100},
+            {"text": "flow", "x0": 144, "x1": 168, "top": 90, "bottom": 100},
+            {"text": "2", "x0": 300, "x1": 306, "top": 760, "bottom": 770},
+        ],
+    )
+    page.width = 612
+    page.height = 792
+    monkeypatch.setitem(sys.modules, "pdfplumber", SimpleNamespace(open=lambda _path: FakePDF([page])))
+
+    parsed = PDFParser().parse(pdf_path)
+
+    blocks = parsed.metadata["pdf_blocks"]
+    kinds = [block["kind"] for block in blocks]
+    assert "heading" in kinds
+    assert "figure_caption" in kinds
+    assert "footer" in kinds
+    assert any(block["kind"] == "body" and block["medical_evidence"] for block in blocks)
+    assert all("text" not in block for block in blocks)
+    assert all(block["char_end"] > block["char_start"] for block in blocks)
+
+
+@pytest.mark.parametrize("page_label", ["Page 2", "2/8", "2"])
+def test_pdf_blocks_classify_page_labels_as_footer(page_label):
+    assert _pdf_line_kind({"text": page_label}) == "footer"
 
 
 def test_pdf_table_normalizer_skips_empty_tables():

@@ -24,7 +24,7 @@ import logging
 import re
 import unicodedata
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from xml.etree import ElementTree
 from pathlib import Path
 from typing import Any
@@ -32,7 +32,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
-PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v4"
+PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v5"
 
 
 # Parsed document shape
@@ -106,6 +106,45 @@ class PdfLayoutRegion:
                 if self.column_boundary is not None
                 else None
             ),
+        }
+
+
+@dataclass(frozen=True)
+class PdfExtractedBlock:
+    """A page block kept with enough geometry to gate medical evidence."""
+
+    page: int
+    kind: str
+    column: str
+    top: float
+    bottom: float
+    x0: float
+    x1: float
+    text: str
+    reconstructed: bool = False
+    quality_flags: tuple[str, ...] = ()
+    char_start: int = 0
+    char_end: int = 0
+
+    @property
+    def medical_evidence(self) -> bool:
+        return self.kind == "body"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "page": self.page,
+            "kind": self.kind,
+            "block_type": self.kind,
+            "column": self.column,
+            "top": round(self.top, 2),
+            "bottom": round(self.bottom, 2),
+            "x0": round(self.x0, 2),
+            "x1": round(self.x1, 2),
+            "reconstructed": self.reconstructed,
+            "quality_flags": list(self.quality_flags),
+            "medical_evidence": self.medical_evidence,
+            "char_start": self.char_start,
+            "char_end": self.char_end,
         }
 
 
@@ -618,11 +657,66 @@ def _pdf_render_lines(lines: list[list[dict[str, Any]]]) -> list[str]:
         rendered = _pdf_render_line(line)
         if not rendered:
             continue
-        if output and output[-1].endswith("-") and rendered[:1].islower():
-            output[-1] = f"{output[-1][:-1]}{rendered}"
-        else:
-            output.append(rendered)
+        if output:
+            joined = _join_pdf_line_ending(output[-1], rendered)
+            if joined is not None:
+                output[-1] = joined
+                continue
+        output.append(rendered)
     return output
+
+
+_SAFE_LINE_BREAK_WORDS = {
+    "attenuation",
+    "columns",
+    "information",
+    "randomized",
+    "significance",
+}
+_HYPHENATED_WORD_PREFIXES = {
+    "anti",
+    "case",
+    "cross",
+    "dose",
+    "later",
+    "long",
+    "multi",
+    "non",
+    "post",
+    "pre",
+    "short",
+    "small",
+    "well",
+}
+
+
+def _join_pdf_line_ending(previous: str, following: str) -> str | None:
+    """Join a visual line break without destroying scientific compounds."""
+    if not previous.endswith("-") or not following[:1].islower():
+        return None
+
+    match = re.search(r"([A-Za-z]+)-$", previous)
+    if not match:
+        return f"{previous}{following}"
+    prefix = match.group(1).lower()
+    suffix_match = re.match(r"([a-z]+)", following)
+    suffix = suffix_match.group(1).lower() if suffix_match else ""
+    if not suffix:
+        return f"{previous}{following}"
+
+    # An internal hyphen is evidence that the first hyphen is semantic, as in
+    # non-small-cell or well-established. Preserve both parts as one phrase.
+    if "-" in suffix or prefix in _HYPHENATED_WORD_PREFIXES:
+        return f"{previous}{following}"
+
+    if f"{prefix}{suffix}" in _SAFE_LINE_BREAK_WORDS or (
+        len(prefix) >= 3 and len(suffix) >= 3
+    ):
+        return f"{previous[:-1]}{following}"
+
+    # Unknown short fragments stay visibly hyphenated so the evidence gate can
+    # reject them instead of silently inventing a word boundary.
+    return f"{previous}{following}"
 
 
 def _pdf_render_line(line: list[dict[str, Any]]) -> str:
@@ -645,6 +739,301 @@ def _pdf_render_line(line: list[dict[str, Any]]) -> str:
         else:
             parts.append(value)
     return " ".join(parts)
+
+
+_PDF_CAPTION_LINE = re.compile(
+    r"^(?:figure|fig\.?|table|scheme|chart)\s*\d+\s*[.:：-]?\s*\S|"
+    r"^(?:图|図|表)\s*\d+\s*[.:：-]?\s*\S",
+    re.I,
+)
+_PDF_HEADING_LINE = re.compile(
+    r"^(?:abstract|background|introduction|materials?\s+and\s+methods?|"
+    r"methods?|study\s+(?:subjects?|population|design)|results?|discussion|"
+    r"conclusions?|limitations?|references?|keywords?|acknowledg(?:e)?ments?|"
+    r"funding|conflicts?\s+of\s+interest|目的|方法|结果|讨论|结论|参考文献)$",
+    re.I,
+)
+_PDF_METADATA_LINE = re.compile(
+    r"(?:\bdoi\s*:\s*10\.|https?://doi\.org/10\.|\bpmid\s*[:#]?\s*\d+|"
+    r"\bissn\s*[:#]?\s*\d{4}[-–]\d{3}[0-9xX]|copyright|©|"
+    r"\b[A-Z][A-Za-z.&'-]+\s+\d{1,3}\s*:\s*\d{1,5}[-–]\d{1,5})",
+    re.I,
+)
+
+
+def _pdf_line_record(
+    words: list[dict[str, Any]],
+    *,
+    column: str,
+    reconstructed: bool,
+) -> dict[str, Any] | None:
+    text = _pdf_render_line(words)
+    if not text:
+        return None
+    top = min(float(word.get("top", word.get("doctop", 0)) or 0) for word in words)
+    bottom = max(
+        float(word.get("bottom", word.get("top", word.get("doctop", 0))) or 0)
+        for word in words
+    )
+    return {
+        "words": words,
+        "text": text,
+        "column": column,
+        "top": top,
+        "bottom": bottom,
+        "x0": min(float(word.get("x0", 0) or 0) for word in words),
+        "x1": max(
+            float(word.get("x1", word.get("x0", 0)) or 0) for word in words
+        ),
+        "reconstructed": reconstructed,
+    }
+
+
+def _pdf_reconstructed_line_records(page: Any) -> list[dict[str, Any]]:
+    """Return visual lines in reading order, retaining their column identity."""
+    usable = _extract_pdf_words(page)
+    positioned = [
+        word for word in usable if "top" in word or "doctop" in word
+    ]
+    if not positioned:
+        return []
+
+    line_groups = _pdf_line_groups(positioned)
+    boundary = _pdf_column_boundary(positioned, page)
+    if boundary is None:
+        return [
+            record
+            for line in line_groups
+            if (record := _pdf_line_record(
+                line, column="full_width", reconstructed=False
+            ))
+        ]
+
+    split_indices = [
+        index
+        for index, line in enumerate(line_groups)
+        if _pdf_line_has_gutter(line, boundary, page)
+    ]
+    if not split_indices:
+        return [
+            record
+            for line in line_groups
+            if (record := _pdf_line_record(
+                line, column="full_width", reconstructed=False
+            ))
+        ]
+
+    first_split = min(split_indices)
+    last_split = max(split_indices)
+    output: list[dict[str, Any]] = []
+    left_column: list[dict[str, Any]] = []
+    right_column: list[dict[str, Any]] = []
+
+    def flush_columns() -> None:
+        output.extend(left_column)
+        output.extend(right_column)
+        left_column.clear()
+        right_column.clear()
+
+    for index, line in enumerate(line_groups):
+        inside_column_region = first_split <= index <= last_split
+        if not inside_column_region:
+            flush_columns()
+            record = _pdf_line_record(
+                line, column="full_width", reconstructed=False
+            )
+            if record:
+                output.append(record)
+            continue
+
+        left = [
+            word for word in line
+            if float(word.get("x0", 0) or 0) <= boundary
+        ]
+        right = [
+            word for word in line
+            if float(word.get("x0", 0) or 0) > boundary
+        ]
+        if left and right and _pdf_line_has_gutter(line, boundary, page):
+            left_record = _pdf_line_record(
+                left, column="left", reconstructed=True
+            )
+            right_record = _pdf_line_record(
+                right, column="right", reconstructed=True
+            )
+            if left_record:
+                left_column.append(left_record)
+            if right_record:
+                right_column.append(right_record)
+        elif left and not right:
+            record = _pdf_line_record(left, column="left", reconstructed=True)
+            if record:
+                left_column.append(record)
+        elif right and not left:
+            record = _pdf_line_record(right, column="right", reconstructed=True)
+            if record:
+                right_column.append(record)
+        else:
+            # A spanning line is a page-level separator. Never attach it to a
+            # body block from either column.
+            flush_columns()
+            record = _pdf_line_record(
+                line, column="full_width", reconstructed=False
+            )
+            if record:
+                output.append(record)
+
+    flush_columns()
+    return output
+
+
+def _pdf_line_kind(record: dict[str, Any]) -> str:
+    text = str(record.get("text") or "").strip()
+    if re.fullmatch(
+        r"(?:page\s+)?\d{1,4}(?:\s*/\s*\d{1,4})?",
+        text,
+        re.I,
+    ):
+        return "footer"
+    if _PDF_CAPTION_LINE.search(text):
+        return "figure_caption" if re.match(r"^(?:fig(?:ure)?\.?|图|図)", text, re.I) else "table_caption"
+    if _PDF_METADATA_LINE.search(text):
+        return "metadata"
+    if len(text) <= 120 and (
+        _PDF_HEADING_LINE.fullmatch(text)
+        or (text.isupper() and len(text.split()) <= 12)
+    ):
+        return "heading"
+    return "body"
+
+
+def _pdf_block_flags(kind: str, reconstructed: bool) -> tuple[str, ...]:
+    flags: list[str] = []
+    if reconstructed:
+        flags.append("pdf_layout_reconstructed")
+    if kind in {"header", "footer"}:
+        flags.append("header_footer_contamination")
+    elif kind in {"figure_caption", "table_caption"}:
+        flags.append("caption_body_mixed")
+    elif kind in {"heading", "metadata"}:
+        flags.append("heading_body_duplicated" if kind == "heading" else "reference_like")
+    return tuple(flags)
+
+
+def _pdf_extract_blocks(page: Any, page_number: int = 0) -> tuple[list[dict[str, Any]], str]:
+    """Build conservative page blocks before section chunking.
+
+    The generic page text remains available for the document viewer. Medical
+    evidence later uses only body blocks, so captions and page furniture cannot
+    silently become a supported field just because they share a page.
+    """
+    records = _pdf_reconstructed_line_records(page)
+    if not records:
+        return [], ""
+
+    page_height = float(getattr(page, "height", 0) or 0)
+    blocks: list[PdfExtractedBlock] = []
+    current: list[dict[str, Any]] = []
+    current_kind = ""
+
+    def flush() -> None:
+        nonlocal current, current_kind
+        if not current:
+            return
+        kind = current_kind or "body"
+        text = "\n".join(_pdf_render_line(record["words"]) for record in current).strip()
+        if text:
+            blocks.append(
+                PdfExtractedBlock(
+                    page=page_number,
+                    kind=kind,
+                    column=str(current[0].get("column") or "full_width"),
+                    top=min(float(record["top"]) for record in current),
+                    bottom=max(float(record["bottom"]) for record in current),
+                    x0=min(float(record["x0"]) for record in current),
+                    x1=max(float(record["x1"]) for record in current),
+                    text=text,
+                    reconstructed=any(bool(record.get("reconstructed")) for record in current),
+                    quality_flags=_pdf_block_flags(
+                        kind, any(bool(record.get("reconstructed")) for record in current)
+                    ),
+                )
+            )
+        current = []
+        current_kind = ""
+
+    for record in records:
+        kind = _pdf_line_kind(record)
+        if current:
+            previous = current[-1]
+            gap = max(0.0, float(record["top"]) - float(previous["bottom"]))
+            line_height = max(1.0, float(previous["bottom"]) - float(previous["top"]))
+            compatible = (
+                record.get("column") == previous.get("column")
+                and gap <= max(12.0, line_height * 2.4)
+            )
+            # Captions often wrap onto ordinary-looking lines. Keep those
+            # lines together, but never let a caption absorb a new heading.
+            if current_kind in {"figure_caption", "table_caption"} and kind == "body":
+                kind = current_kind
+            if not compatible or kind != current_kind:
+                flush()
+        if not current:
+            current_kind = kind
+        current.append(record)
+    flush()
+
+    # Repeated short lines at the top/bottom of later pages are journal
+    # furniture, even when they do not contain an explicit DOI or page number.
+    normalized_counts: dict[str, set[int]] = {}
+    for block in blocks:
+        normalized = " ".join(block.text.lower().split())
+        if len(normalized) <= 120 and normalized:
+            normalized_counts.setdefault(normalized, set()).add(block.page)
+    page_height = page_height or 800.0
+    repeated: list[PdfExtractedBlock] = []
+    for block in blocks:
+        normalized = " ".join(block.text.lower().split())
+        near_edge = block.top <= page_height * 0.12 or block.bottom >= page_height * 0.88
+        if (
+            block.kind == "body"
+            and near_edge
+            and len(normalized_counts.get(normalized, set())) >= 2
+        ):
+            kind = "header" if block.top <= page_height * 0.12 else "footer"
+            repeated.append(
+                replace(
+                    block,
+                    kind=kind,
+                    quality_flags=_pdf_block_flags(kind, block.reconstructed),
+                )
+            )
+        else:
+            repeated.append(block)
+
+    positioned_blocks: list[PdfExtractedBlock] = []
+    cursor = 0
+    for block in repeated:
+        if not block.text:
+            continue
+        positioned = replace(
+            block,
+            char_start=cursor,
+            char_end=cursor + len(block.text),
+        )
+        positioned_blocks.append(positioned)
+        cursor += len(block.text) + 1
+
+    rendered = "\n".join(block.text for block in positioned_blocks).strip()
+    # Keep text only inside the parser's in-memory handoff. The persisted
+    # metadata below strips it because the actual source text already lives in
+    # chunks and sections.
+    block_dicts = []
+    for block in positioned_blocks:
+        item = block.to_dict()
+        item["text"] = block.text
+        block_dicts.append(item)
+    return block_dicts, rendered
 
 
 def _page_has_extractable_objects(page: Any) -> bool:
@@ -857,6 +1246,8 @@ class PDFParser:
         reconstructed_pages: list[int] = []
         extraction_warnings: list[str] = []
         page_layouts: list[dict[str, Any]] = []
+        pdf_blocks: list[dict[str, Any]] = []
+        raw_text_offset = 0
 
         with pdfplumber.open(str(path)) as pdf:
             pdf_title = self._metadata_title(getattr(pdf, "metadata", None))
@@ -867,11 +1258,23 @@ class PDFParser:
                 if "pdf_text_reconstructed" in page_warnings:
                     reconstructed_pages.append(page_num)
                 layout = getattr(self, "_last_pdf_layout", None) or _pdf_layout_info(page)
-                page_layouts.append({"page": page_num, **layout})
+                page_layouts.append({
+                    "page": page_num,
+                    "page_height": float(getattr(page, "height", 0) or 0),
+                    "page_width": float(getattr(page, "width", 0) or 0),
+                    **layout,
+                })
                 extraction_warnings.extend(
                     f"{warning}_page_{page_num}" if warning == "pdf_text_unreadable" else warning
                     for warning in page_warnings
                 )
+                page_blocks = list(getattr(self, "_last_pdf_blocks", []) or [])
+                for block in page_blocks:
+                    block = dict(block)
+                    block["page"] = page_num
+                    block["char_start"] = raw_text_offset + int(block.get("char_start", 0) or 0)
+                    block["char_end"] = raw_text_offset + int(block.get("char_end", 0) or 0)
+                    pdf_blocks.append(block)
                 all_text.append(page_text)
                 headings.extend(self._extract_layout_headings(page, page_num))
 
@@ -889,7 +1292,23 @@ class PDFParser:
                     sections.append(Section(title=f"Page {page_num}",
                                             level=0, content=page_text))
                     chunks.extend(_chunk(page_text, chunk_type="page",
-                                         meta={"page": page_num}))
+                                         meta={
+                                             "page": page_num,
+                                             # Kept for the document browser and
+                                             # legacy search, not for medical
+                                             # evidence selection.
+                                             "medical_evidence": False,
+                                             "block_type": "page_text",
+                                         }))
+                raw_text_offset += len(page_text) + 2
+
+        # Repeated journal furniture is easier to identify after all pages are
+        # available. Preserve it for browsing, but mark it unusable evidence.
+        pdf_blocks = self._mark_repeated_pdf_furniture(pdf_blocks, page_layouts)
+        pdf_blocks = [
+            {key: value for key, value in block.items() if key != "text"}
+            for block in pdf_blocks
+        ]
 
         full_text = "\n\n".join(all_text)
         words = len(full_text.split())
@@ -910,6 +1329,7 @@ class PDFParser:
             "unreadable_pages": unreadable_pages,
             "reconstructed_pages": reconstructed_pages,
             "page_layouts": page_layouts,
+            "pdf_blocks": pdf_blocks,
             "extraction_method": (
                 "pdfplumber-coordinate-columns"
                 if any(layout.get("mode") == "columns" for layout in page_layouts)
@@ -933,6 +1353,47 @@ class PDFParser:
             word_count   = words,
             reading_time_min = max(1, words // 250),
         )
+
+    @staticmethod
+    def _mark_repeated_pdf_furniture(
+        blocks: list[dict[str, Any]],
+        page_layouts: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Mark repeated short edge text as header/footer without deleting it."""
+        page_heights = {
+            int(layout.get("page", 0) or 0): float(layout.get("page_height", 0) or 0)
+            for layout in page_layouts
+        }
+        counts: dict[str, set[int]] = {}
+        for block in blocks:
+            normalized = " ".join(str(block.get("text") or "").lower().split())
+            if normalized and len(normalized) <= 120:
+                counts.setdefault(normalized, set()).add(int(block.get("page", 0) or 0))
+
+        result: list[dict[str, Any]] = []
+        for block in blocks:
+            updated = dict(block)
+            normalized = " ".join(str(block.get("text") or "").lower().split())
+            page = int(block.get("page", 0) or 0)
+            height = page_heights.get(page) or 800.0
+            near_top = float(block.get("top", 0) or 0) <= height * 0.12
+            near_bottom = float(block.get("bottom", 0) or 0) >= height * 0.88
+            if (
+                block.get("kind") == "body"
+                and len(normalized) <= 120
+                and len(counts.get(normalized, set())) >= 2
+                and (near_top or near_bottom)
+            ):
+                kind = "header" if near_top else "footer"
+                updated["kind"] = kind
+                updated["block_type"] = kind
+                updated["medical_evidence"] = False
+                flags = list(updated.get("quality_flags") or [])
+                if "header_footer_contamination" not in flags:
+                    flags.append("header_footer_contamination")
+                updated["quality_flags"] = flags
+            result.append(updated)
+        return result
 
     def _normalise_table(self, table: Any) -> tuple[list[str], list[list[str]]]:
         """Clean pdfplumber table output before it becomes searchable text."""
@@ -964,6 +1425,7 @@ class PDFParser:
         """
         layout = _pdf_layout_info(page)
         self._last_pdf_layout = layout
+        self._last_pdf_blocks, reconstructed_text = _pdf_extract_blocks(page)
         candidates: list[str] = []
         try:
             candidates.append(
@@ -997,7 +1459,7 @@ class PDFParser:
         # Coordinate reconstruction therefore wins whenever the layout detector
         # has enough repeated gutter evidence, before text-candidate ranking.
         if layout.get("column_count", 1) >= 2 and layout.get("stable"):
-            reconstructed = _reconstruct_pdf_words(page)
+            reconstructed = reconstructed_text or _reconstruct_pdf_words(page)
             if reconstructed:
                 best = _normalise_pdf_text(reconstructed)
                 warnings.append("pdf_text_reconstructed")
@@ -1008,7 +1470,7 @@ class PDFParser:
             warnings.append("pdf_layout_ambiguous")
             return best, "unreadable", warnings
         elif not best or _glued_text_score(best) >= 2:
-            reconstructed = _reconstruct_pdf_words(page)
+            reconstructed = reconstructed_text or _reconstruct_pdf_words(page)
             if reconstructed and (
                 not best or _glued_text_score(reconstructed) < _glued_text_score(best)
             ):
