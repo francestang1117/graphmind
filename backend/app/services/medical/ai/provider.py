@@ -457,6 +457,23 @@ _SAMPLE_SIZE_EVIDENCE = re.compile(
     r"|\d[\d,]*(?:例|名(?:患者|受试者)?))",
     re.I,
 )
+_MEASUREMENT_EVIDENCE = re.compile(
+    r"\b(?:measured|quantified|determined|analyzed|analysed|assessed|"
+    r"evaluated|tested|collected)\b|测量|定量|检测|测定|分析|评估|收集",
+    re.I,
+)
+_MEASUREMENT_OBJECT = re.compile(
+    r"\b(?:plasma|serum|urine|biomarker|biomarkers|concentration|activity|"
+    r"expression|sample|specimen|isoform|isoforms|level|levels|outcome|"
+    r"marker|markers|cells?|tissues?)\b|血浆|血清|尿液|生物标志物|"
+    r"浓度|活性|表达|样本|标本|异构体|水平|指标|细胞|组织",
+    re.I,
+)
+_COMPARATOR_EVIDENCE = re.compile(
+    r"\b(?:control(?:\s+group|s)?|placebo|usual\s+care|matched\s+group|"
+    r"comparison\s+group|comparator)\b|对照(?:组)?|安慰剂",
+    re.I,
+)
 
 
 def _method_evidence(evidence: list[EvidenceItem], field: str) -> EvidenceItem | None:
@@ -489,9 +506,20 @@ def _method_marker_found(text: str, field: str, marker: re.Pattern[str]) -> bool
         return any(_population_sentence_supported(sentence) for sentence in _sentence_parts(text))
     if field == "human_animal_in_vitro":
         return bool(
-            _ENGLISH_SUBJECT_MARKERS.search(text or "")
-            or _CJK_SUBJECT_MARKERS.search(text or "")
+            (
+                _MEASUREMENT_EVIDENCE.search(text or "")
+                and _MEASUREMENT_OBJECT.search(text or "")
+            )
+            or (
+                not _looks_like_author_metadata(text)
+                and (
+                    _ENGLISH_SUBJECT_MARKERS.search(text or "")
+                    or _CJK_SUBJECT_MARKERS.search(text or "")
+                )
+            )
         )
+    if field == "comparator":
+        return bool(_COMPARATOR_EVIDENCE.search(text or ""))
     if field == "sample_size":
         return bool(_SAMPLE_SIZE_EVIDENCE.search(text or ""))
     return bool(marker.search(text or ""))
@@ -523,6 +551,14 @@ def _method_excerpt(item: EvidenceItem, field: str) -> str:
             else _method_marker_found(sentence, field, marker)
         )
     ]
+    if field == "human_animal_in_vitro":
+        measured = [
+            sentence
+            for sentence in matching
+            if _MEASUREMENT_EVIDENCE.search(sentence)
+        ]
+        if measured:
+            matching = measured
     return _summary(" ".join(matching[:2])) if matching else ""
 
 

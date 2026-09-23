@@ -107,6 +107,7 @@ def test_pdf_reparse_and_reopen_only_returns_new_readable_analysis(tmp_path, mon
             "Participants: The study included 72 adults with confirmed Fabry disease and 38 matched controls.",
             "Results",
             "Serum Gb3 was higher among adults with Fabry disease than controls.",
+            "plasma Plasma Lyso-Gb3 levels were reported.",
             "ary Gb3 levels were higher in the cohort.",
             "Discussion",
             "The findings describe a selected adult cohort and require further study.",
@@ -285,6 +286,7 @@ def test_pdf_reparse_and_reopen_only_returns_new_readable_analysis(tmp_path, mon
     findings = [finding["statement"] for finding in report["key_findings"]]
     assert findings
     assert all(not text.startswith("Objectives") for text in findings)
+    assert all("plasma Plasma" not in text for text in findings)
     assert all("ary Gb3" not in text for text in findings)
     assert all("orm, glo- Introduction" not in text for text in findings)
     population = report["study_methods"]["population"]["value"]

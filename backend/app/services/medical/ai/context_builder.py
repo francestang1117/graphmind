@@ -27,6 +27,12 @@ _NON_MEDICAL_SECTION_TYPES = _REFERENCE_SECTION_TYPES | frozenset(
         "funding",
         "author_contributions",
         "conflicts_of_interest",
+        "figure_caption",
+        "table_caption",
+        "header",
+        "footer",
+        "metadata",
+        "title_page",
     }
 )
 
@@ -157,6 +163,9 @@ class ContextBuilder:
                 continue
             metadata = raw_chunk.get("metadata")
             metadata = metadata if isinstance(metadata, dict) else {}
+            if metadata.get("medical_evidence") is False:
+                quality_filtered = True
+                continue
             section_type = self._section_type(raw_chunk, metadata)
             section = self._section_for(raw_chunk, metadata, section_type, section_map)
             if section_type == "unknown":
@@ -182,7 +191,13 @@ class ContextBuilder:
                 text,
                 section_type=section_type,
                 section_title=section_title,
-                metadata=metadata,
+                metadata={
+                    **metadata,
+                    "quality_flags": [
+                        *(metadata.get("quality_flags") or []),
+                        *(metadata.get("pdf_quality_flags") or []),
+                    ],
+                },
                 source_warnings=source_warnings or (),
             )
             if not quality.usable:
@@ -429,7 +444,19 @@ class ContextBuilder:
 
 
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
-_PHONE = re.compile(r"(?<!\w)\+?[0-9][0-9().\-\s]{7,}[0-9](?!\w)")
+_PROTECTED_CITATION = re.compile(
+    r"(?:\bdoi\s*:\s*10\.\S+|https?://doi\.org/10\.\S+|"
+    r"\b(?:pmid|pmcid|issn)\s*[:#]?\s*[A-Z0-9-]+|"
+    r"\b(?:[A-Z][A-Za-z.&'-]+\s+){1,5}\d{1,4}\s*[:;]\s*"
+    r"\d{1,5}\s*[-–]\s*\d{1,5}(?:\s*,\s*(?:19|20)\d{2})?)",
+    re.I,
+)
+_PHONE = re.compile(
+    r"(?ix)"
+    r"(?P<label>\b(?:phone|telephone|mobile|tel|contact|电话|手机|联系方式|联系电话)\b"
+    r"\s*(?:number|no\.?|号码)?\s*[:：]?\s*)?"
+    r"(?P<number>\+?[0-9](?:[0-9().\-\s]{7,}[0-9])?)"
+)
 _IDENTIFIER = re.compile(
     r"(?im)\b(?:mrn|medical\s+record(?:\s+number)?|patient\s+id|病历号|患者编号)"
     r"\s*[:#：]?\s*[A-Z0-9][A-Z0-9-]{2,}\b"
@@ -454,14 +481,42 @@ def _warning_codes(values: Iterable[str]) -> list[str]:
 
 
 def redact_sensitive_fields(text: str) -> tuple[str, bool]:
-    """Remove common contact and record identifiers before an external call."""
-    changed_text = _EMAIL.sub("[REDACTED_EMAIL]", text)
-    changed_text = _PHONE.sub("[REDACTED_PHONE]", changed_text)
+    """Remove direct identifiers while preserving public citation metadata.
+
+    Journal volume/page ranges and DOI/PMID identifiers are public source
+    locators, not patient contact details. Protect them before applying the
+    phone rule, which is intentionally conservative but still supports
+    labelled and international phone numbers.
+    """
+    protected: dict[str, str] = {}
+
+    def protect(match: re.Match[str]) -> str:
+        token = f"__GRAPHMIND_PUBLIC_{len(protected)}__"
+        protected[token] = match.group(0)
+        return token
+
+    changed_text = _PROTECTED_CITATION.sub(protect, str(text or ""))
+    changed_text = _EMAIL.sub("[REDACTED_EMAIL]", changed_text)
+
+    def redact_phone(match: re.Match[str]) -> str:
+        label = match.group("label") or ""
+        number = match.group("number") or ""
+        digits = re.sub(r"\D", "", number)
+        # Unlabelled short numbers are overwhelmingly citation fragments,
+        # sample sizes, years, or IDs. Only redact unlabelled phone-like
+        # numbers when they have an international prefix or 10+ digits.
+        if not label and not number.startswith("+") and len(digits) < 10:
+            return match.group(0)
+        return f"{label}[REDACTED_PHONE]" if label else "[REDACTED_PHONE]"
+
+    changed_text = _PHONE.sub(redact_phone, changed_text)
     changed_text = _IDENTIFIER.sub("[REDACTED_IDENTIFIER]", changed_text)
     changed_text = _NAMED_FIELD.sub(
         lambda match: f"{match.group('prefix')} [REDACTED]",
         changed_text,
     )
+    for token, original in protected.items():
+        changed_text = changed_text.replace(token, original)
     return changed_text, changed_text != text
 
 

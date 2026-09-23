@@ -48,6 +48,7 @@ from app.services.medical.ai.provider import (
 )
 from app.services.medical.ai.safety_validator import validate_safety
 from app.services.medical.ai.support_validator import validate_support
+from app.services.medical.text_quality import assess_passage
 
 
 def _context(*items: tuple[str, str]) -> AnalysisContext:
@@ -676,6 +677,29 @@ def test_redact_sensitive_fields_removes_chinese_and_english_names():
     assert "Alice" not in redacted
     assert "1 Main Street" not in redacted
     assert "[REDACTED]" in redacted
+
+
+def test_redact_sensitive_fields_preserves_public_scientific_citations():
+    redacted, changed = redact_sensitive_fields(
+        "Intern Med 63: 1531-1538, 2024. "
+        "DOI: 10.2169/internalmedicine.2493-23. "
+        "Phone: +1 555-010-1234."
+    )
+
+    assert "Intern Med 63: 1531-1538, 2024" in redacted
+    assert "DOI: 10.2169/internalmedicine.2493-23" in redacted
+    assert "[REDACTED_PHONE]" in redacted
+    assert changed
+
+
+def test_passage_quality_rejects_parser_artifacts_before_provider_selection():
+    for text in (
+        "plasma Plasma Lyso-Gb3 levels were reported.",
+        "ary Gb3 isoforms were higher in the cohort.",
+        "The results 1533 Intern Med 63: 1531-1538, 2024.",
+    ):
+        quality = assess_passage(text)
+        assert not quality.usable
 
 
 def test_context_builder_redacts_title_and_section_title():

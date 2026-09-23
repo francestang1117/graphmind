@@ -39,6 +39,18 @@ _COLUMN_INTERLEAVE = re.compile(
     r"(?:\b(?:ary|orm|tients|cance|sults|troduction)[, ]+\b){1,2}",
     re.I,
 )
+_ADJACENT_DUPLICATE = re.compile(
+    r"\b([A-Za-z][A-Za-z'-]{2,})\s+([A-Za-z][A-Za-z'-]{2,})\b"
+)
+_LOWERCASE_FRAGMENT = re.compile(
+    r"^(?:ary|orm|tients?|cance|sults|troduction|nformation|ntervention|"
+    r"ignifi|ethods?|esults?|onclusion)\b",
+)
+_REFERENCE_LIKE = re.compile(
+    r"(?:\bdoi\s*:\s*10\.|https?://doi\.org/10\.|\b(?:pmid|issn)\s*[:#]?\s*\d+|"
+    r"\b(?:intern\s+med|journal|vol(?:ume)?|suppl(?:ement)?)\b\s*\d{1,4}\s*[:;])",
+    re.I,
+)
 
 _NON_MEDICAL = {
     "references",
@@ -91,24 +103,73 @@ def assess_passage(
         reasons.append("non_medical_section")
         hard_reject = True
 
-    inherited = [
+    block_type = str(
+        metadata.get("pdf_block_type")
+        or metadata.get("block_type")
+        or ""
+    ).strip().lower().replace("-", "_")
+    inherited_flags = [
         str(flag).strip().lower()
         for flag in (
             *(metadata.get("quality_flags") or []),
+            *(metadata.get("pdf_quality_flags") or []),
             *(metadata.get("extraction_warnings") or []),
             *source_warnings,
         )
         if str(flag).strip()
     ]
-    if any("unreadable" in flag for flag in inherited):
+    if metadata.get("medical_evidence") is False or block_type in {
+        "figure_caption",
+        "table_caption",
+        "header",
+        "footer",
+        "metadata",
+        "heading",
+        "page_text",
+    }:
+        reasons.append(
+            "caption_body_mixed"
+            if block_type in {"figure_caption", "table_caption"}
+            else "header_footer_contamination"
+            if block_type in {"header", "footer", "metadata"}
+            else "heading_body_duplicated"
+            if block_type == "heading"
+            else "non_medical_block"
+        )
+        hard_reject = True
+    for flag in inherited_flags:
+        if flag not in reasons and flag in {
+            "mixed_page_regions",
+            "caption_body_mixed",
+            "header_footer_contamination",
+            "heading_body_duplicated",
+            "reference_like",
+        }:
+            reasons.append(flag)
+            hard_reject = True
+
+    if any("unreadable" in flag for flag in inherited_flags):
         reasons.append("pdf_text_unreadable")
         hard_reject = True
-    if any("ambiguous" in flag for flag in inherited):
+    if any("ambiguous" in flag for flag in inherited_flags):
         reasons.append("pdf_layout_ambiguous")
         hard_reject = True
 
     if _COLUMN_INTERLEAVE.search(value):
         reasons.append("obvious_column_interleave")
+        hard_reject = True
+
+    if any(
+        first.casefold() == second.casefold() and first != second
+        for first, second in _ADJACENT_DUPLICATE.findall(value)
+    ):
+        reasons.append("adjacent_duplicate_words")
+        hard_reject = True
+    if _LOWERCASE_FRAGMENT.search(value):
+        reasons.append("incomplete_sentence")
+        hard_reject = True
+    if _REFERENCE_LIKE.search(value) or len(_CITATION.findall(value)) >= 4:
+        reasons.append("reference_like")
         hard_reject = True
 
     soft_flags: list[str] = []
