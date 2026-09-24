@@ -447,6 +447,11 @@ def test_extractive_provider_does_not_turn_objectives_into_findings():
 def test_extractive_provider_skips_fragmented_source_text():
     context = _context(
         ("EVIDENCE_001", "results", "ary Gb3 isoforms were higher in patients..."),
+        (
+            "EVIDENCE_003",
+            "results",
+            "Lyso-Gb3 and related analogs in plasma Plasma Lyso-Gb3 concentrations were determined by LC-MS/MS.",
+        ),
         ("EVIDENCE_002", "results", "The measured isoforms were higher in patients."),
     )
 
@@ -552,7 +557,7 @@ def test_extractive_provider_requires_a_measured_object_for_what_was_measured(
         "prompt", _context(("EVIDENCE_001", "methods", measurement_text))
     )
 
-    attribute = output["study_methods"]["human_animal_in_vitro"]
+    attribute = output["study_methods"]["what_was_measured"]
     assert bool(attribute) is expected_value
     if expected_value:
         assert attribute["value"] == measurement_text
@@ -581,9 +586,10 @@ def test_extractive_provider_keeps_method_fields_out_of_results_and_compacts_com
     assert "5 classic Fabry men" in methods["sample_size"]["value"]
     assert "mean plasma" not in methods["sample_size"]["value"]
     assert methods["comparator"]["value"] == "Plasma: 36 control subjects; Urine: 11 control subjects"
-    assert methods["human_animal_in_vitro"]["value"] == (
+    assert methods["what_was_measured"]["value"] == (
         "Plasma Lyso-Gb3 and urinary Gb3 isoforms were measured using LC-MS/MS."
     )
+    assert methods["human_animal_in_vitro"] == {}
 
 
 def test_extractive_provider_splits_mixed_plasma_and_urine_cohorts():

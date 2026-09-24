@@ -63,7 +63,7 @@ function queuedRun() {
     parsed_source_hash: "parsed-new",
     provider: "extractive",
     model_name: "extractive-v3",
-    prompt_version: "medical-insights-v3+medical-insights-readable-v6",
+    prompt_version: "medical-insights-v3+medical-insights-readable-v7",
     schema_version: "medical-insights-v3",
   };
 }

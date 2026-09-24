@@ -267,7 +267,11 @@ function ReportView({
   const methodFields = [
     ["Study design", report.study_methods?.design],
     ["Population", report.study_methods?.population],
-    ["What was measured", report.study_methods?.human_animal_in_vitro],
+    [
+      "What was measured",
+      report.study_methods?.what_was_measured
+        ?? report.study_methods?.human_animal_in_vitro,
+    ],
     ["Sample size", report.study_methods?.sample_size],
     ["Comparator", report.study_methods?.comparator],
   ] as const;

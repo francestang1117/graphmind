@@ -260,6 +260,7 @@ def _report_text(report: MedicalInsightReport) -> str:
         *(item.value for item in (
             report.study_methods.design,
             report.study_methods.population,
+            report.study_methods.what_was_measured,
             report.study_methods.human_animal_in_vitro,
             report.study_methods.sample_size,
             report.study_methods.comparator,

@@ -130,6 +130,10 @@ class EvidenceAttribute(_StrictModel):
 class StudyMethods(_StrictModel):
     design: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
     population: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
+    # ``what_was_measured`` is intentionally separate from the legacy
+    # human/animal/in-vitro classification field. Older persisted reports may
+    # still contain the latter, so it remains readable as a deprecated field.
+    what_was_measured: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
     human_animal_in_vitro: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
     sample_size: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
     comparator: EvidenceAttribute = Field(default_factory=EvidenceAttribute)

@@ -45,8 +45,10 @@ Rules:
   needs at least one Evidence ID. If the source does not say something, omit it
   or state that it was not found; do not fill it from general knowledge.
 - Keep direct statements, summaries, inferences, and uncertainty distinct.
-- Fill study_methods with design, population, human/animal/in-vitro status,
-  sample size, and comparator. Use support_status=not_reported and the exact
+- Fill study_methods with design, population, what_was_measured, sample size,
+  and comparator. ``what_was_measured`` must name an explicitly measured
+  analyte, specimen, biomarker, outcome, or other object; it is not a
+  human/animal/in-vitro classification. Use support_status=not_reported and the exact
   text "Not reported in the selected source evidence." when absent.
 - Explain applicability separately from findings. Add future_research items
   only for open questions or next steps stated or directly supported by the

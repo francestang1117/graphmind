@@ -105,6 +105,7 @@ def test_pdf_reparse_and_reopen_only_returns_new_readable_analysis(tmp_path, mon
             "Fabry disease is a rare inherited lysosomal disorder.",
             "Methods",
             "Participants: The study included 72 adults with confirmed Fabry disease and 38 matched controls.",
+            "Plasma Gb3 levels were measured using LC-MS/MS.",
             "Results",
             "Serum Gb3 was higher among adults with Fabry disease than controls.",
             "plasma Plasma Lyso-Gb3 levels were reported.",
@@ -293,6 +294,8 @@ def test_pdf_reparse_and_reopen_only_returns_new_readable_analysis(tmp_path, mon
     assert "72 adults" in population
     assert "Author One" not in population
     assert "Author Two" not in population
+    assert report["study_methods"]["what_was_measured"]["support_status"] == "supported"
+    assert report["study_methods"]["human_animal_in_vitro"]["support_status"] == "not_reported"
 
     reopened_again = asyncio.run(
         medical_insights.get_current_medical_insights(

@@ -223,7 +223,8 @@ export interface MedicalInsightReport {
   study_methods?: {
     design: MedicalInsightAttribute;
     population: MedicalInsightAttribute;
-    human_animal_in_vitro: MedicalInsightAttribute;
+    what_was_measured?: MedicalInsightAttribute;
+    human_animal_in_vitro?: MedicalInsightAttribute;
     sample_size: MedicalInsightAttribute;
     comparator: MedicalInsightAttribute;
   };

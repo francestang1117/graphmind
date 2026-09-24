@@ -487,10 +487,16 @@ class DiseaseProfileAggregator:
             stats["sample_size_not_reported_count"] += 1
 
         population = str(
-            (methods.get("human_animal_in_vitro") or {}).get("value")
-            if isinstance(methods.get("human_animal_in_vitro"), Mapping)
+            (methods.get("population") or {}).get("value")
+            if isinstance(methods.get("population"), Mapping)
             else ""
         ).casefold()
+        if not population:
+            population = str(
+                (methods.get("human_animal_in_vitro") or {}).get("value")
+                if isinstance(methods.get("human_animal_in_vitro"), Mapping)
+                else ""
+            ).casefold()
         if any(term in population for term in ("animal", "mouse", "mice", "rat", "动物", "小鼠")):
             stats["animal_study_count"] += 1
         elif any(term in population for term in ("in vitro", "cell", "细胞", "体外")):

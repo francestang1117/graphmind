@@ -141,14 +141,19 @@ class ExtractiveMedicalAIProvider:
                 "evidence_ids": [overview_item.evidence_id] if overview_item else [],
             },
             "study_methods": {
-                field: _method_attribute(evidence, field)
-                for field in (
-                    "design",
-                    "population",
-                    "human_animal_in_vitro",
-                    "sample_size",
-                    "comparator",
-                )
+                **{
+                    field: _method_attribute(evidence, field)
+                    for field in (
+                        "design",
+                        "population",
+                        "what_was_measured",
+                        "sample_size",
+                        "comparator",
+                    )
+                },
+                # Kept empty in new reports. The old field represented a
+                # study-setting classification, not a measured analyte.
+                "human_animal_in_vitro": {},
             },
             "key_findings": findings,
             "limitations": limitations,
@@ -436,8 +441,8 @@ _METHOD_MARKERS = {
         r"\b(?:randomi[sz]ed|cohort|cross[- ]sectional|case[- ]control|case series|observational|trial|prospective|retrospective)\b",
         re.I,
     ),
-    "human_animal_in_vitro": re.compile(
-        r"\b(?:humans?|patients?|animals?|mouse|mice|rats?|in vitro|cell lines?|tissues?)\b|患者|受试者|人类|人体|动物|小鼠|大鼠|体外|细胞系|组织样本|组织切片|肿瘤组织|病理组织|组织培养|组织学",
+    "what_was_measured": re.compile(
+        r"\b(?:measured|quantified|determined|analyzed|analysed|assessed|evaluated|tested|collected|quantification)\b|测量|定量|检测|测定|分析|评估|收集",
         re.I,
     ),
     "sample_size": re.compile(
@@ -492,7 +497,7 @@ def _method_evidence(evidence: list[EvidenceItem], field: str) -> EvidenceItem |
         return None
     preferred_sections = {
         "design": ("design", "methods"),
-        "human_animal_in_vitro": ("methods", "population"),
+        "what_was_measured": ("methods", "population"),
         "sample_size": ("methods",),
         "comparator": ("comparator", "methods", "population", "design"),
     }.get(field, ("methods",))
@@ -510,7 +515,7 @@ def _method_evidence(evidence: list[EvidenceItem], field: str) -> EvidenceItem |
 def _method_marker_found(text: str, field: str, marker: re.Pattern[str]) -> bool:
     if field == "population":
         return any(_population_sentence_supported(sentence) for sentence in _sentence_parts(text))
-    if field == "human_animal_in_vitro":
+    if field == "what_was_measured":
         return any(
             _measurement_sentence_supported(sentence)
             for sentence in _sentence_parts(text)
@@ -546,11 +551,11 @@ def _method_excerpt(item: EvidenceItem, field: str) -> str:
             _population_sentence_supported(sentence)
             if field == "population"
             else _measurement_sentence_supported(sentence)
-            if field == "human_animal_in_vitro"
+            if field == "what_was_measured"
             else _method_marker_found(sentence, field, marker)
         )
     ]
-    if field == "human_animal_in_vitro":
+    if field == "what_was_measured":
         return _measurement_excerpt(matching)
     if field == "population":
         return _compact_sample_size_excerpt(matching)

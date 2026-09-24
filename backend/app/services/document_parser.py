@@ -32,7 +32,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 
-PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v6"
+PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v7"
 
 
 # Parsed document shape
