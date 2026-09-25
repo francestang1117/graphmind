@@ -314,6 +314,9 @@ def test_context_builder_excludes_reference_chunks_even_when_budget_is_available
     )
 
     assert context.total_chunks == 1
+    assert context.source_chunks_total == 2
+    assert context.eligible_chunks == 1
+    assert context.scope_excluded_chunks == 1
     assert [item.section_type for item in context.evidence] == ["results"]
     assert "references" not in context.included_sections
     assert "references" not in context.omitted_sections
@@ -380,6 +383,9 @@ def test_context_builder_reserves_space_across_paper_sections():
     }
     assert context.omitted_sections == []
     assert context.total_chunks == 5
+    assert context.source_chunks_total == 5
+    assert context.eligible_chunks == 5
+    assert context.budget_excluded_chunks == 0
     assert sum(item.token_count for item in context.evidence) <= 220
     assert "context_truncated" in context.warnings
 
@@ -406,6 +412,32 @@ def test_context_builder_uses_the_full_budget_to_finish_reserved_chunks():
     assert sum(item.token_count for item in context.evidence) == 90
     assert not any(item.truncated for item in context.evidence)
     assert "context_truncated" not in context.warnings
+
+
+def test_context_builder_reports_quality_filtering_separately_from_eligible_coverage():
+    context = ContextBuilder().build(
+        [
+            {"id": "good", "text": "The study reported a measured result.", "section_type": "results"},
+            {
+                "id": "damaged",
+                "text": "clinical signifi- classified into three types.",
+                "section_type": "results",
+            },
+        ],
+        title="Paper",
+        document_kind="research_paper",
+        language="en",
+        max_input_tokens=1000,
+    )
+
+    assert context.source_chunks_total == 2
+    assert context.eligible_chunks == 1
+    assert context.total_chunks == 1
+    assert context.quality_filtered_chunks == 1
+    assert context.scope_excluded_chunks == 0
+    assert context.budget_excluded_chunks == 0
+    assert context.coverage_complete
+    assert "evidence_quality_filtered" in context.warnings
 
 
 class _Responses:

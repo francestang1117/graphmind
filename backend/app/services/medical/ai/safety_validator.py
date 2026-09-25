@@ -247,6 +247,8 @@ def _report_text(report: MedicalInsightReport) -> str:
         report.overview.study_type,
         *(item.statement for item in report.key_findings),
         *(item.plain_explanation for item in report.key_findings),
+        *(item.statement for item in report.authors_conclusions),
+        *(item.plain_explanation for item in report.authors_conclusions),
         *(item.statement for item in report.limitations),
         *(item.plain_explanation for item in report.limitations),
         *(item.statement for item in report.what_it_means),

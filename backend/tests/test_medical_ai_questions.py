@@ -445,6 +445,28 @@ def test_extractive_provider_does_not_turn_objectives_into_findings():
     assert statements == ["Results Fabry patients had higher biomarker levels."]
 
 
+def test_extractive_provider_separates_reported_results_from_authors_conclusions():
+    context = _context(
+        ("EVIDENCE_000", "abstract", "This study examined biomarkers in Fabry disease."),
+        ("EVIDENCE_001", "results", "Fabry patients had higher biomarker levels."),
+        (
+            "EVIDENCE_002",
+            "conclusion",
+            "This quantitative method may be useful for facilitating diagnosis.",
+        ),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert [item["statement"] for item in output["key_findings"]] == [
+        "Fabry patients had higher biomarker levels."
+    ]
+    assert [item["statement"] for item in output["authors_conclusions"]] == [
+        "This quantitative method may be useful for facilitating diagnosis."
+    ]
+    assert all("may be useful" not in item["statement"] for item in output["key_findings"])
+
+
 def test_extractive_provider_skips_fragmented_source_text():
     context = _context(
         ("EVIDENCE_001", "results", "ary Gb3 isoforms were higher in patients..."),

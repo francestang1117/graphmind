@@ -229,6 +229,7 @@ export interface MedicalInsightReport {
     comparator: MedicalInsightAttribute;
   };
   key_findings: MedicalInsightFinding[];
+  authors_conclusions?: MedicalInsightFinding[];
   limitations: MedicalInsightFinding[];
   medical_terms: Array<{
     term: string;
@@ -245,6 +246,12 @@ export interface MedicalInsightReport {
     complete: boolean;
     selected_chunks: number;
     total_chunks: number;
+    source_chunks_total?: number;
+    eligible_chunks?: number;
+    quality_filtered_chunks?: number;
+    scope_excluded_chunks?: number;
+    duplicate_chunks?: number;
+    budget_excluded_chunks?: number;
     selected_tokens: number;
     max_input_tokens: number;
     included_sections: string[];

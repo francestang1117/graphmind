@@ -2041,6 +2041,29 @@ button {
   line-height: 1.45;
 }
 
+.insight-method-rows {
+  display: grid;
+  gap: 5px;
+}
+
+.insight-method-rows > div {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.insight-method-rows > div > span {
+  color: var(--soft);
+  font-size: 13px;
+}
+
+.insight-method-rows strong {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.45;
+}
+
 .insight-method-item .insight-evidence-list {
   grid-column: 2;
   margin-top: 0;
@@ -2098,6 +2121,20 @@ button {
   cursor: pointer;
   font-size: 13px;
   text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.insight-full-passage {
+  margin-top: 7px;
+  color: var(--soft);
+  font-size: 12px;
+}
+
+.insight-full-passage > summary {
+  color: var(--blue);
+  cursor: pointer;
+  font-weight: 450;
   text-decoration: underline;
   text-underline-offset: 3px;
 }

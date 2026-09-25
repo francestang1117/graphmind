@@ -64,6 +64,12 @@ class AnalysisContext:
     evidence: list[EvidenceItem] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     total_chunks: int = 0
+    source_chunks_total: int = 0
+    eligible_chunks: int = 0
+    quality_filtered_chunks: int = 0
+    scope_excluded_chunks: int = 0
+    duplicate_chunks: int = 0
+    budget_excluded_chunks: int = 0
     total_tokens: int = 0
     max_input_tokens: int = 0
     included_sections: list[str] = field(default_factory=list)
@@ -148,7 +154,10 @@ class ContextBuilder:
         section_map = self._section_map(sections or [])
         candidates: list[tuple[int, int, dict[str, Any]]] = []
         seen: set[tuple[str, str]] = set()
-        quality_filtered = False
+        source_chunks_total = 0
+        quality_filtered_chunks = 0
+        scope_excluded_chunks = 0
+        duplicate_chunks = 0
 
         safe_title = title or "Untitled medical document"
         title_redacted = False
@@ -158,13 +167,15 @@ class ContextBuilder:
         for index, raw_chunk in enumerate(chunks):
             if not isinstance(raw_chunk, dict):
                 continue
+            source_chunks_total += 1
             text = str(raw_chunk.get("text") or "").strip()
             if not text:
+                scope_excluded_chunks += 1
                 continue
             metadata = raw_chunk.get("metadata")
             metadata = metadata if isinstance(metadata, dict) else {}
             if metadata.get("medical_evidence") is False:
-                quality_filtered = True
+                scope_excluded_chunks += 1
                 continue
             section_type = self._section_type(raw_chunk, metadata)
             section = self._section_for(raw_chunk, metadata, section_type, section_map)
@@ -179,6 +190,7 @@ class ContextBuilder:
                 # These sections remain available in the document browser,
                 # but acknowledgements and bibliographic material are not
                 # medical evidence for a report.
+                scope_excluded_chunks += 1
                 continue
             section_title = str(
                 raw_chunk.get("section_title")
@@ -201,11 +213,12 @@ class ContextBuilder:
                 source_warnings=source_warnings or (),
             )
             if not quality.usable:
-                quality_filtered = True
+                quality_filtered_chunks += 1
                 continue
             chunk_id = str(raw_chunk.get("id") or f"chunk:{index}")
             dedupe_key = (chunk_id, text)
             if dedupe_key in seen:
+                duplicate_chunks += 1
                 continue
             seen.add(dedupe_key)
             normalized = {
@@ -356,11 +369,16 @@ class ContextBuilder:
             for index, item in enumerate(selected, start=1)
         ]
 
+        budget_excluded_chunks = sum(
+            1 for _priority, _index, candidate in candidates
+            if allowances.get(candidate["index"], 0) <= 0
+        )
+
         if redacted:
             warnings.append("pii_redacted")
         if any(item.truncated for item in selected) or len(selected) < len(candidates):
             warnings.append("context_truncated")
-        if quality_filtered:
+        if quality_filtered_chunks or scope_excluded_chunks:
             warnings.append("evidence_quality_filtered")
         all_sections = list(dict.fromkeys(candidate[2]["section_type"] for candidate in candidates))
         included_sections = list(dict.fromkeys(item.section_type for item in selected))
@@ -374,6 +392,12 @@ class ContextBuilder:
             evidence=selected,
             warnings=warnings,
             total_chunks=len(candidates),
+            source_chunks_total=source_chunks_total,
+            eligible_chunks=len(candidates),
+            quality_filtered_chunks=quality_filtered_chunks,
+            scope_excluded_chunks=scope_excluded_chunks,
+            duplicate_chunks=duplicate_chunks,
+            budget_excluded_chunks=budget_excluded_chunks,
             total_tokens=total_tokens,
             max_input_tokens=budget,
             included_sections=included_sections,

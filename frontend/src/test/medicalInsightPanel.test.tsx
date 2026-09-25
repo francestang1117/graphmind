@@ -63,7 +63,7 @@ function queuedRun() {
     parsed_source_hash: "parsed-new",
     provider: "extractive",
     model_name: "extractive-v3",
-    prompt_version: "medical-insights-v3+medical-insights-readable-v8",
+    prompt_version: "medical-insights-v3+medical-insights-readable-v9",
     schema_version: "medical-insights-v3",
   };
 }
@@ -206,6 +206,14 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
           evidence_level: "reported_in_document",
           interpretation_type: "direct_statement",
         }],
+        authors_conclusions: [{
+          id: "conclusion-1",
+          statement: "The method may be useful for future screening studies.",
+          plain_explanation: "This is the authors' conclusion.",
+          evidence_ids: [],
+          evidence_level: "reported_in_document",
+          interpretation_type: "direct_statement",
+        }],
         limitations: [],
         medical_terms: [],
         what_it_means: [],
@@ -230,11 +238,14 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
     renderPanel();
 
     const about = await screen.findByRole("heading", { name: "About this paper" });
-    const findings = screen.getByRole("heading", { name: "Key findings" });
+    const findings = screen.getByRole("heading", { name: "Reported results" });
+    const conclusions = screen.getByRole("heading", { name: "Authors’ conclusions" });
     const question = screen.getByRole("heading", { name: "Questions for your clinician" });
     expect(about.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(findings.compareDocumentPosition(conclusions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(findings.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("The measured biomarker differed between groups.")).toBeInTheDocument();
+    expect(screen.getByText("The method may be useful for future screening studies.")).toBeInTheDocument();
     expect(screen.queryByText("Supported")).not.toBeInTheDocument();
     expect(screen.queryByText("Direct Statement")).not.toBeInTheDocument();
 
@@ -263,6 +274,7 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
         },
         study_methods: {},
         key_findings: [],
+        authors_conclusions: [],
         limitations: [],
         medical_terms: [],
         what_it_means: [],
@@ -272,6 +284,21 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
         question_suggestions: [],
         questions_for_professional: [],
         warnings: ["evidence_quality_filtered"],
+        coverage: {
+          complete: true,
+          selected_chunks: 1,
+          total_chunks: 1,
+          source_chunks_total: 2,
+          eligible_chunks: 1,
+          quality_filtered_chunks: 1,
+          scope_excluded_chunks: 0,
+          duplicate_chunks: 0,
+          budget_excluded_chunks: 0,
+          selected_tokens: 3200,
+          max_input_tokens: 12000,
+          included_sections: ["results"],
+          omitted_sections: [],
+        },
       },
       evidence: [{
         evidence_id: "EVIDENCE_001",
@@ -288,6 +315,10 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
 
     expect(await screen.findByText("Source passages attached")).toBeInTheDocument();
     expect(screen.queryByText("All displayed claims have validated source passages")).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 1 eligible source chunks included")).toBeInTheDocument();
+    expect(screen.getByText("2 source chunks scanned before quality and scope filtering")).toBeInTheDocument();
+    expect(screen.getByText("1 source chunks excluded for text quality")).toBeInTheDocument();
+    expect(screen.getByText("Approximately 3,200 source tokens selected; limit 12,000")).toBeInTheDocument();
   });
 
   it("shows each processing note only once", async () => {
@@ -325,7 +356,7 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
 
     expect(await screen.findAllByText("Processing notes")).toHaveLength(1);
     const noteText =
-      "Some passages were excluded because their text quality was not reliable enough for medical evidence.";
+      "Some source passages were excluded because they were not suitable for the evidence context.";
     const notes = screen.getAllByText(noteText);
     expect(notes).toHaveLength(1);
     expect(notes.every((note) => note.textContent === noteText)).toBe(true);

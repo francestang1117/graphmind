@@ -100,7 +100,7 @@ function warningLabel(warning: string) {
     case "no_reliable_key_findings":
       return "No reliable key findings could be extracted from this document.";
     case "evidence_quality_filtered":
-      return "Some passages were excluded because their text quality was not reliable enough for medical evidence.";
+      return "Some source passages were excluded because they were not suitable for the evidence context.";
     case "study_aim_unavailable":
       return "The study aim was not clearly identified in the analyzed text; the overview is shown as background.";
     case "pdf_layout_ambiguous":
@@ -121,7 +121,13 @@ function visibleProcessingWarnings(warnings: string[] | undefined) {
       : warning
   ));
   return [...new Set(normalized)].filter(
-    (warning) => !["not_medical_advice", "extractive_output", "pii_redacted"].includes(warning),
+    (warning) => ![
+      "not_medical_advice",
+      "extractive_output",
+      "pii_redacted",
+      // This explanation is already shown next to the Background heading.
+      "study_aim_unavailable",
+    ].includes(warning),
   );
 }
 
@@ -140,12 +146,24 @@ function locationLabel(evidence: MedicalInsightEvidence) {
 }
 
 function passageExcerpt(evidence: MedicalInsightEvidence) {
-  if (evidence.excerpt?.trim()) return evidence.excerpt;
-  const sentences = evidence.quote
+  const sourceText = evidence.excerpt?.trim() || evidence.quote;
+  const sentences = sourceText
     .split(/(?<=[.!?。！？])\s+/)
     .map((part) => part.trim())
     .filter(Boolean);
-  return sentences.slice(0, 3).join(" ") || evidence.quote;
+  return sentences[0] || sourceText;
+}
+
+function sampleSizeRows(label: string, value: string) {
+  if (label !== "Sample size") return null;
+  const rows = value
+    .split(/;\s+(?=(?:Plasma|Urine):)/i)
+    .map((part) => {
+      const match = part.match(/^(Plasma|Urine):\s*(.*)$/i);
+      return match ? [match[1], match[2]] as const : null;
+    })
+    .filter((row): row is readonly [string, string] => Boolean(row));
+  return rows.length > 1 ? rows : null;
 }
 
 function findingEvidence(
@@ -222,10 +240,20 @@ function MethodItem({
   evidenceById: Map<string, MedicalInsightEvidence>;
   onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
 }) {
+  const cohortRows = sampleSizeRows(label, item.value);
   return (
     <div className="insight-method-item">
       <span>{label}</span>
-      <strong>{item.value}</strong>
+      {cohortRows ? (
+        <div className="insight-method-rows">
+          {cohortRows.map(([cohort, value]) => (
+            <div key={cohort}>
+              <span>{cohort}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+      ) : <strong>{item.value}</strong>}
       {item.evidence_ids.length > 0 && findingEvidence(
         {
           id: `method-${label}`,
@@ -314,17 +342,24 @@ function ReportView({
       </section>
 
       <FindingList
-        title="Key findings"
+        title="Reported results"
         items={report.key_findings}
         evidenceById={evidenceById}
         onSelectEvidence={onSelectEvidence}
       />
       {!report.key_findings.length && report.warnings.includes("no_reliable_key_findings") && (
         <section className="insight-report-section insight-empty-findings" role="status">
-          <h3>Key findings</h3>
-          <p>No reliable key findings could be extracted from this document.</p>
+          <h3>Reported results</h3>
+          <p>No reliable reported results could be extracted from this document.</p>
         </section>
       )}
+
+      <FindingList
+        title="Authors’ conclusions"
+        items={report.authors_conclusions ?? []}
+        evidenceById={evidenceById}
+        onSelectEvidence={onSelectEvidence}
+      />
 
       <QuestionSuggestionList
         report={report}
@@ -391,8 +426,27 @@ function ReportView({
         <details className="insight-report-section insight-details">
           <summary>Analysis coverage</summary>
           <div className="insight-coverage-grid">
-            <span>{report.coverage.selected_chunks} of {report.coverage.total_chunks} source chunks included</span>
-            <span>{report.coverage.selected_tokens} of {report.coverage.max_input_tokens} input tokens used</span>
+            <span>
+              {report.coverage.selected_chunks} of {(report.coverage.eligible_chunks ?? report.coverage.total_chunks)} eligible source chunks included
+            </span>
+            {Boolean(report.coverage.source_chunks_total) && (
+              <span>{report.coverage.source_chunks_total} source chunks scanned before quality and scope filtering</span>
+            )}
+            {Boolean(report.coverage.quality_filtered_chunks) && (
+              <span>{report.coverage.quality_filtered_chunks} source chunks excluded for text quality</span>
+            )}
+            {Boolean(report.coverage.scope_excluded_chunks) && (
+              <span>{report.coverage.scope_excluded_chunks} source chunks excluded by evidence scope</span>
+            )}
+            {Boolean(report.coverage.duplicate_chunks) && (
+              <span>{report.coverage.duplicate_chunks} duplicate source chunks removed</span>
+            )}
+            {Boolean(report.coverage.budget_excluded_chunks) && (
+              <span>{report.coverage.budget_excluded_chunks} eligible chunks not included because of the context limit</span>
+            )}
+            <span>
+              Approximately {report.coverage.selected_tokens.toLocaleString()} source tokens selected; limit {report.coverage.max_input_tokens.toLocaleString()}
+            </span>
             <span>Included: {report.coverage.included_sections.map(readable).join(", ") || "No labeled sections"}</span>
             {!report.coverage.complete && (
               <span>Not included: {report.coverage.omitted_sections.map(readable).join(", ") || "Some source passages"}</span>

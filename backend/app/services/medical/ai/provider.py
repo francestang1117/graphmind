@@ -52,9 +52,9 @@ class ExtractiveMedicalAIProvider:
             summary = "The document contains no extractable passage for a summary."
 
         finding_sections = (
-            {"results", "conclusion"}
+            {"results", "result", "outcomes", "evidence", "discussion"}
             if context.document_kind == "research_paper"
-            else {"results", "evidence", "conclusion", "recommendations"}
+            else {"results", "result", "evidence", "recommendations", "discussion"}
         )
         findings = []
         for item in _take_distinct(
@@ -72,6 +72,23 @@ class ExtractiveMedicalAIProvider:
                     f"finding_{len(findings) + 1:03d}",
                     statement,
                     f"This is reported in the document's {item.section_type} section.",
+                    item,
+                    interpretation_type="direct_statement",
+                )
+            )
+
+        authors_conclusions = []
+        for item in _take_distinct(evidence, {"conclusion", "conclusions"}, limit=2):
+            if overview_item and item.evidence_id == overview_item.evidence_id:
+                continue
+            statement = _summary(item.text)
+            if not statement:
+                continue
+            authors_conclusions.append(
+                _finding(
+                    f"conclusion_{len(authors_conclusions) + 1:03d}",
+                    statement,
+                    "This is the authors' conclusion from the document.",
                     item,
                     interpretation_type="direct_statement",
                 )
@@ -156,6 +173,7 @@ class ExtractiveMedicalAIProvider:
                 "human_animal_in_vitro": {},
             },
             "key_findings": findings,
+            "authors_conclusions": authors_conclusions,
             "limitations": limitations,
             "medical_terms": [],
             # This provider is intentionally extractive. Do not place raw
@@ -928,6 +946,12 @@ def _coverage(context: AnalysisContext) -> dict[str, Any]:
         "complete": context.coverage_complete,
         "selected_chunks": len(context.evidence),
         "total_chunks": context.total_chunks,
+        "source_chunks_total": context.source_chunks_total,
+        "eligible_chunks": context.eligible_chunks,
+        "quality_filtered_chunks": context.quality_filtered_chunks,
+        "scope_excluded_chunks": context.scope_excluded_chunks,
+        "duplicate_chunks": context.duplicate_chunks,
+        "budget_excluded_chunks": context.budget_excluded_chunks,
         "selected_tokens": sum(item.token_count for item in context.evidence),
         "max_input_tokens": context.max_input_tokens,
         "included_sections": context.included_sections,

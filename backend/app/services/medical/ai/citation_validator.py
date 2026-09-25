@@ -131,6 +131,7 @@ def _core_items(
     yield "overview", report.overview, report.overview.evidence_ids
     for field_name in (
         "key_findings",
+        "authors_conclusions",
         "limitations",
         "what_it_means",
         "what_it_does_not_mean",
@@ -152,6 +153,7 @@ def _report_citations(report: MedicalInsightReport) -> Iterable[tuple[str, list[
     yield "overview", report.overview.evidence_ids
     for field_name in (
         "key_findings",
+        "authors_conclusions",
         "limitations",
         "what_it_means",
         "what_it_does_not_mean",

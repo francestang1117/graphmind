@@ -143,6 +143,16 @@ class AnalysisCoverage(_StrictModel):
     complete: bool = True
     selected_chunks: int = 0
     total_chunks: int = 0
+    # ``total_chunks`` remains the number of eligible chunks for backwards
+    # compatibility. These fields make the filtering and budget decisions
+    # explicit to API consumers instead of presenting eligible chunks as the
+    # whole source document.
+    source_chunks_total: int = 0
+    eligible_chunks: int = 0
+    quality_filtered_chunks: int = 0
+    scope_excluded_chunks: int = 0
+    duplicate_chunks: int = 0
+    budget_excluded_chunks: int = 0
     selected_tokens: int = 0
     max_input_tokens: int = 0
     included_sections: list[str] = Field(default_factory=list)
@@ -156,6 +166,7 @@ class MedicalInsightReport(_StrictModel):
     overview: DocumentOverview
     study_methods: StudyMethods = Field(default_factory=StudyMethods)
     key_findings: list[EvidenceFinding] = Field(default_factory=list)
+    authors_conclusions: list[EvidenceFinding] = Field(default_factory=list)
     limitations: list[EvidenceFinding] = Field(default_factory=list)
     medical_terms: list[MedicalTermExplanation] = Field(default_factory=list)
     what_it_means: list[EvidenceFinding] = Field(default_factory=list)
