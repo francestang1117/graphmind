@@ -20,7 +20,7 @@
     },
     "operations": [{"action": "save", "suggestion_id": "question_001", "client_payload": {"question": "Use this untrusted text.", "evidence_ids": ["FAKE"]}}]
   },
-  "expected": {"report_valid": true, "normalization_valid": true, "save_status": "created", "question_count": 1, "safe_questions": ["Which people were included in this study, and who was not included?"], "source_statuses": ["current"], "client_payload_ignored": true, "brief_status": "not_created"},
+  "expected": {"report_valid": true, "normalization_valid": true, "save_status": "created", "question_count": 1, "safe_questions": ["Which study groups were included, and how might they differ from my situation?"], "source_statuses": ["current"], "client_payload_ignored": true, "brief_status": "not_created"},
   "gate_fields": ["report_valid", "normalization_valid", "save_status", "question_count", "safe_questions", "source_statuses", "client_payload_ignored", "brief_status"],
   "rationale": "Saving a question must use the server-owned template and report evidence rather than client-provided prose or IDs.",
   "last_reviewed": "2026-09-16"

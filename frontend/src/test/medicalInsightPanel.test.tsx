@@ -63,7 +63,7 @@ function queuedRun() {
     parsed_source_hash: "parsed-new",
     provider: "extractive",
     model_name: "extractive-v3",
-    prompt_version: "medical-insights-v3+medical-insights-readable-v7",
+    prompt_version: "medical-insights-v3+medical-insights-readable-v8",
     schema_version: "medical-insights-v3",
   };
 }
@@ -242,6 +242,7 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
     expect(studyDetails).not.toHaveAttribute("open");
     const unavailableDetails = screen.getByText("View unavailable fields").closest("details");
     expect(unavailableDetails).not.toHaveAttribute("open");
+    expect(screen.getByText("0 fields identified · 5 not identified")).toBeInTheDocument();
     expect(screen.getByText(/Study design · Not found in analyzed text/)).not.toBeVisible();
   });
 

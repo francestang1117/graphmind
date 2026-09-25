@@ -50,6 +50,10 @@ Rules:
   analyte, specimen, biomarker, outcome, or other object; it is not a
   human/animal/in-vitro classification. Use support_status=not_reported and the exact
   text "Not reported in the selected source evidence." when absent.
+- Keep ``population`` focused on the named study groups and analysis cohorts;
+  do not repeat every group count there when ``sample_size`` can carry those
+  counts. Use ``sample_size`` for the group-by-group numbers and keep
+  ``comparator`` focused on the comparison groups.
 - Explain applicability separately from findings. Add future_research items
   only for open questions or next steps stated or directly supported by the
   document; do not invent a research agenda.

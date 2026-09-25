@@ -558,7 +558,7 @@ def _method_excerpt(item: EvidenceItem, field: str) -> str:
     if field == "what_was_measured":
         return _measurement_excerpt(matching)
     if field == "population":
-        return _compact_sample_size_excerpt(matching)
+        return _compact_population_excerpt(matching)
     if field == "sample_size":
         return _compact_sample_size_excerpt(matching)
     if field == "comparator":
@@ -593,7 +593,7 @@ _CONTROL_COUNT = re.compile(
     re.I,
 )
 _SAMPLE_GROUP_COUNT = re.compile(
-    r"\b\d[\d,]*\s+(?:classic\s+Fabry\s+men|later[- ]onset\s+Fabry\s+men|"
+    r"\b\d[\d,]*\s+(?:classic\s+Fabry\s+men|(?:later|late)[- ]onset(?:\s+Fabry)?\s+men|"
     r"Fabry\s+women|women|men|control(?:\s+subjects?|s?)|"
     r"participants?|patients?|subjects?|adults?|children)\b",
     re.I,
@@ -657,6 +657,56 @@ def _cohort_count_groups(sentences: list[str]) -> list[tuple[str, list[str]]]:
             )
             groups.append((label, list(dict.fromkeys(counts))))
     return groups
+
+
+def _population_group_names(sentences: list[str]) -> list[str]:
+    """Extract participant group labels without repeating their counts."""
+    groups: list[str] = []
+    for sentence in sentences:
+        for match in _SAMPLE_GROUP_COUNT.finditer(sentence):
+            group = re.sub(r"^\d[\d,]*\s+", "", match.group(0)).strip()
+            normalized = re.sub(r"\s+", " ", group)
+            if normalized.casefold() in {"control", "controls"}:
+                normalized = "control subjects"
+            elif normalized.casefold() == "late-onset men":
+                normalized = "late-onset Fabry men"
+            if normalized and normalized.casefold() not in {
+                existing.casefold() for existing in groups
+            }:
+                groups.append(normalized)
+    return groups
+
+
+def _compact_population_excerpt(sentences: list[str]) -> str:
+    """Describe who was studied without duplicating sample-size numbers."""
+    groups = _population_group_names(sentences)
+    if not groups:
+        return _summary(" ".join(sentences[:2])) if sentences else ""
+
+    if len(groups) == 1:
+        group_text = groups[0]
+    elif len(groups) == 2:
+        group_text = f"{groups[0]} and {groups[1]}"
+    else:
+        group_text = ", ".join(groups[:-1]) + f", and {groups[-1]}"
+
+    modalities: list[str] = []
+    for sentence in sentences:
+        lowered = sentence.casefold()
+        if "plasma" in lowered and "plasma" not in modalities:
+            modalities.append("plasma")
+        if ("urine" in lowered or "urinary" in lowered) and "urine" not in modalities:
+            modalities.append("urine")
+
+    if len(modalities) == 2:
+        return _summary(
+            f"The study included {group_text}; plasma and urine analyses were performed."
+        )
+    if modalities:
+        return _summary(
+            f"The study included {group_text}; {modalities[0]} analysis was performed."
+        )
+    return _summary(f"The study included {group_text}.")
 
 
 def _compact_sample_size_excerpt(sentences: list[str]) -> str:

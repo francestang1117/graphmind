@@ -270,7 +270,7 @@ def test_saved_v3_question_payload_uses_controlled_template():
     assert payload["questions_for_professional"] == []
     assert payload["question_suggestions"][0]["topic"] == "study_population"
     assert payload["question_suggestions"][0]["question"] == (
-        "Which people were included in this study, and who was not included?"
+        "Which study groups were included, and how might they differ from my situation?"
     )
     assert "migalastat" not in payload["question_suggestions"][0]["rationale"]
 

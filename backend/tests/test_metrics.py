@@ -13,8 +13,8 @@ def test_metrics_endpoint_records_route_labels():
 
     assert health.headers["x-graphmind-frontend-commit"] == "test-ui-sha"
     assert health.headers["x-graphmind-parser-version"] == "document-parser-pdf-readable-v7"
-    assert health.headers["x-graphmind-analysis-pipeline"] == "medical-insights-readable-v7"
-    assert health.headers["x-graphmind-insight-contract"] == "medical-insights-readable-v7"
+    assert health.headers["x-graphmind-analysis-pipeline"] == "medical-insights-readable-v8"
+    assert health.headers["x-graphmind-insight-contract"] == "medical-insights-readable-v8"
     assert health.headers["x-graphmind-analysis-model"] == "extractive-v3"
     assert response.status_code == 200
     assert "graphmind_http_requests_total" in response.text

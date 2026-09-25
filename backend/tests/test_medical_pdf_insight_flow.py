@@ -291,7 +291,8 @@ def test_pdf_reparse_and_reopen_only_returns_new_readable_analysis(tmp_path, mon
     assert all("ary Gb3" not in text for text in findings)
     assert all("orm, glo- Introduction" not in text for text in findings)
     population = report["study_methods"]["population"]["value"]
-    assert "72 adults" in population
+    assert "adults" in population
+    assert "72 adults" not in population
     assert "Author One" not in population
     assert "Author Two" not in population
     assert report["study_methods"]["what_was_measured"]["support_status"] == "supported"

@@ -426,8 +426,9 @@ def test_extractive_provider_rejects_author_names_as_population_evidence():
     population = output["study_methods"]["population"]
     assert population["support_status"] == "supported"
     assert "Tomoko Shiga" not in population["value"]
-    assert "15 classic Fabry men" in population["value"]
-    assert "36 controls" in population["value"]
+    assert "classic Fabry men" in population["value"]
+    assert "control subjects" in population["value"]
+    assert "15 classic Fabry men" not in population["value"]
 
 
 def test_extractive_provider_does_not_turn_objectives_into_findings():
@@ -613,6 +614,13 @@ def test_extractive_provider_splits_mixed_plasma_and_urine_cohorts():
         "36 controls; Urine: 5 classic Fabry men; 5 later-onset Fabry men; "
         "17 Fabry women; 11 controls"
     )
+    assert methods["population"]["value"] == (
+        "The study included classic Fabry men, later-onset Fabry men, Fabry women, "
+        "and control subjects; plasma and urine analyses were performed."
+    )
+    assert methods["population"]["value"] != methods["sample_size"]["value"]
+    assert "plasma" in methods["population"]["value"].casefold()
+    assert "urine" in methods["population"]["value"].casefold()
     assert methods["comparator"]["value"] == "Plasma: 36 controls; Urine: 11 controls"
     assert all("1533" not in finding["statement"] for finding in report["key_findings"])
 
@@ -831,7 +839,9 @@ def test_analyzer_replaces_free_form_question_with_controlled_template():
     assert provider.calls == 1
     suggestion = output.report.question_suggestions[0]
     assert suggestion.topic == "study_population"
-    assert suggestion.question == "Which people were included in this study, and who was not included?"
+    assert suggestion.question == (
+        "Which study groups were included, and how might they differ from my situation?"
+    )
     assert "migalastat" not in suggestion.question
     assert validate_safety(output.report).valid
 
@@ -853,7 +863,7 @@ def test_analyzer_localizes_controlled_question_templates():
     )
 
     suggestion = output.report.question_suggestions[0]
-    assert suggestion.question == "这项研究纳入了哪些人，没有纳入哪些人？"
+    assert suggestion.question == "这项研究纳入了哪些人群？这些人群与我的情况有什么不同？"
     assert suggestion.rationale.startswith("原文描述了研究人群")
 
 

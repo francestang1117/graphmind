@@ -342,7 +342,7 @@ function ReportView({
             Study details
             {unavailableMethods.length > 0 && (
               <span className="insight-summary-count">
-                {availableMethods.length} found · {unavailableMethods.length} not identified
+                {availableMethods.length} fields identified · {unavailableMethods.length} not identified
               </span>
             )}
           </summary>
