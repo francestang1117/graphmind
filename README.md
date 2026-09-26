@@ -113,7 +113,8 @@ Then open:
 - API docs: `http://localhost:8000/docs`
 - Metrics: `http://localhost:8000/metrics`
 
-To include the current commit in Sentry release names:
+Set the same commit on the frontend and backend so the in-app version check can
+detect a stale or mixed deployment:
 
 ```bash
 GIT_SHA=$(git rev-parse HEAD) docker compose up --build

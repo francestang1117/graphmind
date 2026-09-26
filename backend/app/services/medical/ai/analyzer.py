@@ -92,6 +92,19 @@ class MedicalInsightAnalyzer:
             max_input_tokens=self.max_input_tokens,
             redact_pii=self.redact_pii,
         )
+        if any(
+            warning in context.warnings
+            for warning in ("pdf_text_unreadable", "pdf_layout_ambiguous")
+        ):
+            raise MedicalInsightError(
+                "This PDF layout could not be read reliably. Choose a text-selectable PDF or run OCR before analysis.",
+                code=(
+                    "source_layout_ambiguous"
+                    if "pdf_layout_ambiguous" in context.warnings
+                    else "source_text_unreadable"
+                ),
+                details={"warnings": context.warnings},
+            )
         if not context.evidence:
             raise MedicalInsightValidationError(
                 "The document has no extractable evidence for analysis.",
@@ -209,11 +222,19 @@ class MedicalInsightAnalyzer:
         context: AnalysisContext,
     ) -> MedicalInsightReport:
         warnings = _unique([*context.warnings, *report.warnings, "not_medical_advice"])
+        if not report.key_findings:
+            warnings.append("no_reliable_key_findings")
         coverage = report.coverage.model_copy(
             update={
                 "complete": context.coverage_complete,
                 "selected_chunks": len(context.evidence),
                 "total_chunks": context.total_chunks,
+                "source_chunks_total": context.source_chunks_total,
+                "eligible_chunks": context.eligible_chunks,
+                "quality_filtered_chunks": context.quality_filtered_chunks,
+                "scope_excluded_chunks": context.scope_excluded_chunks,
+                "duplicate_chunks": context.duplicate_chunks,
+                "budget_excluded_chunks": context.budget_excluded_chunks,
                 "selected_tokens": sum(item.token_count for item in context.evidence),
                 "max_input_tokens": context.max_input_tokens,
                 "included_sections": context.included_sections,

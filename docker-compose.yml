@@ -31,7 +31,7 @@ services:
     environment:
       PROJECT_NAME: GraphMind
       VERSION: 0.1.0
-      GIT_SHA: ${GIT_SHA:-}
+      GIT_SHA: ${GIT_SHA:-unknown}
       ENVIRONMENT: development
       AUTH_REQUIRED: "false"
       SECRET_KEY: dev-only-change-me-before-deploy
@@ -73,7 +73,7 @@ services:
     environment:
       PROJECT_NAME: GraphMind
       VERSION: 0.1.0
-      GIT_SHA: ${GIT_SHA:-}
+      GIT_SHA: ${GIT_SHA:-unknown}
       ENVIRONMENT: development
       AUTH_REQUIRED: "false"
       SECRET_KEY: dev-only-change-me-before-deploy
@@ -110,7 +110,7 @@ services:
     environment:
       PROJECT_NAME: GraphMind
       VERSION: 0.1.0
-      GIT_SHA: ${GIT_SHA:-}
+      GIT_SHA: ${GIT_SHA:-unknown}
       ENVIRONMENT: development
       AUTH_REQUIRED: "false"
       SECRET_KEY: dev-only-change-me-before-deploy
@@ -192,6 +192,7 @@ services:
       - ./frontend/index.html:/app/index.html
     environment:
       VITE_API_URL: http://localhost:8000
+      VITE_APP_COMMIT: ${GIT_SHA:-unknown}
     depends_on:
       - api
     restart: unless-stopped

@@ -158,6 +158,7 @@ def _supported_statements(
     yield "overview", report.overview.summary, report.overview.evidence_ids
     for field_name in (
         "key_findings",
+        "authors_conclusions",
         "limitations",
         "what_it_means",
         "what_it_does_not_mean",

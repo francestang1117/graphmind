@@ -26,9 +26,21 @@ _MAX_FINDINGS = 10
 _MAX_QUESTIONS = 3
 _MAX_QUOTE_CHARS = 5000
 _NOT_REPORTED = {
-    "en": "The selected analysis evidence did not report this field.",
-    "zh": "所选分析证据未报告此字段。",
-    "ja": "選択した分析証拠ではこの項目は報告されていません。",
+    "en": {
+        "not_reported_in_source": "The source evidence states that this field was not reported.",
+        "not_extracted_from_analyzed_text": "This field was not confirmed in the analyzed text.",
+        "source_unreadable": "This field could not be checked because the source text was not readable.",
+    },
+    "zh": {
+        "not_reported_in_source": "原文证据说明该字段未报告。",
+        "not_extracted_from_analyzed_text": "在已分析文本中未能确认该字段。",
+        "source_unreadable": "由于原文无法可靠读取，无法检查该字段。",
+    },
+    "ja": {
+        "not_reported_in_source": "出典の証拠では、この項目は報告されていません。",
+        "not_extracted_from_analyzed_text": "分析した本文では、この項目を確認できませんでした。",
+        "source_unreadable": "本文を信頼して読み取れないため、この項目を確認できません。",
+    },
 }
 _QUESTION_TEMPLATES = {
     "en": {
@@ -157,9 +169,12 @@ def build_comparison_preview(
             questions.append(
                 {
                     "id": f"comparison:{document_id}:limitations",
+                    "topic": "study_limitation",
                     "question": question,
                     "rationale": rationale,
                     "document_id": document_id,
+                    "document_ids": [document_id],
+                    "analysis_run_ids": [str(run.get("run_id") or "")],
                     "evidence": limitations[0]["evidence"],
                     "evidence_total": limitations[0]["evidence_total"],
                     "evidence_truncated": limitations[0]["evidence_truncated"],
@@ -169,7 +184,7 @@ def build_comparison_preview(
     preview = ComparisonPreview(
         concept_id=concept_id,
         documents=documents,
-        discussion_questions=questions[:_MAX_QUESTIONS],
+        discussion_questions=_merge_questions(questions)[:_MAX_QUESTIONS],
         warnings=_unique_strings(warnings)[:20],
     )
     return preview
@@ -201,9 +216,15 @@ def _build_methods(
         raw_value = raw_value if isinstance(raw_value, Mapping) else {}
         status = str(raw_value.get("support_status") or "uncertain")
         if status == "not_reported":
+            missing_reason = str(
+                raw_value.get("missing_reason") or "not_reported_in_source"
+            )
+            if missing_reason not in _NOT_REPORTED[language]:
+                missing_reason = "not_extracted_from_analyzed_text"
             methods[field] = ComparisonMethod(
-                value=_NOT_REPORTED[language],
+                value=_NOT_REPORTED[language][missing_reason],
                 support_status="not_reported",
+                missing_reason=missing_reason,
             )
             continue
         value = str(raw_value.get("value") or "").strip()
@@ -220,6 +241,7 @@ def _build_methods(
                 evidence_total=evidence_total,
                 evidence_truncated=evidence_truncated,
                 warnings=["source_unavailable"],
+                missing_reason="source_unreadable",
             )
             continue
         if status not in {"supported", "partially_supported", "uncertain"}:
@@ -241,15 +263,82 @@ def _build_methods(
             question, rationale = _QUESTION_TEMPLATES[language][topic]
             method_question = {
                 "id": f"comparison:{document_id}:{topic}",
+                "topic": topic,
                 "question": question,
                 "rationale": rationale,
                 "document_id": document_id,
+                "document_ids": [document_id],
+                "analysis_run_ids": [run_id],
                 "evidence": method.evidence,
                 "evidence_total": method.evidence_total,
                 "evidence_truncated": method.evidence_truncated,
             }
             break
     return methods, method_question
+
+
+def _merge_questions(values: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge repeated template questions while keeping every valid source."""
+
+    def evidence_value(item: Any, key: str) -> Any:
+        if isinstance(item, Mapping):
+            return item.get(key)
+        return getattr(item, key, None)
+
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    order: list[tuple[str, str]] = []
+    for value in values:
+        topic = str(value.get("topic") or "")
+        question = " ".join(str(value.get("question") or "").split()).casefold()
+        key = (topic, question)
+        current = merged.get(key)
+        if current is None:
+            current = dict(value)
+            current["id"] = f"comparison:{topic}"
+            current["document_ids"] = list(dict.fromkeys(
+                _string_list(value.get("document_ids"))
+                or [str(value.get("document_id") or "")]
+            ))
+            current["analysis_run_ids"] = list(dict.fromkeys(
+                _string_list(value.get("analysis_run_ids"))
+            ))
+            current["evidence"] = list(value.get("evidence") or [])[:5]
+            merged[key] = current
+            order.append(key)
+            continue
+
+        current["document_ids"] = list(dict.fromkeys(
+            [*current.get("document_ids", []), *value.get("document_ids", [])]
+        ))[:5]
+        current["analysis_run_ids"] = list(dict.fromkeys(
+            [*current.get("analysis_run_ids", []), *value.get("analysis_run_ids", [])]
+        ))[:5]
+        evidence = [*current.get("evidence", []), *value.get("evidence", [])]
+        unique_evidence: list[dict[str, Any]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for item in evidence:
+            identity = (
+                str(evidence_value(item, "document_id") or ""),
+                str(evidence_value(item, "analysis_run_id") or ""),
+                str(evidence_value(item, "evidence_id") or ""),
+            )
+            if identity in seen:
+                continue
+            seen.add(identity)
+            unique_evidence.append(item)
+        current_total = int(current.get("evidence_total") or 0)
+        value_total = int(value.get("evidence_total") or len(value.get("evidence") or []))
+        current["evidence_total"] = max(
+            len(unique_evidence),
+            current_total + value_total,
+        )
+        current["evidence"] = unique_evidence[:5]
+        current["evidence_truncated"] = (
+            current["evidence_total"] > 5
+            or bool(current.get("evidence_truncated"))
+            or bool(value.get("evidence_truncated"))
+        )
+    return [merged[key] for key in order]
 
 
 def _build_findings(

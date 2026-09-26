@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from app.services.medical.models import (
@@ -61,6 +61,35 @@ class PaperStructureParser:
         r"^(?:figure|fig\.?)\s*\d+\s*[.:：-]?\s*\S|^(?:图|図)\s*\d+\s*[.:：-]?\s*\S",
         re.I,
     )
+    _STRUCTURED_ABSTRACT_LABEL = re.compile(
+        r"(?<![A-Za-z])(?P<label>Objectives?|Methods?|Results?|"
+        r"Conclusion|Conclusions|目的|方法|结果|結論|结论)"
+        r"(?=\s+|[:：])",
+        re.I,
+    )
+    _SENTENCE_END = re.compile(r"[.!?。！？](?=\s|$)|\n{2,}")
+    _REFERENCE_LINE = re.compile(
+        r"^\s*(?:\[?\d{1,3}\]?\s*[.)]|"
+        r"(?:doi\s*:\s*10\.|https?://doi\.org/10\.)|"
+        r"[A-Z][^\n]{3,100}\b(?:19|20)\d{2}\b[^\n]{0,80}"
+        r"\b\d{1,4}\s*[:;]\s*\d{1,5})",
+        re.I,
+    )
+    _REFERENCE_AUTHOR_LINE = re.compile(
+        r"\b(?:et\s+al\.?|[A-Z][a-z]+\s+[A-Z](?:\.|\b))\b.*\b(?:19|20)\d{2}\b",
+        re.I,
+    )
+    _NON_MEDICAL_TYPES = frozenset(
+        {
+            "references",
+            "supplementary",
+            "acknowledgements",
+            "acknowledgments",
+            "funding",
+            "author_contributions",
+            "conflicts_of_interest",
+        }
+    )
 
     def __init__(self, chunk_size: int = 1200, overlap: int = 160) -> None:
         self.chunk_size = max(200, chunk_size)
@@ -74,11 +103,16 @@ class PaperStructureParser:
         """Parse a classified paper or guideline into traceable sections."""
         required_sections = self._required_sections(analysis.document_kind)
         text = str(parsed.get("content") or parsed.get("raw_content") or "")
+        extraction_warnings = self._pdf_extraction_warnings(parsed)
         if not text.strip():
             warning = "ocr_required" if self._format(parsed) == "pdf" else "no_extractable_text"
-            return PaperStructureResult(warnings=[warning], missing_sections=list(required_sections))
+            return PaperStructureResult(
+                warnings=[*extraction_warnings, warning],
+                missing_sections=list(required_sections),
+            )
 
         pages = self._page_ranges(parsed, text)
+        pdf_blocks = self._pdf_blocks(parsed)
         explicit = self._docx_sections(parsed)
         if explicit:
             sections = self._sections_from_explicit_blocks(explicit, text, analysis.language)
@@ -100,6 +134,13 @@ class PaperStructureParser:
                 )
             ]
 
+        sections = self._expand_structured_abstracts(
+            sections,
+            text,
+            analysis.language,
+            pages,
+        )
+
         table_sections, _ = self._table_parts(
             parsed, text, analysis.language, analysis.document_kind
         )
@@ -113,7 +154,9 @@ class PaperStructureParser:
         # Number sections first so the same number is stored on each chunk.
         chunks: list[dict[str, Any]] = []
         for section in sections:
-            section_chunks = self._section_chunks(section, analysis.document_kind, pages)
+            section_chunks = self._section_chunks(
+                section, analysis.document_kind, pages, pdf_blocks
+            )
             section.chunk_count = len(section_chunks)
             chunks.extend(section_chunks)
         for chunk_index, chunk in enumerate(chunks):
@@ -130,7 +173,7 @@ class PaperStructureParser:
             for secondary in section.secondary_types
         )
         missing = [section for section in required_sections if section not in present]
-        warnings = []
+        warnings = [*extraction_warnings]
         if self._format(parsed) == "pdf" and not self._page_ranges(parsed, text):
             warnings.append("page_location_unavailable")
         if any(
@@ -149,6 +192,24 @@ class PaperStructureParser:
             missing_sections=missing,
             warnings=warnings,
         )
+
+    def _pdf_extraction_warnings(self, parsed: dict[str, Any]) -> list[str]:
+        """Expose parser quality to the analysis task without copying source text."""
+        if self._format(parsed) != "pdf":
+            return []
+        metadata = parsed.get("metadata")
+        if not isinstance(metadata, dict):
+            return []
+        quality = str(metadata.get("text_quality") or "").strip().lower()
+        warnings: list[str] = []
+        if quality == "unreadable":
+            warnings.append("pdf_text_unreadable")
+        elif quality == "degraded":
+            warnings.append("pdf_layout_reconstructed")
+        for warning in metadata.get("extraction_warnings") or []:
+            if warning == "pdf_text_reconstructed":
+                warnings.append("pdf_layout_reconstructed")
+        return list(dict.fromkeys(warnings))
 
     def _sections_from_headings(
         self,
@@ -181,6 +242,12 @@ class PaperStructureParser:
         for index, heading in enumerate(headings):
             content_start = heading.end
             content_end = headings[index + 1].start if index + 1 < len(headings) else len(text)
+            content_end = self._non_medical_tail_start(
+                text,
+                content_start,
+                content_end,
+                heading.section_type,
+            )
             content_start, content_end, section_text = self._trim_range(
                 text, content_start, content_end
             )
@@ -199,6 +266,126 @@ class PaperStructureParser:
                 )
             )
         return sections
+
+    def _non_medical_tail_start(
+        self,
+        text: str,
+        start: int,
+        end: int,
+        section_type: str,
+    ) -> int:
+        """Stop medical sections before acknowledgements and bibliography tails."""
+        if section_type in self._NON_MEDICAL_TYPES:
+            return end
+        value = text[start:end]
+        cursor = 0
+        lines = value.splitlines(keepends=True)
+        for line in lines:
+            title = clean_heading(line.strip())
+            normalized = normalize_section_title(title)
+            if normalized.primary in self._NON_MEDICAL_TYPES:
+                return start + cursor
+            cursor += len(line)
+
+        # When a PDF loses the References heading, require two independent
+        # bibliography-shaped lines before cutting anything. One in-text
+        # citation must never erase the end of a conclusion or result.
+        candidates: list[int] = []
+        offsets: list[int] = []
+        cursor = 0
+        for line in lines:
+            stripped = line.strip()
+            if stripped and (
+                self._REFERENCE_LINE.search(stripped)
+                or self._REFERENCE_AUTHOR_LINE.search(stripped)
+            ):
+                candidates.append(len(offsets))
+            offsets.append(cursor)
+            cursor += len(line)
+        for index in candidates:
+            nearby = [candidate for candidate in candidates if index <= candidate <= index + 8]
+            if len(nearby) >= 2 and index > 0:
+                return start + offsets[index]
+        return end
+
+    def _expand_structured_abstracts(
+        self,
+        sections: list[StructuredSection],
+        text: str,
+        language: str,
+        pages: list[_PageRange],
+    ) -> list[StructuredSection]:
+        """Split inline abstract labels before providers assign semantic roles."""
+        expanded: list[StructuredSection] = []
+        type_by_label = {
+            "objective": MedicalSectionType.SCOPE.value,
+            "objectives": MedicalSectionType.SCOPE.value,
+            "method": MedicalSectionType.METHODS.value,
+            "methods": MedicalSectionType.METHODS.value,
+            "result": MedicalSectionType.RESULTS.value,
+            "results": MedicalSectionType.RESULTS.value,
+            "conclusion": MedicalSectionType.CONCLUSION.value,
+            "conclusions": MedicalSectionType.CONCLUSION.value,
+            "目的": MedicalSectionType.SCOPE.value,
+            "方法": MedicalSectionType.METHODS.value,
+            "结果": MedicalSectionType.RESULTS.value,
+            "結論": MedicalSectionType.CONCLUSION.value,
+            "结论": MedicalSectionType.CONCLUSION.value,
+        }
+
+        for section in sections:
+            if section.section_type != MedicalSectionType.ABSTRACT.value:
+                expanded.append(section)
+                continue
+
+            matches = [
+                match
+                for match in self._STRUCTURED_ABSTRACT_LABEL.finditer(section.text)
+                if not match.group("label").isascii()
+                or match.group("label")[:1].isupper()
+            ]
+            if len(matches) < 2:
+                expanded.append(section)
+                continue
+
+            parent_metadata = dict(section.metadata)
+            parent_metadata["structured_abstract_parent"] = True
+            expanded.append(replace(section, metadata=parent_metadata))
+            for index, match in enumerate(matches):
+                label = match.group("label")
+                section_type = type_by_label.get(label.casefold())
+                if section_type is None:
+                    continue
+                relative_end = (
+                    matches[index + 1].start()
+                    if index + 1 < len(matches)
+                    else len(section.text)
+                )
+                content_start = match.end()
+                while content_start < relative_end and section.text[content_start] in " \t\r\n:：":
+                    content_start += 1
+                start, end, section_text = self._trim_range(
+                    text,
+                    section.char_start + content_start,
+                    section.char_start + relative_end,
+                )
+                if not section_text:
+                    continue
+                child = self._section(
+                    section_type,
+                    label,
+                    start,
+                    end,
+                    section_text,
+                    language,
+                    max(0.0, section.confidence - 0.02),
+                    pages,
+                    False,
+                    location_exact=bool(section.metadata.get("location_exact", True)),
+                )
+                child.metadata["structured_abstract_label"] = True
+                expanded.append(child)
+        return expanded
 
     def _sections_from_explicit_blocks(
         self,
@@ -462,23 +649,41 @@ class PaperStructureParser:
         section: StructuredSection,
         document_kind: str,
         pages: list[_PageRange] | None = None,
+        pdf_blocks: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
-        if not section.text.strip():
+        if not section.text.strip() or section.metadata.get("structured_abstract_parent"):
             return []
         chunks: list[dict[str, Any]] = []
-        start = 0
         text = section.text
-        while start < len(text):
-            end = min(len(text), start + self.chunk_size)
-            raw_piece = text[start:end]
-            piece = raw_piece.strip()
-            if piece:
-                location_exact = bool(section.metadata.get("location_exact", True))
+        spans = self._sentence_spans(text)
+        location_exact = bool(section.metadata.get("location_exact", True))
+        start_index = 0
+        while start_index < len(spans):
+            chunk_start = spans[start_index][0]
+            chunk_end = spans[start_index][1]
+            end_index = start_index + 1
+            while (
+                end_index < len(spans)
+                and spans[end_index][1] - chunk_start <= self.chunk_size
+            ):
                 if location_exact:
-                    leading = len(raw_piece) - len(raw_piece.lstrip())
-                    trailing = len(raw_piece) - len(raw_piece.rstrip())
-                    absolute_start = section.char_start + start + leading
-                    absolute_end = section.char_start + end - trailing
+                    candidate_start = section.char_start + chunk_start
+                    candidate_end = section.char_start + spans[end_index][1]
+                    if self._pdf_chunk_metadata(
+                        candidate_start,
+                        candidate_end,
+                        pdf_blocks or [],
+                        location_exact=True,
+                    ).get("reject"):
+                        break
+                chunk_end = spans[end_index][1]
+                end_index += 1
+
+            piece = text[chunk_start:chunk_end]
+            if piece:
+                if location_exact:
+                    absolute_start = section.char_start + chunk_start
+                    absolute_end = section.char_start + chunk_end
                 else:
                     absolute_start = 0
                     absolute_end = 0
@@ -491,7 +696,16 @@ class PaperStructureParser:
                     if located_start is not None:
                         chunk_page_start = located_start
                         chunk_page_end = located_end
-                chunks.append({
+                block_metadata = self._pdf_chunk_metadata(
+                    absolute_start,
+                    absolute_end,
+                    pdf_blocks or [],
+                    location_exact=location_exact,
+                )
+                if block_metadata.get("reject"):
+                    start_index = end_index
+                    continue
+                chunk = {
                     "text": piece,
                     "type": "medical_section",
                     "start": absolute_start,
@@ -509,11 +723,110 @@ class PaperStructureParser:
                     "document_kind": document_kind,
                     "evidence_role": section.metadata.get("evidence_role", "context"),
                     "location_exact": location_exact,
-                })
-            if end >= len(text):
+                    "starts_at_sentence_boundary": True,
+                    "ends_at_sentence_boundary": True,
+                }
+                chunk.update(
+                    {
+                        key: value
+                        for key, value in block_metadata.items()
+                        if key != "reject"
+                    }
+                )
+                chunks.append(chunk)
+            if end_index >= len(spans):
                 break
-            start = max(start + 1, end - self.overlap)
+            target = chunk_end - self.overlap
+            next_index = end_index
+            for candidate_index in range(end_index - 1, start_index, -1):
+                if spans[candidate_index][0] <= target:
+                    next_index = candidate_index
+                    break
+            start_index = max(start_index + 1, next_index)
         return chunks
+
+    def _pdf_blocks(self, parsed: dict[str, Any]) -> list[dict[str, Any]]:
+        if self._format(parsed) != "pdf":
+            return []
+        metadata = parsed.get("metadata")
+        if not isinstance(metadata, dict):
+            return []
+        blocks = metadata.get("pdf_blocks")
+        if not isinstance(blocks, list):
+            return []
+        return [
+            block
+            for block in blocks
+            if isinstance(block, dict)
+            and int(block.get("char_end", 0) or 0) > int(block.get("char_start", 0) or 0)
+        ]
+
+    def _pdf_chunk_metadata(
+        self,
+        start: int,
+        end: int,
+        blocks: list[dict[str, Any]],
+        *,
+        location_exact: bool,
+    ) -> dict[str, Any]:
+        """Attach block provenance or reject mixed page furniture."""
+        if not blocks or not location_exact or end <= start:
+            return {}
+        overlaps = [
+            block
+            for block in blocks
+            if max(start, int(block.get("char_start", 0) or 0))
+            < min(end, int(block.get("char_end", 0) or 0))
+        ]
+        if not overlaps:
+            return {"reject": True, "quality_flags": ["mixed_page_regions"]}
+
+        kinds = {str(block.get("kind") or block.get("block_type") or "body") for block in overlaps}
+        if kinds != {"body"}:
+            flags: list[str] = []
+            for block in overlaps:
+                flags.extend(str(flag) for flag in block.get("quality_flags", []) if flag)
+            if "mixed_page_regions" not in flags:
+                flags.append("mixed_page_regions")
+            return {"reject": True, "quality_flags": list(dict.fromkeys(flags))}
+
+        pages = {int(block.get("page", 0) or 0) for block in overlaps}
+        columns = {str(block.get("column") or "full_width") for block in overlaps}
+        if len(pages) != 1 or len(columns) != 1:
+            return {
+                "reject": True,
+                "quality_flags": ["mixed_page_regions"],
+            }
+        block = overlaps[0]
+        return {
+            "pdf_block_type": "body",
+            "pdf_block_index": blocks.index(block),
+            "pdf_column": next(iter(columns)),
+            "pdf_reconstructed": any(bool(item.get("reconstructed")) for item in overlaps),
+            "pdf_quality_flags": list(
+                dict.fromkeys(
+                    str(flag)
+                    for item in overlaps
+                    for flag in item.get("quality_flags", [])
+                    if flag
+                )
+            ),
+            "medical_evidence": True,
+        }
+
+    def _sentence_spans(self, text: str) -> list[tuple[int, int]]:
+        """Return trimmed, punctuation-aware spans for stable chunk boundaries."""
+        spans: list[tuple[int, int]] = []
+        cursor = 0
+        for match in self._SENTENCE_END.finditer(text):
+            start, end, value = self._trim_range(text, cursor, match.end())
+            if value:
+                spans.append((start, end))
+            cursor = match.end()
+        start, end, value = self._trim_range(text, cursor, len(text))
+        if value:
+            spans.append((start, end))
+        return spans
 
     def _table_parts(
         self,
@@ -679,6 +992,11 @@ class PaperStructureParser:
             "limitations": "study_limitation",
             "references": "reference",
             "supplementary": "supplementary_material",
+            "acknowledgements": "non_medical_metadata",
+            "acknowledgments": "non_medical_metadata",
+            "funding": "non_medical_metadata",
+            "author_contributions": "non_medical_metadata",
+            "conflicts_of_interest": "non_medical_metadata",
             "table": "table",
             "figure_caption": "figure_caption",
         }.get(section_type, "context")

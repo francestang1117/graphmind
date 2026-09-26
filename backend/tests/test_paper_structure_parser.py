@@ -2,6 +2,7 @@
 
 from app.services.medical.models import MedicalDocumentAnalysis
 from app.services.medical.paper_structure_parser import PaperStructureParser
+from app.services.medical.ai.context_builder import ContextBuilder
 
 
 def _analysis(
@@ -202,6 +203,106 @@ def test_chunk_page_range_is_narrower_than_a_multi_page_section():
     assert all(chunk["section_page_end"] == 2 for chunk in result_chunks)
 
 
+def test_chunks_start_and_end_on_sentence_boundaries():
+    text = "Results\n" + (
+        "Fabry patients had higher Gb3 levels than controls. "
+        "The difference was most pronounced in classic disease. "
+        "Follow-up measurements remained stable. "
+        "Urinary isoforms were also higher in the classic subgroup. "
+        "The observed pattern was consistent across the measured samples."
+    )
+    parsed = {
+        "content": text,
+        "metadata": {"format": "pdf"},
+        "extra": {"sections": [], "tables": []},
+    }
+
+    result = PaperStructureParser(chunk_size=200, overlap=40).parse(parsed, _analysis())
+    chunks = [chunk for chunk in result.chunks if chunk["section_type"] == "results"]
+
+    assert len(chunks) >= 2
+    assert all(chunk["starts_at_sentence_boundary"] for chunk in chunks)
+    assert all(chunk["ends_at_sentence_boundary"] for chunk in chunks)
+    assert all(text[chunk["char_start"]:chunk["char_end"]] == chunk["text"] for chunk in chunks)
+    assert all(not chunk["text"].lstrip().startswith(("ary ", "orm,")) for chunk in chunks)
+
+
+def test_structured_abstract_labels_get_distinct_semantic_sections():
+    text = (
+        "Abstract\n"
+        "Objectives The study assessed biomarker levels. "
+        "Methods Plasma samples from 15 patients and 36 controls were analyzed. "
+        "Results Patients had higher levels than controls. "
+        "Conclusion The marker may support further study."
+    )
+    parsed = {
+        "content": text,
+        "metadata": {"format": "pdf"},
+        "extra": {"sections": [], "tables": []},
+    }
+
+    result = PaperStructureParser().parse(parsed, _analysis())
+
+    assert {section.section_type for section in result.sections} >= {
+        "abstract",
+        "scope",
+        "methods",
+        "results",
+        "conclusion",
+    }
+    assert any(
+        chunk["section_type"] == "results"
+        and "Patients had higher levels" in chunk["text"]
+        for chunk in result.chunks
+    )
+    assert not any(
+        chunk["section_type"] == "results" and "Objectives" in chunk["text"]
+        for chunk in result.chunks
+    )
+
+
+def test_non_medical_tail_stops_conclusion_before_acknowledgements_and_funding():
+    text = (
+        "Conclusion\nThe reported association should be interpreted cautiously.\n\n"
+        "Acknowledgements\nWe thank the participating clinics.\n\n"
+        "Funding\nSupported by a research grant.\n\n"
+        "References\n1. Smith J. Fabry disease. 2020;12:34."
+    )
+    parsed = {"content": text, "metadata": {"format": "pdf"}, "extra": {"sections": [], "tables": []}}
+
+    result = PaperStructureParser().parse(parsed, _analysis())
+
+    conclusion = next(section for section in result.sections if section.section_type == "conclusion")
+    assert "Acknowledgements" not in conclusion.text
+    assert "Funding" not in conclusion.text
+    assert {section.section_type for section in result.sections} >= {
+        "conclusion",
+        "acknowledgements",
+        "funding",
+        "references",
+    }
+    context = ContextBuilder().build(result.chunks)
+    assert not any(
+        item.section_type in {"acknowledgements", "funding", "references"}
+        for item in context.evidence
+    )
+
+
+def test_content_based_reference_tail_requires_more_than_one_bibliographic_line():
+    text = (
+        "Conclusion\nThe finding is consistent with one prior report (Smith, 2020).\n\n"
+        "1. Smith J. Fabry disease. 2020;12:34.\n"
+        "2. Jones A. Biomarkers in Fabry disease. 2021;13:45."
+    )
+    parsed = {"content": text, "metadata": {"format": "pdf"}, "extra": {"sections": [], "tables": []}}
+
+    result = PaperStructureParser().parse(parsed, _analysis())
+    conclusion = next(section for section in result.sections if section.section_type == "conclusion")
+
+    assert "consistent with one prior report" in conclusion.text
+    assert "Smith J. Fabry disease" not in conclusion.text
+
+
 def test_table_section_keeps_exact_text_location():
     text = "Results\nOutcome\nRecovered\n"
     parsed = {
@@ -262,6 +363,66 @@ def test_figure_captions_are_kept_with_page_and_text_location():
     assert figure.page_start == figure.page_end == 1
     assert text[figure.char_start:figure.char_end] == "Figure 1. Study flow"
     assert result.chunks[-1]["section_type"] == "figure_caption"
+
+
+def test_pdf_block_metadata_rejects_caption_and_reference_mixed_chunks():
+    text = (
+        "Results\n"
+        "Clean result sentence.\n"
+        "Figure 1. Study flow and participant exclusions.\n"
+        "Intern Med 63: 1531-1538, 2024\n"
+    )
+    caption_start = text.index("Figure 1")
+    citation_start = text.index("Intern Med")
+    parsed = {
+        "content": text,
+        "metadata": {
+            "format": "pdf",
+            "pdf_blocks": [
+                {
+                    "page": 1,
+                    "kind": "body",
+                    "block_type": "body",
+                    "column": "left",
+                    "char_start": text.index("Clean"),
+                    "char_end": caption_start,
+                    "medical_evidence": True,
+                    "quality_flags": [],
+                },
+                {
+                    "page": 1,
+                    "kind": "figure_caption",
+                    "block_type": "figure_caption",
+                    "column": "left",
+                    "char_start": caption_start,
+                    "char_end": citation_start,
+                    "medical_evidence": False,
+                    "quality_flags": ["caption_body_mixed"],
+                },
+                {
+                    "page": 1,
+                    "kind": "metadata",
+                    "block_type": "metadata",
+                    "column": "left",
+                    "char_start": citation_start,
+                    "char_end": len(text),
+                    "medical_evidence": False,
+                    "quality_flags": ["reference_like"],
+                },
+            ],
+        },
+        "extra": {
+            "sections": [{"title": "Page 1", "content": text}],
+            "tables": [],
+        },
+    }
+
+    result = PaperStructureParser().parse(parsed, _analysis())
+    result_chunks = [chunk for chunk in result.chunks if chunk["section_type"] == "results"]
+
+    assert [chunk["text"] for chunk in result_chunks] == ["Clean result sentence."]
+    assert result_chunks[0]["pdf_block_type"] == "body"
+    assert result_chunks[0]["medical_evidence"] is True
 
 
 def test_empty_pdf_reports_that_ocr_is_needed():

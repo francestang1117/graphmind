@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import uuid
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -47,6 +48,7 @@ from app.services.medical.ai.provider import (
 )
 from app.services.medical.ai.safety_validator import validate_safety
 from app.services.medical.ai.support_validator import validate_support
+from app.services.medical.text_quality import assess_passage
 
 
 def _context(*items: tuple[str, str]) -> AnalysisContext:
@@ -104,6 +106,15 @@ def _report(*evidence_ids: str) -> MedicalInsightReport:
             "warnings": [],
         }
     )
+
+
+@pytest.mark.parametrize("statement", [".", "•", "...", "()", " - "])
+def test_finding_schema_rejects_non_substantive_statements(statement: str):
+    payload = _report("EVIDENCE_001").model_dump()
+    payload["key_findings"][0]["statement"] = statement
+
+    with pytest.raises(ValidationError, match="finding statement"):
+        MedicalInsightReport.model_validate(payload)
 
 
 def test_citations_require_current_evidence_and_reject_references():
@@ -259,7 +270,7 @@ def test_saved_v3_question_payload_uses_controlled_template():
     assert payload["questions_for_professional"] == []
     assert payload["question_suggestions"][0]["topic"] == "study_population"
     assert payload["question_suggestions"][0]["question"] == (
-        "Which people were included in this study, and who was not included?"
+        "Which study groups were included, and how might they differ from my situation?"
     )
     assert "migalastat" not in payload["question_suggestions"][0]["rationale"]
 
@@ -288,6 +299,29 @@ def test_context_builder_reads_legacy_page_metadata_for_guidelines():
     assert evidence.section_type == "recommendations"
     assert evidence.section_title == "Recommendations"
     assert evidence.page_start == evidence.page_end == 4
+
+
+def test_context_builder_excludes_reference_chunks_even_when_budget_is_available():
+    context = ContextBuilder().build(
+        [
+            {"id": "results", "text": "The study reported a result.", "section_type": "results"},
+            {"id": "references", "text": "A cited paper and its DOI.", "section_type": "references"},
+        ],
+        title="Paper",
+        document_kind="research_paper",
+        language="en",
+        max_input_tokens=1000,
+    )
+
+    assert context.total_chunks == 1
+    assert context.source_chunks_total == 2
+    assert context.eligible_chunks == 1
+    assert context.quality_filtered_chunks == 0
+    assert context.scope_excluded_chunks == 1
+    assert "evidence_quality_filtered" not in context.warnings
+    assert [item.section_type for item in context.evidence] == ["results"]
+    assert "references" not in context.included_sections
+    assert "references" not in context.omitted_sections
 
 
 def test_context_builder_preserves_safe_parser_warnings_only():
@@ -351,6 +385,9 @@ def test_context_builder_reserves_space_across_paper_sections():
     }
     assert context.omitted_sections == []
     assert context.total_chunks == 5
+    assert context.source_chunks_total == 5
+    assert context.eligible_chunks == 5
+    assert context.budget_excluded_chunks == 0
     assert sum(item.token_count for item in context.evidence) <= 220
     assert "context_truncated" in context.warnings
 
@@ -377,6 +414,32 @@ def test_context_builder_uses_the_full_budget_to_finish_reserved_chunks():
     assert sum(item.token_count for item in context.evidence) == 90
     assert not any(item.truncated for item in context.evidence)
     assert "context_truncated" not in context.warnings
+
+
+def test_context_builder_reports_quality_filtering_separately_from_eligible_coverage():
+    context = ContextBuilder().build(
+        [
+            {"id": "good", "text": "The study reported a measured result.", "section_type": "results"},
+            {
+                "id": "damaged",
+                "text": "clinical signifi- classified into three types.",
+                "section_type": "results",
+            },
+        ],
+        title="Paper",
+        document_kind="research_paper",
+        language="en",
+        max_input_tokens=1000,
+    )
+
+    assert context.source_chunks_total == 2
+    assert context.eligible_chunks == 1
+    assert context.total_chunks == 1
+    assert context.quality_filtered_chunks == 1
+    assert context.scope_excluded_chunks == 0
+    assert context.budget_excluded_chunks == 0
+    assert context.coverage_complete
+    assert "evidence_quality_filtered" in context.warnings
 
 
 class _Responses:
@@ -456,6 +519,22 @@ def test_openai_provider_reports_timeout_after_bounded_retries():
 
     assert exc.value.code == "provider_timeout"
     assert len(client.responses.calls) == 2
+
+
+def test_analyzer_rejects_unreadable_pdf_before_calling_provider():
+    provider = FakeMedicalAIProvider()
+
+    with pytest.raises(MedicalInsightError) as exc:
+        MedicalInsightAnalyzer(provider=provider).run(
+            [{"id": "chunk-1", "text": "unreliable scan text", "section_type": "results"}],
+            source_warnings=["pdf_text_unreadable"],
+            title="Scanned paper",
+            document_kind="research_paper",
+            language="en",
+        )
+
+    assert exc.value.code == "source_text_unreadable"
+    assert provider.calls == []
 
 
 def test_openai_invalid_json_gets_one_schema_repair_attempt():
@@ -632,6 +711,40 @@ def test_redact_sensitive_fields_removes_chinese_and_english_names():
     assert "Alice" not in redacted
     assert "1 Main Street" not in redacted
     assert "[REDACTED]" in redacted
+
+
+def test_redact_sensitive_fields_preserves_public_scientific_citations():
+    redacted, changed = redact_sensitive_fields(
+        "Intern Med 63: 1531-1538, 2024. "
+        "DOI: 10.2169/internalmedicine.2493-23. "
+        "Phone: +1 555-010-1234."
+    )
+
+    assert "Intern Med 63: 1531-1538, 2024" in redacted
+    assert "DOI: 10.2169/internalmedicine.2493-23" in redacted
+    assert "[REDACTED_PHONE]" in redacted
+    assert changed
+
+
+def test_redact_sensitive_fields_preserves_single_page_citations():
+    redacted, _ = redact_sensitive_fields(
+        "Intern Med 63: 1533, 2024. "
+        "DOI: 10.2169/internalmedicine.2493-23"
+    )
+
+    assert "Intern Med 63: 1533, 2024" in redacted
+    assert "10.2169/internalmedicine.2493-23" in redacted
+    assert "[REDACTED_PHONE]" not in redacted
+
+
+def test_passage_quality_rejects_parser_artifacts_before_provider_selection():
+    for text in (
+        "plasma Plasma Lyso-Gb3 levels were reported.",
+        "ary Gb3 isoforms were higher in the cohort.",
+        "The results 1533 Intern Med 63: 1531-1538, 2024.",
+    ):
+        quality = assess_passage(text)
+        assert not quality.usable
 
 
 def test_context_builder_redacts_title_and_section_title():

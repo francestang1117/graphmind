@@ -6,6 +6,12 @@ import {
   getAccessToken,
   saveAccessToken,
 } from "./authSession";
+import {
+  ApplicationUpdateIncompleteError,
+  frontendRuntimeCommit,
+  validateMedicalRuntimeHeaders,
+  type MedicalRuntimeVersions,
+} from "./runtimeVersion";
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 export const AUTH_REQUIRED_EVENT = "graphmind:auth-required";
@@ -14,6 +20,43 @@ const http = axios.create({
   baseURL: `${API_BASE}/api/v1`,
   timeout: 30_000,
   withCredentials: true,
+});
+
+function isMedicalInsightRequest(url?: string) {
+  return Boolean(url && /medical-insights|medical-analysis-runs/.test(url));
+}
+
+function annotateMedicalInsightResponse<T>(response: import("axios").AxiosResponse<T>) {
+  if (isMedicalInsightRequest(response.config.url)) {
+    const versions = validateMedicalRuntimeHeaders(response.headers as Record<string, unknown>);
+    if (response.data && typeof response.data === "object" && "run_id" in response.data) {
+      response.data = {
+        ...response.data,
+        runtime_versions: versions,
+      } as T;
+    }
+  }
+  return response;
+}
+
+http.interceptors.request.use((config) => {
+  if (isMedicalInsightRequest(config.url)) {
+    config.headers.set("X-GraphMind-Frontend-Commit", frontendRuntimeCommit());
+  }
+  return config;
+});
+
+http.interceptors.response.use(annotateMedicalInsightResponse, async (error) => {
+  if (axios.isAxiosError(error) && isMedicalInsightRequest(error.config?.url) && error.response) {
+    try {
+      validateMedicalRuntimeHeaders(error.response.headers as Record<string, unknown>);
+    } catch (versionError) {
+      if (versionError instanceof ApplicationUpdateIncompleteError) {
+        return Promise.reject(versionError);
+      }
+    }
+  }
+  return Promise.reject(error);
 });
 
 http.interceptors.request.use((config) => {
@@ -107,6 +150,9 @@ export interface MedicalInsightEvidence {
   quote: string;
   character_start?: number | null;
   character_end?: number | null;
+  excerpt?: string;
+  quality_score?: number;
+  quality_flags?: string[];
 }
 
 export interface MedicalInsightFinding {
@@ -122,6 +168,7 @@ export interface MedicalInsightAttribute {
   value: string;
   support_status: "supported" | "partially_supported" | "not_reported" | "uncertain" | string;
   evidence_ids: string[];
+  missing_reason?: "not_reported_in_source" | "not_extracted_from_analyzed_text" | "source_unreadable" | string;
 }
 
 export type QuestionSuggestionCategory =
@@ -176,11 +223,13 @@ export interface MedicalInsightReport {
   study_methods?: {
     design: MedicalInsightAttribute;
     population: MedicalInsightAttribute;
-    human_animal_in_vitro: MedicalInsightAttribute;
+    what_was_measured?: MedicalInsightAttribute;
+    human_animal_in_vitro?: MedicalInsightAttribute;
     sample_size: MedicalInsightAttribute;
     comparator: MedicalInsightAttribute;
   };
   key_findings: MedicalInsightFinding[];
+  authors_conclusions?: MedicalInsightFinding[];
   limitations: MedicalInsightFinding[];
   medical_terms: Array<{
     term: string;
@@ -197,6 +246,12 @@ export interface MedicalInsightReport {
     complete: boolean;
     selected_chunks: number;
     total_chunks: number;
+    source_chunks_total?: number;
+    eligible_chunks?: number;
+    quality_filtered_chunks?: number;
+    scope_excluded_chunks?: number;
+    duplicate_chunks?: number;
+    budget_excluded_chunks?: number;
     selected_tokens: number;
     max_input_tokens: number;
     included_sections: string[];
@@ -237,6 +292,9 @@ export interface MedicalInsightRun {
   citation_coverage?: number;
   validation_status?: string;
   warnings?: string[];
+  parser_version?: string;
+  analysis_pipeline_version?: string;
+  runtime_versions?: MedicalRuntimeVersions;
   evidence?: MedicalInsightEvidence[];
 }
 
@@ -302,6 +360,8 @@ export interface DiseaseProfileItem {
   source_id: string;
   evidence_ids: string[];
   evidence: DiseaseProfileSource[];
+  evidence_total: number;
+  evidence_truncated: boolean;
   source: string;
   external_id: string;
   doi?: string | null;
@@ -431,6 +491,7 @@ export interface ComparisonMethod {
   evidence_total: number;
   evidence_truncated: boolean;
   warnings: string[];
+  missing_reason?: string;
 }
 
 export interface ComparisonMethods {
@@ -464,6 +525,9 @@ export interface ComparisonQuestion {
   question: string;
   rationale: string;
   document_id: string;
+  document_ids: string[];
+  analysis_run_ids: string[];
+  topic: string;
   evidence: ComparisonEvidence[];
   evidence_total: number;
   evidence_truncated: boolean;

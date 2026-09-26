@@ -6,6 +6,36 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
+from app.services.medical.text_quality import assess_passage
+
+
+_REFERENCE_SECTION_TYPES = frozenset(
+    {
+        "references",
+        "reference",
+        "bibliography",
+        "works_cited",
+        "reference_list",
+        "references_and_bibliography",
+    }
+)
+_NON_MEDICAL_SECTION_TYPES = _REFERENCE_SECTION_TYPES | frozenset(
+    {
+        "supplementary",
+        "acknowledgements",
+        "acknowledgments",
+        "funding",
+        "author_contributions",
+        "conflicts_of_interest",
+        "figure_caption",
+        "table_caption",
+        "header",
+        "footer",
+        "metadata",
+        "title_page",
+    }
+)
+
 
 @dataclass(frozen=True)
 class EvidenceItem:
@@ -22,6 +52,8 @@ class EvidenceItem:
     token_count: int
     source_index: int
     truncated: bool = False
+    quality_score: int = 100
+    quality_flags: tuple[str, ...] = ()
 
 
 @dataclass
@@ -32,6 +64,12 @@ class AnalysisContext:
     evidence: list[EvidenceItem] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     total_chunks: int = 0
+    source_chunks_total: int = 0
+    eligible_chunks: int = 0
+    quality_filtered_chunks: int = 0
+    scope_excluded_chunks: int = 0
+    duplicate_chunks: int = 0
+    budget_excluded_chunks: int = 0
     total_tokens: int = 0
     max_input_tokens: int = 0
     included_sections: list[str] = field(default_factory=list)
@@ -116,6 +154,10 @@ class ContextBuilder:
         section_map = self._section_map(sections or [])
         candidates: list[tuple[int, int, dict[str, Any]]] = []
         seen: set[tuple[str, str]] = set()
+        source_chunks_total = 0
+        quality_filtered_chunks = 0
+        scope_excluded_chunks = 0
+        duplicate_chunks = 0
 
         safe_title = title or "Untitled medical document"
         title_redacted = False
@@ -125,11 +167,16 @@ class ContextBuilder:
         for index, raw_chunk in enumerate(chunks):
             if not isinstance(raw_chunk, dict):
                 continue
+            source_chunks_total += 1
             text = str(raw_chunk.get("text") or "").strip()
             if not text:
+                scope_excluded_chunks += 1
                 continue
             metadata = raw_chunk.get("metadata")
             metadata = metadata if isinstance(metadata, dict) else {}
+            if metadata.get("medical_evidence") is False:
+                scope_excluded_chunks += 1
+                continue
             section_type = self._section_type(raw_chunk, metadata)
             section = self._section_for(raw_chunk, metadata, section_type, section_map)
             if section_type == "unknown":
@@ -139,9 +186,39 @@ class ContextBuilder:
                     section,
                     section.get("metadata") if isinstance(section.get("metadata"), dict) else {},
                 )
+            if section_type in _NON_MEDICAL_SECTION_TYPES:
+                # These sections remain available in the document browser,
+                # but acknowledgements and bibliographic material are not
+                # medical evidence for a report.
+                scope_excluded_chunks += 1
+                continue
+            section_title = str(
+                raw_chunk.get("section_title")
+                or metadata.get("section_title")
+                or metadata.get("section")
+                or section.get("original_title")
+                or ""
+            )
+            quality = assess_passage(
+                text,
+                section_type=section_type,
+                section_title=section_title,
+                metadata={
+                    **metadata,
+                    "quality_flags": [
+                        *(metadata.get("quality_flags") or []),
+                        *(metadata.get("pdf_quality_flags") or []),
+                    ],
+                },
+                source_warnings=source_warnings or (),
+            )
+            if not quality.usable:
+                quality_filtered_chunks += 1
+                continue
             chunk_id = str(raw_chunk.get("id") or f"chunk:{index}")
             dedupe_key = (chunk_id, text)
             if dedupe_key in seen:
+                duplicate_chunks += 1
                 continue
             seen.add(dedupe_key)
             normalized = {
@@ -152,6 +229,7 @@ class ContextBuilder:
                 "section_type": section_type,
                 "section": section,
                 "index": index,
+                "quality": quality,
             }
             candidates.append((self.PRIORITY.get(section_type, 10), index, normalized))
 
@@ -175,7 +253,7 @@ class ContextBuilder:
             first_by_section: dict[str, dict[str, Any]] = {}
             for _priority, _index, candidate in candidates:
                 section_type = candidate["section_type"]
-                if section_type in {"references", "reference", "bibliography"}:
+                if section_type in _NON_MEDICAL_SECTION_TYPES:
                     continue
                 first_by_section.setdefault(section_type, candidate)
             section_candidates = list(first_by_section.values())
@@ -262,6 +340,8 @@ class ContextBuilder:
                     token_count=_estimate_tokens(text),
                     source_index=index,
                     truncated=item_truncated,
+                    quality_score=candidate["quality"].score,
+                    quality_flags=candidate["quality"].reasons,
                 )
             )
 
@@ -283,14 +363,23 @@ class ContextBuilder:
                 token_count=item.token_count,
                 source_index=item.source_index,
                 truncated=item.truncated,
+                quality_score=item.quality_score,
+                quality_flags=item.quality_flags,
             )
             for index, item in enumerate(selected, start=1)
         ]
+
+        budget_excluded_chunks = sum(
+            1 for _priority, _index, candidate in candidates
+            if allowances.get(candidate["index"], 0) <= 0
+        )
 
         if redacted:
             warnings.append("pii_redacted")
         if any(item.truncated for item in selected) or len(selected) < len(candidates):
             warnings.append("context_truncated")
+        if quality_filtered_chunks:
+            warnings.append("evidence_quality_filtered")
         all_sections = list(dict.fromkeys(candidate[2]["section_type"] for candidate in candidates))
         included_sections = list(dict.fromkeys(item.section_type for item in selected))
         omitted_sections = [value for value in all_sections if value not in included_sections]
@@ -303,6 +392,12 @@ class ContextBuilder:
             evidence=selected,
             warnings=warnings,
             total_chunks=len(candidates),
+            source_chunks_total=source_chunks_total,
+            eligible_chunks=len(candidates),
+            quality_filtered_chunks=quality_filtered_chunks,
+            scope_excluded_chunks=scope_excluded_chunks,
+            duplicate_chunks=duplicate_chunks,
+            budget_excluded_chunks=budget_excluded_chunks,
             total_tokens=total_tokens,
             max_input_tokens=budget,
             included_sections=included_sections,
@@ -373,7 +468,19 @@ class ContextBuilder:
 
 
 _EMAIL = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
-_PHONE = re.compile(r"(?<!\w)\+?[0-9][0-9().\-\s]{7,}[0-9](?!\w)")
+_PROTECTED_CITATION = re.compile(
+    r"(?:\bdoi\s*:\s*10\.\S+|https?://doi\.org/10\.\S+|"
+    r"\b(?:pmid|pmcid|issn)\s*[:#]?\s*[A-Z0-9-]+|"
+    r"\b(?:[A-Z][A-Za-z.&'-]+\s+){1,5}\d{1,4}\s*[:;]\s*"
+    r"\d{1,5}\s*[-–]\s*\d{1,5}(?:\s*,\s*(?:19|20)\d{2})?)",
+    re.I,
+)
+_PHONE = re.compile(
+    r"(?ix)"
+    r"(?P<label>\b(?:phone|telephone|mobile|tel|contact|电话|手机|联系方式|联系电话)\b"
+    r"\s*(?:number|no\.?|号码)?\s*[:：]?\s*)?"
+    r"(?P<number>\+?[0-9](?:[0-9().\-\s]{7,}[0-9])?)"
+)
 _IDENTIFIER = re.compile(
     r"(?im)\b(?:mrn|medical\s+record(?:\s+number)?|patient\s+id|病历号|患者编号)"
     r"\s*[:#：]?\s*[A-Z0-9][A-Z0-9-]{2,}\b"
@@ -398,14 +505,42 @@ def _warning_codes(values: Iterable[str]) -> list[str]:
 
 
 def redact_sensitive_fields(text: str) -> tuple[str, bool]:
-    """Remove common contact and record identifiers before an external call."""
-    changed_text = _EMAIL.sub("[REDACTED_EMAIL]", text)
-    changed_text = _PHONE.sub("[REDACTED_PHONE]", changed_text)
+    """Remove direct identifiers while preserving public citation metadata.
+
+    Journal volume/page ranges and DOI/PMID identifiers are public source
+    locators, not patient contact details. Protect them before applying the
+    phone rule, which is intentionally conservative but still supports
+    labelled and international phone numbers.
+    """
+    protected: dict[str, str] = {}
+
+    def protect(match: re.Match[str]) -> str:
+        token = f"__GRAPHMIND_PUBLIC_{len(protected)}__"
+        protected[token] = match.group(0)
+        return token
+
+    changed_text = _PROTECTED_CITATION.sub(protect, str(text or ""))
+    changed_text = _EMAIL.sub("[REDACTED_EMAIL]", changed_text)
+
+    def redact_phone(match: re.Match[str]) -> str:
+        label = match.group("label") or ""
+        number = match.group("number") or ""
+        digits = re.sub(r"\D", "", number)
+        # Unlabelled short numbers are overwhelmingly citation fragments,
+        # sample sizes, years, or IDs. Only redact unlabelled phone-like
+        # numbers when they have an international prefix or 10+ digits.
+        if not label and not number.startswith("+") and len(digits) < 10:
+            return match.group(0)
+        return f"{label}[REDACTED_PHONE]" if label else "[REDACTED_PHONE]"
+
+    changed_text = _PHONE.sub(redact_phone, changed_text)
     changed_text = _IDENTIFIER.sub("[REDACTED_IDENTIFIER]", changed_text)
     changed_text = _NAMED_FIELD.sub(
         lambda match: f"{match.group('prefix')} [REDACTED]",
         changed_text,
     )
+    for token, original in protected.items():
+        changed_text = changed_text.replace(token, original)
     return changed_text, changed_text != text
 
 

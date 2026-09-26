@@ -65,6 +65,7 @@ class DiseaseProfileAggregator:
         valid_analysis_ids: set[str] = set()
         valid_runs_by_id: dict[str, Mapping[str, Any]] = {}
         evidence_by_run: dict[str, dict[str, dict[str, Any]]] = {}
+        clinician_question_keys: set[tuple[str, str]] = set()
         all_question_count = 0
         stats = {
             "research_paper_count": 0,
@@ -161,7 +162,18 @@ class DiseaseProfileAggregator:
                     )
                     if not sources:
                         continue
-                    section_counts["clinician_questions"] += 1
+                    question_text = " ".join(
+                        str(question.get("question") or "").split()
+                    ).strip()
+                    if not question_text:
+                        continue
+                    question_key = (
+                        str(question.get("topic") or "").strip(),
+                        question_text.casefold(),
+                    )
+                    if question_key not in clinician_question_keys:
+                        clinician_question_keys.add(question_key)
+                        section_counts["clinician_questions"] += 1
                     if collect_items:
                         sections["clinician_questions"].append(
                             {
@@ -177,7 +189,7 @@ class DiseaseProfileAggregator:
                                     (current_run or {}).get("parsed_source_hash") or ""
                                 ),
                                 "source_status": "current",
-                                "question": str(question.get("question") or ""),
+                                "question": question_text,
                                 "rationale": str(question.get("rationale") or ""),
                                 "category": str(question.get("category") or ""),
                                 "topic": str(question.get("topic") or ""),
@@ -185,9 +197,16 @@ class DiseaseProfileAggregator:
                                 "source_id": str(question.get("source_id") or ""),
                                 "evidence_ids": evidence_ids,
                                 "evidence": sources,
+                                "evidence_total": len(sources),
+                                "evidence_truncated": False,
                             }
                         )
                     all_question_count += 1
+
+        if collect_items and "clinician_questions" in active_sections:
+            sections["clinician_questions"] = _merge_clinician_questions(
+                sections["clinician_questions"]
+            )
 
         external_stats = (0, 0)
         if "external_studies" in active_sections:
@@ -386,7 +405,10 @@ class DiseaseProfileAggregator:
                 if support_status == "not_reported":
                     # Do not trust a stale or malformed provider value when
                     # it claims that the source did not report the field.
-                    item_value = "Not reported in the source analysis."
+                    item_value = _missing_method_value(
+                        value.get("missing_reason"),
+                        str(document.get("language") or "en"),
+                    )
                     evidence_ids = []
                     sources = []
                 elif not item_value or not sources:
@@ -465,10 +487,16 @@ class DiseaseProfileAggregator:
             stats["sample_size_not_reported_count"] += 1
 
         population = str(
-            (methods.get("human_animal_in_vitro") or {}).get("value")
-            if isinstance(methods.get("human_animal_in_vitro"), Mapping)
+            (methods.get("population") or {}).get("value")
+            if isinstance(methods.get("population"), Mapping)
             else ""
         ).casefold()
+        if not population:
+            population = str(
+                (methods.get("human_animal_in_vitro") or {}).get("value")
+                if isinstance(methods.get("human_animal_in_vitro"), Mapping)
+                else ""
+            ).casefold()
         if any(term in population for term in ("animal", "mouse", "mice", "rat", "动物", "小鼠")):
             stats["animal_study_count"] += 1
         elif any(term in population for term in ("in vitro", "cell", "细胞", "体外")):
@@ -536,6 +564,8 @@ class DiseaseProfileAggregator:
                         "source_url": str(article.get("source_url") or ""),
                         "retraction_status": status,
                         "flagged": flagged,
+                        "evidence_total": 1,
+                        "evidence_truncated": False,
                         "warnings": [],
                         "relevance_score": match.get("relevance_score"),
                         "match_specificity": str(match.get("match_specificity") or ""),
@@ -677,6 +707,8 @@ def _base_item(
         "source_status": "current",
         "evidence_ids": evidence_ids,
         "evidence": sources,
+        "evidence_total": len(sources),
+        "evidence_truncated": False,
     }
 
 
@@ -706,6 +738,125 @@ def _finding_item(
         "explanation": explanation,
         "title": interpretation_type,
     }
+
+
+def _merge_clinician_questions(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse identical template questions without losing their sources."""
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    order: list[tuple[str, str]] = []
+    all_document_ids: dict[tuple[str, str], list[str]] = {}
+    all_document_titles: dict[tuple[str, str], list[str]] = {}
+    all_evidence_ids: dict[tuple[str, str], list[str]] = {}
+    all_sources: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for item in items:
+        key = (
+            str(item.get("topic") or "").strip(),
+            " ".join(str(item.get("question") or "").split()).casefold(),
+        )
+        document_ids = _unique_strings(
+            item.get("document_ids") or [item.get("document_id")]
+        )
+        document_titles = _unique_strings(
+            item.get("document_titles") or [item.get("document_title")]
+        )
+        evidence_ids = _unique_strings(item.get("evidence_ids", []))
+        sources: list[dict[str, Any]] = []
+        seen_sources: set[tuple[str, str, str]] = set()
+        for source in item.get("evidence", []) or []:
+            if not isinstance(source, dict):
+                continue
+            identity = (
+                str(source.get("document_id") or ""),
+                str(source.get("analysis_run_id") or ""),
+                str(source.get("evidence_id") or ""),
+            )
+            if identity in seen_sources:
+                continue
+            seen_sources.add(identity)
+            sources.append(source)
+
+        all_document_ids[key] = _unique_strings(
+            [*all_document_ids.get(key, []), *document_ids]
+        )
+        all_document_titles[key] = _unique_strings(
+            [*all_document_titles.get(key, []), *document_titles]
+        )
+        all_evidence_ids[key] = _unique_strings(
+            [*all_evidence_ids.get(key, []), *evidence_ids]
+        )
+        existing_sources = all_sources.setdefault(key, [])
+        existing_source_ids = {
+            (
+                str(source.get("document_id") or ""),
+                str(source.get("analysis_run_id") or ""),
+                str(source.get("evidence_id") or ""),
+            )
+            for source in existing_sources
+        }
+        for source in sources:
+            identity = (
+                str(source.get("document_id") or ""),
+                str(source.get("analysis_run_id") or ""),
+                str(source.get("evidence_id") or ""),
+            )
+            if identity not in existing_source_ids:
+                existing_sources.append(source)
+                existing_source_ids.add(identity)
+
+        current = merged.get(key)
+        if current is None:
+            current = dict(item)
+            merged[key] = current
+            order.append(key)
+
+        document_ids = all_document_ids[key]
+        document_titles = all_document_titles[key]
+        evidence_ids = all_evidence_ids[key]
+        sources = all_sources[key]
+        current["document_ids"] = document_ids[:20]
+        current["document_titles"] = document_titles[:20]
+        current["related_document_count"] = len(document_ids)
+        current["related_documents_truncated"] = len(document_ids) > 20
+        current["evidence_ids"] = evidence_ids[:5]
+        current["evidence"] = sources[:5]
+        current["evidence_total"] = len(sources)
+        current["evidence_truncated"] = len(sources) > 5 or len(evidence_ids) > 5
+    return [merged[key] for key in order]
+
+
+def _missing_method_value(reason: Any, language: str) -> str:
+    """Use a precise, localized label for an unpopulated method field."""
+    locale = language if language in {"en", "zh", "ja"} else "en"
+    if reason is None:
+        # Preserve the wording of legacy reports that predate missing_reason.
+        return {
+            "en": "Not reported in the source analysis.",
+            "zh": "所选分析证据未报告此字段。",
+            "ja": "選択した分析証拠ではこの項目は報告されていません。",
+        }[locale]
+    values = {
+        "en": {
+            "not_reported_in_source": "The source evidence states that this field was not reported.",
+            "not_extracted_from_analyzed_text": "This field was not confirmed in the analyzed text.",
+            "source_unreadable": "This field could not be checked because the source text was not readable.",
+        },
+        "zh": {
+            "not_reported_in_source": "原文证据说明该字段未报告。",
+            "not_extracted_from_analyzed_text": "在已分析文本中未能确认该字段。",
+            "source_unreadable": "由于原文无法可靠读取，无法检查该字段。",
+        },
+        "ja": {
+            "not_reported_in_source": "出典の証拠では、この項目は報告されていません。",
+            "not_extracted_from_analyzed_text": "分析した本文では、この項目を確認できませんでした。",
+            "source_unreadable": "本文を信頼して読み取れないため、この項目を確認できません。",
+        },
+    }
+    missing_reason = str(reason or "not_reported_in_source")
+    if missing_reason not in values[locale]:
+        missing_reason = "not_extracted_from_analyzed_text"
+    return values[locale][missing_reason]
 
 
 def _document_sources(

@@ -394,6 +394,334 @@ def test_extractive_provider_emits_cited_question_suggestions():
     assert output.report.question_suggestions
     assert all(item.evidence_ids for item in output.report.question_suggestions)
     assert all(item.source_kind and item.source_id for item in output.report.question_suggestions)
+    assert "extractive_output" in output.report.warnings
+    assert output.report.what_it_means == []
+    assert output.report.what_it_does_not_mean == []
+
+
+def test_extractive_provider_does_not_invent_population_from_results_text():
+    context = _context(
+        ("EVIDENCE_001", "results", "The study reported an outcome in 42 participants."),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert output["study_methods"]["population"] == {}
+    assert output["question_suggestions"] == []
+
+
+def test_extractive_provider_rejects_author_names_as_population_evidence():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "population",
+            "Tomoko Shiga, Takahiro Tsukimura, Takao Kubota, and Tadayasu Togawa. "
+            "Plasma analysis included 15 classic Fabry men, 6 late-onset men, "
+            "11 women, and 36 controls.",
+        )
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    population = output["study_methods"]["population"]
+    assert population["support_status"] == "supported"
+    assert "Tomoko Shiga" not in population["value"]
+    assert "classic Fabry men" in population["value"]
+    assert "control subjects" in population["value"]
+    assert "15 classic Fabry men" not in population["value"]
+
+
+def test_extractive_provider_does_not_turn_objectives_into_findings():
+    context = _context(
+        ("EVIDENCE_001", "abstract", "Objectives The study assessed a biomarker."),
+        ("EVIDENCE_003", "results", "Objective: To assess biomarkers in the cohort."),
+        ("EVIDENCE_002", "results", "Results Fabry patients had higher biomarker levels."),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    statements = [item["statement"] for item in output["key_findings"]]
+    assert all("Objectives" not in statement for statement in statements)
+    assert statements == ["Results Fabry patients had higher biomarker levels."]
+
+
+def test_extractive_provider_separates_reported_results_from_authors_conclusions():
+    context = _context(
+        ("EVIDENCE_000", "abstract", "This study examined biomarkers in Fabry disease."),
+        ("EVIDENCE_001", "results", "Fabry patients had higher biomarker levels."),
+        (
+            "EVIDENCE_002",
+            "conclusion",
+            "This quantitative method may be useful for facilitating diagnosis.",
+        ),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert [item["statement"] for item in output["key_findings"]] == [
+        "Fabry patients had higher biomarker levels."
+    ]
+    assert [item["statement"] for item in output["authors_conclusions"]] == [
+        "This quantitative method may be useful for facilitating diagnosis."
+    ]
+    assert all("may be useful" not in item["statement"] for item in output["key_findings"])
+
+
+def test_extractive_provider_finds_study_aim_across_abstract_chunks():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "scope",
+            "Objectives Fabry disease is characterized by biomarker accumulation.",
+        ),
+        (
+            "EVIDENCE_002",
+            "scope",
+            "The present study determined the molecular profiles in body fluids from patients with different Fabry phenotypes.",
+        ),
+        (
+            "EVIDENCE_003",
+            "results",
+            "Plasma biomarker levels were higher in Fabry patients.",
+        ),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert output["overview"]["summary"] == (
+        "The present study determined the molecular profiles in body fluids from patients with different Fabry phenotypes."
+    )
+    assert output["overview"]["evidence_ids"] == ["EVIDENCE_002"]
+    assert "study_aim_unavailable" not in output["warnings"]
+
+
+def test_extractive_provider_keeps_two_complete_conclusion_sentences_together():
+    context = _context(
+        (
+            "EVIDENCE_000",
+            "abstract",
+            "This study examined molecular profiles in Fabry disease.",
+        ),
+        (
+            "EVIDENCE_001",
+            "conclusion",
+            "We determined the molecular profiles across the study groups. These quantitative measurements may be useful for facilitating diagnosis. Conflicts of interest were disclosed separately.",
+        ),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert output["authors_conclusions"][0]["statement"] == (
+        "We determined the molecular profiles across the study groups. "
+        "These quantitative measurements may be useful for facilitating diagnosis."
+    )
+    assert "Conflicts of interest" not in output["authors_conclusions"][0]["statement"]
+
+
+def test_extractive_provider_does_not_report_discussion_as_result():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "scope",
+            "This paper examined biomarkers in Fabry disease.",
+        ),
+        (
+            "EVIDENCE_002",
+            "results",
+            "Plasma biomarker levels were higher in Fabry patients.",
+        ),
+        (
+            "EVIDENCE_003",
+            "discussion",
+            "This approach may be useful in future clinical research.",
+        ),
+    )
+
+    report = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    statements = [item["statement"] for item in report["key_findings"]]
+    assert "Plasma biomarker levels were higher in Fabry patients." in statements
+    assert all("may be useful" not in statement for statement in statements)
+
+
+def test_extractive_provider_skips_fragmented_source_text():
+    context = _context(
+        ("EVIDENCE_001", "results", "ary Gb3 isoforms were higher in patients..."),
+        (
+            "EVIDENCE_003",
+            "results",
+            "Lyso-Gb3 and related analogs in plasma Plasma Lyso-Gb3 concentrations were determined by LC-MS/MS.",
+        ),
+        ("EVIDENCE_002", "results", "The measured isoforms were higher in patients."),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert [item["statement"] for item in output["key_findings"]] == [
+        "The measured isoforms were higher in patients."
+    ]
+
+
+def test_extractive_provider_does_not_mark_a_damaged_method_passage_supported():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "methods",
+            "The clinical signifi- classified into three clinical types.",
+        )
+    )
+
+    methods = ExtractiveMedicalAIProvider().generate("prompt", context)["study_methods"]
+
+    assert methods["comparator"] == {}
+    assert methods["human_animal_in_vitro"] == {}
+
+
+def test_extractive_provider_marks_background_when_no_study_aim_is_found():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "abstract",
+            "Fabry disease is characterized by systemic accumulation of biomarkers.",
+        )
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert "study_aim_unavailable" in output["warnings"]
+
+
+def test_extractive_provider_uses_field_matching_sentences_for_method_attributes():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "methods",
+            "This trial included 200 adults. The comparison group received placebo.",
+        )
+    )
+
+    methods = ExtractiveMedicalAIProvider().generate("prompt", context)["study_methods"]
+
+    assert methods["sample_size"]["support_status"] == "supported"
+    assert methods["sample_size"]["value"] == "This trial included 200 adults."
+    assert methods["comparator"]["support_status"] == "supported"
+    assert methods["comparator"]["value"] == "The comparison group received placebo."
+
+    no_sample_size = ExtractiveMedicalAIProvider().generate(
+        "prompt",
+        _context(("EVIDENCE_002", "methods", "Patients were monitored during follow-up.")),
+    )["study_methods"]
+    assert no_sample_size["sample_size"] == {}
+
+
+@pytest.mark.parametrize("population_text", ["患者共1040例参与研究。", "研究人群包括儿童患者。"])
+def test_extractive_provider_detects_contiguous_chinese_population_terms(population_text):
+    context = _context(("EVIDENCE_001", "population", population_text))
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    population = output["study_methods"]["population"]
+    assert population["support_status"] == "supported"
+    assert population["value"] == population_text
+    assert output["question_suggestions"][0]["topic"] == "study_population"
+
+
+@pytest.mark.parametrize(
+    ("measurement_text", "expected_value"),
+    [
+        ("A total of 200 patients were enrolled.", False),
+        ("The experiment was performed in rats.", False),
+        ("本研究纳入1040名患者。", False),
+        ("该实验使用小鼠模型。", False),
+        ("检测肿瘤组织中的蛋白表达。", True),
+        ("使用组织切片进行病理分析。", True),
+        ("研究人员使用统计模型分析数据。", False),
+        ("本研究采用人工智能方法处理影像。", False),
+        ("由两人独立审查研究质量。", False),
+        ("该研究由医院组织开展。", False),
+        ("研究团队组织实施随访。", False),
+        (
+            "Plasma Lyso-Gb3 and urinary Gb3 isoforms were measured using LC-MS/MS.",
+            True,
+        ),
+        (
+            "The diagnosis was performed using an assay, with patients classified into three types.",
+            False,
+        ),
+    ],
+)
+def test_extractive_provider_requires_a_measured_object_for_what_was_measured(
+    measurement_text, expected_value
+):
+    output = ExtractiveMedicalAIProvider().generate(
+        "prompt", _context(("EVIDENCE_001", "methods", measurement_text))
+    )
+
+    attribute = output["study_methods"]["what_was_measured"]
+    assert bool(attribute) is expected_value
+    if expected_value:
+        assert attribute["value"] == measurement_text
+
+
+def test_extractive_provider_keeps_method_fields_out_of_results_and_compacts_comparator():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "methods",
+            "Plasma analysis included 15 classic Fabry men and 36 control subjects. "
+            "Urine analysis included 5 classic Fabry men and 11 control subjects. "
+            "Plasma Lyso-Gb3 and urinary Gb3 isoforms were measured using LC-MS/MS. "
+            "The diagnosis was performed using an assay, with patients classified into three types.",
+        ),
+        (
+            "EVIDENCE_002",
+            "results",
+            "The mean plasma Lyso-Gb3 values were reported with the figure caption.",
+        ),
+    )
+
+    methods = ExtractiveMedicalAIProvider().generate("prompt", context)["study_methods"]
+
+    assert "15 classic Fabry men" in methods["sample_size"]["value"]
+    assert "5 classic Fabry men" in methods["sample_size"]["value"]
+    assert "mean plasma" not in methods["sample_size"]["value"]
+    assert methods["comparator"]["value"] == "Plasma: 36 control subjects; Urine: 11 control subjects"
+    assert methods["what_was_measured"]["value"] == (
+        "Plasma Lyso-Gb3 and urinary Gb3 isoforms were measured using LC-MS/MS."
+    )
+    assert methods["human_animal_in_vitro"] == {}
+
+
+def test_extractive_provider_splits_mixed_plasma_and_urine_cohorts():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "methods",
+            "Plasma Lyso-Gb3 and related analogs were measured in 15 classic Fabry men, "
+            "6 later-onset Fabry men, 11 Fabry women, and 36 controls, while urinary "
+            "Gb3 isoforms were measured in 5 classic Fabry men, 5 later-onset Fabry men, "
+            "17 Fabry women, and 11 controls, using LC-MS/MS.",
+        ),
+        ("EVIDENCE_002", "results", "The results 1533"),
+    )
+
+    report = ExtractiveMedicalAIProvider().generate("prompt", context)
+    methods = report["study_methods"]
+
+    assert methods["sample_size"]["value"] == (
+        "Plasma: 15 classic Fabry men; 6 later-onset Fabry men; 11 Fabry women; "
+        "36 controls; Urine: 5 classic Fabry men; 5 later-onset Fabry men; "
+        "17 Fabry women; 11 controls"
+    )
+    assert methods["population"]["value"] == (
+        "The study included classic Fabry men, later-onset Fabry men, Fabry women, "
+        "and control subjects; plasma and urine analyses were performed."
+    )
+    assert methods["population"]["value"] != methods["sample_size"]["value"]
+    assert "plasma" in methods["population"]["value"].casefold()
+    assert "urine" in methods["population"]["value"].casefold()
+    assert methods["comparator"]["value"] == "Plasma: 36 controls; Urine: 11 controls"
+    assert all("1533" not in finding["statement"] for finding in report["key_findings"])
 
 
 def test_analyzer_deduplicates_multiple_sources_for_same_topic():
@@ -610,7 +938,9 @@ def test_analyzer_replaces_free_form_question_with_controlled_template():
     assert provider.calls == 1
     suggestion = output.report.question_suggestions[0]
     assert suggestion.topic == "study_population"
-    assert suggestion.question == "Which people were included in this study, and who was not included?"
+    assert suggestion.question == (
+        "Which study groups were included, and how might they differ from my situation?"
+    )
     assert "migalastat" not in suggestion.question
     assert validate_safety(output.report).valid
 
@@ -632,7 +962,7 @@ def test_analyzer_localizes_controlled_question_templates():
     )
 
     suggestion = output.report.question_suggestions[0]
-    assert suggestion.question == "这项研究纳入了哪些人，没有纳入哪些人？"
+    assert suggestion.question == "这项研究纳入了哪些人群？这些人群与我的情况有什么不同？"
     assert suggestion.rationale.startswith("原文描述了研究人群")
 
 

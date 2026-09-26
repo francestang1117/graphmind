@@ -107,6 +107,8 @@ class DiseaseProfileItem(_StrictModel):
     source_id: str = ""
     evidence_ids: list[str] = Field(default_factory=list, max_length=5)
     evidence: list[DiseaseProfileSource] = Field(default_factory=list, max_length=5)
+    evidence_total: int = Field(default=0, ge=0)
+    evidence_truncated: bool = False
     source: str = ""
     external_id: str = ""
     doi: str | None = None
@@ -249,6 +251,7 @@ class ComparisonMethod(_StrictModel):
     evidence_total: int = Field(default=0, ge=0)
     evidence_truncated: bool = False
     warnings: list[str] = Field(default_factory=list, max_length=10)
+    missing_reason: str = "not_extracted_from_analyzed_text"
 
 
 class ComparisonMethods(_StrictModel):
@@ -282,6 +285,9 @@ class ComparisonQuestion(_StrictModel):
     question: str = Field(min_length=1, max_length=500)
     rationale: str = ""
     document_id: str = Field(min_length=1, max_length=255)
+    document_ids: list[str] = Field(default_factory=list, max_length=5)
+    analysis_run_ids: list[str] = Field(default_factory=list, max_length=5)
+    topic: str = ""
     evidence: list[ComparisonEvidence] = Field(default_factory=list, max_length=5)
     evidence_total: int = Field(default=0, ge=0)
     evidence_truncated: bool = False

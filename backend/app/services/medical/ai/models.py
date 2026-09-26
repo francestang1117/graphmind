@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 InterpretationType = Literal[
@@ -18,6 +19,11 @@ SupportStatus = Literal[
     "partially_supported",
     "not_reported",
     "uncertain",
+]
+MissingReason = Literal[
+    "not_reported_in_source",
+    "not_extracted_from_analyzed_text",
+    "source_unreadable",
 ]
 QuestionSuggestionCategory = Literal[
     "clarify_finding",
@@ -64,6 +70,18 @@ class EvidenceFinding(_StrictModel):
     evidence_level: str = "reported_in_document"
     interpretation_type: InterpretationType = "summary"
 
+    @field_validator("statement")
+    @classmethod
+    def validate_substantive_statement(cls, value: str) -> str:
+        normalized = " ".join(str(value or "").split()).strip()
+        meaningful = re.findall(
+            r"[A-Za-zÀ-ÖØ-öø-ÿ\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]",
+            normalized,
+        )
+        if len(meaningful) < 8:
+            raise ValueError("finding statement must contain at least 8 meaningful characters")
+        return normalized
+
 
 class MedicalTermExplanation(_StrictModel):
     term: str
@@ -93,6 +111,9 @@ class EvidenceAttribute(_StrictModel):
     value: str = NOT_REPORTED_VALUE
     support_status: SupportStatus = "not_reported"
     evidence_ids: list[str] = Field(default_factory=list)
+    # Old reports do not have this field. Keep the fallback conservative so a
+    # missing extraction is not presented as a claim about the whole paper.
+    missing_reason: MissingReason = "not_extracted_from_analyzed_text"
 
     @model_validator(mode="after")
     def validate_not_reported_state(self) -> Self:
@@ -109,6 +130,10 @@ class EvidenceAttribute(_StrictModel):
 class StudyMethods(_StrictModel):
     design: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
     population: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
+    # ``what_was_measured`` is intentionally separate from the legacy
+    # human/animal/in-vitro classification field. Older persisted reports may
+    # still contain the latter, so it remains readable as a deprecated field.
+    what_was_measured: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
     human_animal_in_vitro: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
     sample_size: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
     comparator: EvidenceAttribute = Field(default_factory=EvidenceAttribute)
@@ -118,6 +143,16 @@ class AnalysisCoverage(_StrictModel):
     complete: bool = True
     selected_chunks: int = 0
     total_chunks: int = 0
+    # ``total_chunks`` remains the number of eligible chunks for backwards
+    # compatibility. These fields make the filtering and budget decisions
+    # explicit to API consumers instead of presenting eligible chunks as the
+    # whole source document.
+    source_chunks_total: int = 0
+    eligible_chunks: int = 0
+    quality_filtered_chunks: int = 0
+    scope_excluded_chunks: int = 0
+    duplicate_chunks: int = 0
+    budget_excluded_chunks: int = 0
     selected_tokens: int = 0
     max_input_tokens: int = 0
     included_sections: list[str] = Field(default_factory=list)
@@ -131,6 +166,7 @@ class MedicalInsightReport(_StrictModel):
     overview: DocumentOverview
     study_methods: StudyMethods = Field(default_factory=StudyMethods)
     key_findings: list[EvidenceFinding] = Field(default_factory=list)
+    authors_conclusions: list[EvidenceFinding] = Field(default_factory=list)
     limitations: list[EvidenceFinding] = Field(default_factory=list)
     medical_terms: list[MedicalTermExplanation] = Field(default_factory=list)
     what_it_means: list[EvidenceFinding] = Field(default_factory=list)
