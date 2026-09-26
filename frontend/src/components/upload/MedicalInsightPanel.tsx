@@ -100,7 +100,7 @@ function warningLabel(warning: string) {
     case "no_reliable_key_findings":
       return "No reliable key findings could be extracted from this document.";
     case "evidence_quality_filtered":
-      return "Some source passages were excluded because they were not suitable for the evidence context.";
+      return "Some source passages were excluded because their text quality was not reliable enough for analysis.";
     case "study_aim_unavailable":
       return "The study aim was not clearly identified in the analyzed text; the overview is shown as background.";
     case "pdf_layout_ambiguous":
@@ -355,7 +355,11 @@ function ReportView({
       )}
 
       <FindingList
-        title="Authors’ conclusions"
+        title={
+          isExtractive
+            ? "Passages from the authors’ conclusion section"
+            : "Authors’ conclusions"
+        }
         items={report.authors_conclusions ?? []}
         evidenceById={evidenceById}
         onSelectEvidence={onSelectEvidence}

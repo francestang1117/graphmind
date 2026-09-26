@@ -378,7 +378,7 @@ class ContextBuilder:
             warnings.append("pii_redacted")
         if any(item.truncated for item in selected) or len(selected) < len(candidates):
             warnings.append("context_truncated")
-        if quality_filtered_chunks or scope_excluded_chunks:
+        if quality_filtered_chunks:
             warnings.append("evidence_quality_filtered")
         all_sections = list(dict.fromkeys(candidate[2]["section_type"] for candidate in candidates))
         included_sections = list(dict.fromkeys(item.section_type for item in selected))

@@ -316,7 +316,9 @@ def test_context_builder_excludes_reference_chunks_even_when_budget_is_available
     assert context.total_chunks == 1
     assert context.source_chunks_total == 2
     assert context.eligible_chunks == 1
+    assert context.quality_filtered_chunks == 0
     assert context.scope_excluded_chunks == 1
+    assert "evidence_quality_filtered" not in context.warnings
     assert [item.section_type for item in context.evidence] == ["results"]
     assert "references" not in context.included_sections
     assert "references" not in context.omitted_sections
@@ -722,6 +724,17 @@ def test_redact_sensitive_fields_preserves_public_scientific_citations():
     assert "DOI: 10.2169/internalmedicine.2493-23" in redacted
     assert "[REDACTED_PHONE]" in redacted
     assert changed
+
+
+def test_redact_sensitive_fields_preserves_single_page_citations():
+    redacted, _ = redact_sensitive_fields(
+        "Intern Med 63: 1533, 2024. "
+        "DOI: 10.2169/internalmedicine.2493-23"
+    )
+
+    assert "Intern Med 63: 1533, 2024" in redacted
+    assert "10.2169/internalmedicine.2493-23" in redacted
+    assert "[REDACTED_PHONE]" not in redacted
 
 
 def test_passage_quality_rejects_parser_artifacts_before_provider_selection():

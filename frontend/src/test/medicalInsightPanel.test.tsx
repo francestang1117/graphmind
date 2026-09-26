@@ -239,7 +239,9 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
 
     const about = await screen.findByRole("heading", { name: "About this paper" });
     const findings = screen.getByRole("heading", { name: "Reported results" });
-    const conclusions = screen.getByRole("heading", { name: "Authors’ conclusions" });
+    const conclusions = screen.getByRole("heading", {
+      name: "Passages from the authors’ conclusion section",
+    });
     const question = screen.getByRole("heading", { name: "Questions for your clinician" });
     expect(about.compareDocumentPosition(findings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(findings.compareDocumentPosition(conclusions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -356,7 +358,7 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
 
     expect(await screen.findAllByText("Processing notes")).toHaveLength(1);
     const noteText =
-      "Some source passages were excluded because they were not suitable for the evidence context.";
+      "Some source passages were excluded because their text quality was not reliable enough for analysis.";
     const notes = screen.getAllByText(noteText);
     expect(notes).toHaveLength(1);
     expect(notes.every((note) => note.textContent === noteText)).toBe(true);

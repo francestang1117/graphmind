@@ -467,6 +467,32 @@ def test_extractive_provider_separates_reported_results_from_authors_conclusions
     assert all("may be useful" not in item["statement"] for item in output["key_findings"])
 
 
+def test_extractive_provider_does_not_report_discussion_as_result():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "scope",
+            "This paper examined biomarkers in Fabry disease.",
+        ),
+        (
+            "EVIDENCE_002",
+            "results",
+            "Plasma biomarker levels were higher in Fabry patients.",
+        ),
+        (
+            "EVIDENCE_003",
+            "discussion",
+            "This approach may be useful in future clinical research.",
+        ),
+    )
+
+    report = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    statements = [item["statement"] for item in report["key_findings"]]
+    assert "Plasma biomarker levels were higher in Fabry patients." in statements
+    assert all("may be useful" not in statement for statement in statements)
+
+
 def test_extractive_provider_skips_fragmented_source_text():
     context = _context(
         ("EVIDENCE_001", "results", "ary Gb3 isoforms were higher in patients..."),

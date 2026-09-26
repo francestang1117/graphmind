@@ -52,7 +52,7 @@ class ExtractiveMedicalAIProvider:
             summary = "The document contains no extractable passage for a summary."
 
         finding_sections = (
-            {"results", "result", "outcomes", "evidence", "discussion"}
+            {"results", "result", "outcomes"}
             if context.document_kind == "research_paper"
             else {"results", "result", "evidence", "recommendations", "discussion"}
         )
@@ -88,7 +88,7 @@ class ExtractiveMedicalAIProvider:
                 _finding(
                     f"conclusion_{len(authors_conclusions) + 1:03d}",
                     statement,
-                    "This is the authors' conclusion from the document.",
+                    "This passage appears in the document's conclusion section.",
                     item,
                     interpretation_type="direct_statement",
                 )
