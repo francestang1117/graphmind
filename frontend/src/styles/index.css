@@ -2285,8 +2285,15 @@ button {
 .insight-term-list {
   display: grid;
   gap: 0;
-  width: min(100%, 78ch);
   margin-top: 4px;
+}
+
+.insight-finding-list {
+  width: min(100%, 68ch);
+}
+
+.insight-term-list {
+  width: min(100%, 78ch);
 }
 
 .insight-finding,
@@ -2313,6 +2320,14 @@ button {
 .insight-term strong {
   color: var(--text);
   font-size: 17px;
+}
+
+.insight-finding-heading strong {
+  font-weight: 520;
+  line-height: 1.6;
+}
+
+.insight-term strong {
   font-weight: 620;
   line-height: 1.55;
 }

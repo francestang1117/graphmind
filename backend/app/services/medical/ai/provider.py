@@ -36,18 +36,23 @@ class ExtractiveMedicalAIProvider:
 
     def generate(self, _prompt: str, context: AnalysisContext) -> dict[str, Any]:
         evidence = context.evidence
-        overview_item = _first_of(
-            evidence,
-            "abstract",
-            "scope",
-            "recommendations",
-            "evidence",
-            "results",
-            "conclusion",
-            "introduction",
-        ) or (evidence[0] if evidence else None)
-        overview_text = overview_item.text if overview_item else ""
-        summary, summary_is_study_aim = _overview_summary_details(overview_text)
+        study_aim = _find_study_aim(evidence)
+        if study_aim:
+            summary, overview_item = study_aim
+            summary_is_study_aim = True
+        else:
+            overview_item = _first_of(
+                evidence,
+                "abstract",
+                "scope",
+                "recommendations",
+                "evidence",
+                "results",
+                "conclusion",
+                "introduction",
+            ) or (evidence[0] if evidence else None)
+            overview_text = overview_item.text if overview_item else ""
+            summary, summary_is_study_aim = _overview_summary_details(overview_text)
         if not summary:
             summary = "The document contains no extractable passage for a summary."
 
@@ -81,7 +86,7 @@ class ExtractiveMedicalAIProvider:
         for item in _take_distinct(evidence, {"conclusion", "conclusions"}, limit=2):
             if overview_item and item.evidence_id == overview_item.evidence_id:
                 continue
-            statement = _summary(item.text)
+            statement = _conclusion_excerpt(item)
             if not statement:
                 continue
             authors_conclusions.append(
@@ -909,6 +914,68 @@ def _summary(text: str, max_chars: int = 360) -> str:
     return f"{shortened}..."
 
 
+_STUDY_AIM_SECTIONS = frozenset(
+    {"abstract", "scope", "objective", "objectives", "aim"}
+)
+_STUDY_AIM_PATTERN = re.compile(
+    r"\b(?:the present|this|our)\s+study\s+"
+    r"(?:determined|examined|investigated|evaluated|assessed|quantified|aimed\s+to)\b|"
+    r"\bin the present study,?\s+we\s+"
+    r"(?:determined|examined|investigated|evaluated|assessed|quantified)\b|"
+    r"\b(?:this\s+study|we)\s+"
+    r"(?:determined|examined|investigated|evaluated|assessed|quantified|aimed\s+to)\b|"
+    r"\b(?:objective|purpose|aim)\s*(?:was|is|:)\s*",
+    re.I,
+)
+
+
+def _find_study_aim(evidence: list[EvidenceItem]) -> tuple[str, EvidenceItem] | None:
+    """Find a reliable objective sentence across all abstract-like chunks."""
+    for item in evidence:
+        section_type = str(item.section_type or "").strip().lower()
+        if section_type not in _STUDY_AIM_SECTIONS or not _evidence_is_reliable(item):
+            continue
+        for sentence in _sentence_parts(item.text):
+            if not _STUDY_AIM_PATTERN.search(sentence):
+                continue
+            summary = _summary(sentence)
+            if summary:
+                return summary, item
+    return None
+
+
+def _conclusion_excerpt(item: EvidenceItem) -> str:
+    """Keep two complete conclusion sentences when the passage supports them."""
+    sentences = _sentence_parts(item.text)
+    if not sentences:
+        return ""
+
+    first = _summary(sentences[0], max_chars=720)
+    if not first or not _ends_with_sentence(first):
+        return ""
+    if len(sentences) < 2:
+        return first
+
+    second = _summary(sentences[1], max_chars=720)
+    if not second or not _ends_with_sentence(second):
+        return first
+
+    combined = f"{first} {second}"
+    quality = assess_passage(
+        combined,
+        section_type=item.section_type,
+        section_title=item.section_title,
+        metadata={"quality_flags": item.quality_flags},
+    )
+    if not quality.usable or quality.score < 60:
+        return first
+    return combined
+
+
+def _ends_with_sentence(text: str) -> bool:
+    return bool(re.search(r"[.!?。！？](?:['\"”’)\]]*)?$", text.strip()))
+
+
 def _overview_summary(text: str) -> str:
     return _overview_summary_details(text)[0]
 
@@ -922,12 +989,7 @@ def _overview_summary_details(text: str) -> tuple[str, bool]:
         flags=re.I,
     )
     sentences = _sentence_parts(normalized)
-    objective_markers = re.compile(
-        r"\b(?:this\s+study|we)\s+(?:examined|determined|investigated|evaluated|assessed|aimed\s+to)\b|"
-        r"\b(?:objective|purpose|aim)\s*(?:was|is|:)",
-        re.I,
-    )
-    preferred = next((sentence for sentence in sentences if objective_markers.search(sentence)), None)
+    preferred = next((sentence for sentence in sentences if _STUDY_AIM_PATTERN.search(sentence)), None)
     return (
         _summary(preferred or (sentences[0] if sentences else normalized)),
         preferred is not None,

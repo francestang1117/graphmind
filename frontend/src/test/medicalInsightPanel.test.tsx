@@ -316,6 +316,7 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
     renderPanel();
 
     expect(await screen.findByText("Source passages attached")).toBeInTheDocument();
+    expect(await screen.findByText("Passages cited in this report")).toBeInTheDocument();
     expect(screen.queryByText("All displayed claims have validated source passages")).not.toBeInTheDocument();
     expect(screen.getByText("1 of 1 eligible source chunks included")).toBeInTheDocument();
     expect(screen.getByText("2 source chunks scanned before quality and scope filtering")).toBeInTheDocument();

@@ -406,7 +406,7 @@ function ReportView({
 
       {sourcePassages.length > 0 && (
         <details className="insight-report-section insight-details">
-          <summary>Source passages <span className="insight-summary-count">{sourcePassages.length}</span></summary>
+          <summary>Passages cited in this report <span className="insight-summary-count">{sourcePassages.length}</span></summary>
           <ol className="insight-source-passages">
             {sourcePassages.map((evidence) => (
               <li key={evidence.evidence_id}>

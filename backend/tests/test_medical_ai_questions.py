@@ -467,6 +467,57 @@ def test_extractive_provider_separates_reported_results_from_authors_conclusions
     assert all("may be useful" not in item["statement"] for item in output["key_findings"])
 
 
+def test_extractive_provider_finds_study_aim_across_abstract_chunks():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "scope",
+            "Objectives Fabry disease is characterized by biomarker accumulation.",
+        ),
+        (
+            "EVIDENCE_002",
+            "scope",
+            "The present study determined the molecular profiles in body fluids from patients with different Fabry phenotypes.",
+        ),
+        (
+            "EVIDENCE_003",
+            "results",
+            "Plasma biomarker levels were higher in Fabry patients.",
+        ),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert output["overview"]["summary"] == (
+        "The present study determined the molecular profiles in body fluids from patients with different Fabry phenotypes."
+    )
+    assert output["overview"]["evidence_ids"] == ["EVIDENCE_002"]
+    assert "study_aim_unavailable" not in output["warnings"]
+
+
+def test_extractive_provider_keeps_two_complete_conclusion_sentences_together():
+    context = _context(
+        (
+            "EVIDENCE_000",
+            "abstract",
+            "This study examined molecular profiles in Fabry disease.",
+        ),
+        (
+            "EVIDENCE_001",
+            "conclusion",
+            "We determined the molecular profiles across the study groups. These quantitative measurements may be useful for facilitating diagnosis. Conflicts of interest were disclosed separately.",
+        ),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    assert output["authors_conclusions"][0]["statement"] == (
+        "We determined the molecular profiles across the study groups. "
+        "These quantitative measurements may be useful for facilitating diagnosis."
+    )
+    assert "Conflicts of interest" not in output["authors_conclusions"][0]["statement"]
+
+
 def test_extractive_provider_does_not_report_discussion_as_result():
     context = _context(
         (
