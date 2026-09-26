@@ -1,5 +1,5 @@
 export const EXPECTED_PARSER_VERSION = "document-parser-pdf-readable-v7";
-export const EXPECTED_ANALYSIS_PIPELINE_VERSION = "medical-insights-readable-v9";
+export const EXPECTED_ANALYSIS_PIPELINE_VERSION = "medical-insights-readable-v10";
 export const EXPECTED_INSIGHT_CONTRACT_VERSION = "medical-insights-readable-v9";
 
 export interface MedicalRuntimeVersions {

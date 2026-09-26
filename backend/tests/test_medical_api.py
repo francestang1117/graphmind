@@ -305,7 +305,7 @@ def test_current_insights_rejects_runs_from_an_older_analysis_pipeline(monkeypat
         lambda *_args: {
             "provider": "extractive",
             "model_name": "extractive-v3",
-            "prompt_version": "medical-insights-v3",
+            "prompt_version": "medical-insights-v3+medical-insights-readable-v9",
             "schema_version": "medical-insights-v3",
         },
     )
@@ -321,6 +321,120 @@ def test_current_insights_rejects_runs_from_an_older_analysis_pipeline(monkeypat
 
     assert exc.value.code == "analysis_outdated"
     assert exc.value.details["reason"] == "analysis_pipeline_changed"
+    assert exc.value.details["analysis_pipeline_version"] == "medical-insights-readable-v10"
+
+
+def test_current_insights_returns_v10_after_reanalysis_of_v9_run(monkeypatch):
+    current = {"run": "old"}
+    old_run = {
+        "run_id": "run-v9",
+        "document_id": "document-a",
+        "provider": "extractive",
+        "model_name": "extractive-v3",
+        "prompt_version": "medical-insights-v3+medical-insights-readable-v9",
+        "schema_version": "medical-insights-v3",
+        "status": "succeeded",
+    }
+    queued_run = {
+        "run_id": "run-v10",
+        "document_id": "document-a",
+        "provider": "extractive",
+        "model_name": "extractive-v3",
+        "prompt_version": "medical-insights-v3+medical-insights-readable-v10",
+        "schema_version": "medical-insights-v3",
+        "status": "queued",
+    }
+    completed_run = {
+        **queued_run,
+        "status": "succeeded",
+        "report": {"overview": {"summary": "The refreshed report."}},
+    }
+
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_ENABLED", True)
+    monkeypatch.setattr(medical_insights, "resolve_workspace_id", lambda *_: "workspace-a")
+    monkeypatch.setattr(
+        medical_insights,
+        "_get_scoped_document",
+        lambda *_args, **_kwargs: {
+            "document_id": "document-a",
+            "filename": "paper.txt",
+            "file_path": "/tmp/paper.txt",
+            "original_filename": "paper.txt",
+            "file_extension": ".txt",
+            "file_hash": "a" * 64,
+            "parser_version": PDF_TEXT_PARSER_VERSION,
+        },
+    )
+    monkeypatch.setattr(medical_insights, "_require_repository", lambda: None)
+    monkeypatch.setattr(medical_insights, "_refresh_stale_pdf_if_needed", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_PROVIDER", "extractive")
+    monkeypatch.setattr(medical_insights.settings, "MEDICAL_AI_MODEL", "extractive-v3")
+    monkeypatch.setattr(
+        medical_insights,
+        "get_provider",
+        lambda *_args: SimpleNamespace(model_name="extractive-v3"),
+    )
+    monkeypatch.setattr(
+        medical_insights.medical_analysis_repository,
+        "get_current",
+        lambda *_args: old_run if current["run"] == "old" else completed_run,
+    )
+    monkeypatch.setattr(
+        medical_insights.medical_analysis_repository,
+        "get_source",
+        lambda *_args: {
+            "source_hash": "a" * 64,
+            "parsed_source_hash": "parsed-a",
+            "document_kind": "research_paper",
+            "chunks": [{"id": "chunk-1", "text": "A result."}],
+        },
+    )
+    monkeypatch.setattr(
+        medical_insights.medical_analysis_repository,
+        "create_or_reuse",
+        lambda **_kwargs: (queued_run, True),
+    )
+    monkeypatch.setattr(
+        medical_insights,
+        "_enqueue",
+        lambda *_args: current.update(run="new"),
+    )
+
+    with pytest.raises(AppError) as exc:
+        asyncio.run(
+            medical_insights.get_current_medical_insights(
+                "document-a",
+                workspace_id="workspace-a",
+                user=SimpleNamespace(id="user-a"),
+            )
+        )
+    assert exc.value.code == "analysis_outdated"
+    assert exc.value.details["reason"] == "analysis_pipeline_changed"
+
+    response = asyncio.run(
+        medical_insights._start_analysis(
+            "document-a",
+            BackgroundTasks(),
+            SimpleNamespace(id="user-a"),
+            workspace_id="workspace-a",
+            external_processing_confirmed=False,
+            external_processing_config_fingerprint=None,
+            force=True,
+        )
+    )
+    assert response.status_code == 202
+
+    refreshed = asyncio.run(
+        medical_insights.get_current_medical_insights(
+            "document-a",
+            workspace_id="workspace-a",
+            user=SimpleNamespace(id="user-a"),
+        )
+    )
+    assert refreshed["run_id"] == "run-v10"
+    assert refreshed["prompt_version"].endswith("medical-insights-readable-v10")
+    assert refreshed["analysis_pipeline_version"] == "medical-insights-readable-v10"
+    assert refreshed["report"]["overview"]["summary"] == "The refreshed report."
 
 
 def test_run_detail_rejects_a_saved_report_from_an_older_pipeline(monkeypatch):
