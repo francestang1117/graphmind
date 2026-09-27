@@ -105,6 +105,11 @@ def evidence_rows(
             if key in seen:
                 continue
             seen.add(key)
+            quoted_text, character_start, character_end = _citation_span(
+                report,
+                finding_id,
+                item,
+            )
             rows.append(
                 {
                     "finding_id": finding_id,
@@ -115,14 +120,67 @@ def evidence_rows(
                     "section_title": item.section_title,
                     "page_start": item.page_start,
                     "page_end": item.page_end,
-                    "quoted_text": item.text,
-                    "character_start": item.character_start,
-                    "character_end": item.character_end,
+                    "quoted_text": quoted_text,
+                    "character_start": character_start,
+                    "character_end": character_end,
                     "quality_score": item.quality_score,
                     "quality_flags": list(item.quality_flags),
                 }
             )
     return rows
+
+
+def _citation_span(
+    report: MedicalInsightReport,
+    finding_id: str,
+    item: EvidenceItem,
+) -> tuple[str, int | None, int | None]:
+    """Keep conclusion citations inside the conclusion, not its disclosure tail."""
+    conclusion = next(
+        (entry for entry in report.authors_conclusions if entry.id == finding_id),
+        None,
+    )
+    if conclusion is None:
+        return item.text, item.character_start, item.character_end
+
+    source, offsets = _normalized_with_offsets(item.text)
+    statement = " ".join(conclusion.statement.split()).strip()
+    start = source.find(statement)
+    if not statement or start < 0:
+        return item.text, item.character_start, item.character_end
+
+    end = start + len(statement)
+    raw_start = offsets[start]
+    raw_end = offsets[end - 1] + 1
+    character_start = (
+        item.character_start + raw_start
+        if item.character_start is not None
+        else None
+    )
+    character_end = (
+        item.character_start + raw_end
+        if item.character_start is not None
+        else item.character_end
+    )
+    return item.text[raw_start:raw_end], character_start, character_end
+
+
+def _normalized_with_offsets(text: str) -> tuple[str, list[int]]:
+    """Collapse source whitespace while retaining offsets into the raw text."""
+    characters: list[str] = []
+    offsets: list[int] = []
+    for index, character in enumerate(text):
+        if character.isspace():
+            if characters and characters[-1] != " ":
+                characters.append(" ")
+                offsets.append(index)
+            continue
+        characters.append(character)
+        offsets.append(index)
+    if characters and characters[-1] == " ":
+        characters.pop()
+        offsets.pop()
+    return "".join(characters), offsets
 
 
 def _core_items(

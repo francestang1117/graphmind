@@ -517,6 +517,16 @@ def test_extractive_provider_keeps_two_complete_conclusion_sentences_together():
     )
     assert "Conflicts of interest" not in output["authors_conclusions"][0]["statement"]
 
+    report = MedicalInsightReport.model_validate(output)
+    conclusion_row = next(
+        row for row in evidence_rows(report, context)
+        if row["finding_id"] == "conclusion_001"
+    )
+    assert "Conflicts of interest" not in conclusion_row["quoted_text"]
+    assert conclusion_row["quoted_text"].endswith(
+        "These quantitative measurements may be useful for facilitating diagnosis."
+    )
+
 
 def test_extractive_provider_does_not_report_discussion_as_result():
     context = _context(
