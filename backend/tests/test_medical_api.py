@@ -321,10 +321,10 @@ def test_current_insights_rejects_runs_from_an_older_analysis_pipeline(monkeypat
 
     assert exc.value.code == "analysis_outdated"
     assert exc.value.details["reason"] == "analysis_pipeline_changed"
-    assert exc.value.details["analysis_pipeline_version"] == "medical-insights-readable-v11"
+    assert exc.value.details["analysis_pipeline_version"] == "medical-insights-readable-v12"
 
 
-def test_current_insights_returns_v11_after_reanalysis_of_v10_run(monkeypatch):
+def test_current_insights_returns_v12_after_reanalysis_of_v10_run(monkeypatch):
     current = {"run": "old"}
     old_run = {
         "run_id": "run-v10",
@@ -340,7 +340,7 @@ def test_current_insights_returns_v11_after_reanalysis_of_v10_run(monkeypatch):
         "document_id": "document-a",
         "provider": "extractive",
         "model_name": "extractive-v3",
-        "prompt_version": "medical-insights-v3+medical-insights-readable-v11",
+        "prompt_version": "medical-insights-v3+medical-insights-readable-v12",
         "schema_version": "medical-insights-v3",
         "status": "queued",
     }
@@ -432,8 +432,8 @@ def test_current_insights_returns_v11_after_reanalysis_of_v10_run(monkeypatch):
         )
     )
     assert refreshed["run_id"] == "run-v10"
-    assert refreshed["prompt_version"].endswith("medical-insights-readable-v11")
-    assert refreshed["analysis_pipeline_version"] == "medical-insights-readable-v11"
+    assert refreshed["prompt_version"].endswith("medical-insights-readable-v12")
+    assert refreshed["analysis_pipeline_version"] == "medical-insights-readable-v12"
     assert refreshed["report"]["overview"]["summary"] == "The refreshed report."
 
 

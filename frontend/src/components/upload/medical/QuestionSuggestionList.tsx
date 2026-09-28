@@ -7,7 +7,7 @@ import QuestionSuggestionCard from "./QuestionSuggestionCard";
 
 interface Props {
   report: MedicalInsightReport;
-  evidenceById: Map<string, MedicalInsightEvidence>;
+  evidenceByClaim: Map<string, MedicalInsightEvidence>;
   onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
   onSaveSuggestion?: (suggestion: MedicalQuestionSuggestion) => void;
   savedSuggestionIds?: ReadonlySet<string>;
@@ -17,7 +17,7 @@ interface Props {
 
 export default function QuestionSuggestionList({
   report,
-  evidenceById,
+  evidenceByClaim,
   onSelectEvidence,
   onSaveSuggestion,
   savedSuggestionIds,
@@ -44,7 +44,7 @@ export default function QuestionSuggestionList({
             <QuestionSuggestionCard
               key={suggestion.id}
               suggestion={suggestion}
-              evidenceById={evidenceById}
+              evidenceByClaim={evidenceByClaim}
               onSelectEvidence={onSelectEvidence}
               onSave={onSaveSuggestion ? () => onSaveSuggestion(suggestion) : undefined}
               saved={savedSuggestionIds?.has(suggestion.id) ?? false}

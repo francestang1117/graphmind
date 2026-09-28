@@ -69,6 +69,15 @@ def validate_citations(
                     else f"{label} cites a non-medical section"
                 )
                 item_valid = False
+                continue
+            if (
+                getattr(item, "id", None) in _author_conclusion_ids(report)
+                and _citation_span(report, item.id, source) is None
+            ):
+                errors.append(
+                    f"{label} could not be matched to a precise source range"
+                )
+                item_valid = False
         if item_valid:
             supported_items += 1
 
@@ -105,11 +114,14 @@ def evidence_rows(
             if key in seen:
                 continue
             seen.add(key)
-            quoted_text, character_start, character_end = _citation_span(
+            span = _citation_span(
                 report,
                 finding_id,
                 item,
             )
+            if span is None:
+                continue
+            quoted_text, character_start, character_end = span
             rows.append(
                 {
                     "finding_id": finding_id,
@@ -134,7 +146,7 @@ def _citation_span(
     report: MedicalInsightReport,
     finding_id: str,
     item: EvidenceItem,
-) -> tuple[str, int | None, int | None]:
+) -> tuple[str, int | None, int | None] | None:
     """Keep conclusion citations inside the conclusion, not its disclosure tail."""
     conclusion = next(
         (entry for entry in report.authors_conclusions if entry.id == finding_id),
@@ -147,7 +159,27 @@ def _citation_span(
     statement = " ".join(conclusion.statement.split()).strip()
     start = source.find(statement)
     if not statement or start < 0:
-        return item.text, item.character_start, item.character_end
+        source, offsets = _normalized_with_offsets(
+            item.text,
+            remove_soft_hyphens=True,
+        )
+        statement = _normalized_for_match(
+            conclusion.statement,
+            remove_soft_hyphens=True,
+        )
+        start = source.find(statement)
+    if start < 0:
+        source, offsets = _normalized_with_offsets(
+            item.text,
+            compact_hyphen_spacing=True,
+        )
+        statement = _normalized_for_match(
+            conclusion.statement,
+            compact_hyphen_spacing=True,
+        )
+        start = source.find(statement)
+    if not statement or start < 0:
+        return None
 
     end = start + len(statement)
     raw_start = offsets[start]
@@ -165,22 +197,58 @@ def _citation_span(
     return item.text[raw_start:raw_end], character_start, character_end
 
 
-def _normalized_with_offsets(text: str) -> tuple[str, list[int]]:
-    """Collapse source whitespace while retaining offsets into the raw text."""
+def _normalized_with_offsets(
+    text: str,
+    *,
+    remove_soft_hyphens: bool = False,
+    compact_hyphen_spacing: bool = False,
+) -> tuple[str, list[int]]:
+    """Normalize source text while retaining offsets into the raw text."""
     characters: list[str] = []
     offsets: list[int] = []
-    for index, character in enumerate(text):
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if remove_soft_hyphens and character == "-":
+            next_index = index + 1
+            if next_index < len(text) and text[next_index].isspace():
+                index = next_index
+                while index < len(text) and text[index].isspace():
+                    index += 1
+                continue
         if character.isspace():
+            if compact_hyphen_spacing and characters and characters[-1] == "-":
+                index += 1
+                continue
             if characters and characters[-1] != " ":
                 characters.append(" ")
                 offsets.append(index)
+            index += 1
             continue
         characters.append(character)
         offsets.append(index)
+        index += 1
     if characters and characters[-1] == " ":
         characters.pop()
         offsets.pop()
     return "".join(characters), offsets
+
+
+def _normalized_for_match(
+    text: str,
+    *,
+    remove_soft_hyphens: bool = False,
+    compact_hyphen_spacing: bool = False,
+) -> str:
+    return _normalized_with_offsets(
+        text,
+        remove_soft_hyphens=remove_soft_hyphens,
+        compact_hyphen_spacing=compact_hyphen_spacing,
+    )[0]
+
+
+def _author_conclusion_ids(report: MedicalInsightReport) -> set[str]:
+    return {item.id for item in report.authors_conclusions}
 
 
 def _core_items(

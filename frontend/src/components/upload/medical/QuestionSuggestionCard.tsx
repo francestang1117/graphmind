@@ -4,6 +4,7 @@ import type {
   MedicalInsightEvidence,
   MedicalQuestionSuggestion,
 } from "../../../services/api";
+import { evidenceClaimKey } from "./evidenceIndex";
 
 const CATEGORY_LABELS: Record<string, string> = {
   clarify_finding: "Helps clarify the finding",
@@ -15,7 +16,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 interface Props {
   suggestion: MedicalQuestionSuggestion;
-  evidenceById: Map<string, MedicalInsightEvidence>;
+  evidenceByClaim: Map<string, MedicalInsightEvidence>;
   onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
   onSave?: () => void;
   saved?: boolean;
@@ -35,7 +36,7 @@ function locationLabel(evidence: MedicalInsightEvidence) {
 
 export default function QuestionSuggestionCard({
   suggestion,
-  evidenceById,
+  evidenceByClaim,
   onSelectEvidence,
   onSave,
   saved = false,
@@ -71,7 +72,7 @@ export default function QuestionSuggestionCard({
   }
 
   const evidence = suggestion.evidence_ids
-    .map((evidenceId) => evidenceById.get(evidenceId))
+    .map((evidenceId) => evidenceByClaim.get(evidenceClaimKey(`question:${suggestion.id}`, evidenceId)))
     .filter((item): item is MedicalInsightEvidence => Boolean(item));
 
   return (

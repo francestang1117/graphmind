@@ -51,7 +51,7 @@ describe("clinician question save control", () => {
     render(
       <QuestionSuggestionList
         report={report()}
-        evidenceById={new Map()}
+        evidenceByClaim={new Map()}
         onSelectEvidence={vi.fn()}
         onSaveSuggestion={onSaveSuggestion}
       />,
@@ -66,7 +66,7 @@ describe("clinician question save control", () => {
     render(
       <QuestionSuggestionList
         report={report()}
-        evidenceById={new Map()}
+        evidenceByClaim={new Map()}
         onSelectEvidence={vi.fn()}
         onSaveSuggestion={vi.fn()}
         staleSuggestionIds={new Set(["suggestion-1"])}

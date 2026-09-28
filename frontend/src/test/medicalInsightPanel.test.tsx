@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import MedicalInsightPanel from "../components/upload/MedicalInsightPanel";
@@ -63,7 +63,7 @@ function queuedRun() {
     parsed_source_hash: "parsed-new",
     provider: "extractive",
     model_name: "extractive-v3",
-    prompt_version: "medical-insights-v3+medical-insights-readable-v11",
+    prompt_version: "medical-insights-v3+medical-insights-readable-v12",
     schema_version: "medical-insights-v3",
   };
 }
@@ -322,6 +322,85 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
     expect(screen.getByText("2 source chunks scanned before quality and scope filtering")).toBeInTheDocument();
     expect(screen.getByText("1 source chunks excluded for text quality")).toBeInTheDocument();
     expect(screen.getByText("Approximately 3,200 source tokens selected; limit 12,000")).toBeInTheDocument();
+  });
+
+  it("opens the citation range belonging to each claim when source ids are shared", async () => {
+    api.getCurrentMedicalInsights.mockResolvedValue({
+      ...queuedRun(),
+      status: "succeeded",
+      report: {
+        schema_version: "medical-insights-v3",
+        document_kind: "research_paper",
+        language: "en",
+        overview: {
+          title: "Fabry disease biomarker study",
+          summary: "The study examined biomarkers in adults with Fabry disease.",
+          study_type: "Research paper",
+          evidence_ids: [],
+        },
+        study_methods: {},
+        key_findings: [
+          {
+            id: "finding-1",
+            statement: "The first claim is supported by the first sentence.",
+            plain_explanation: "",
+            evidence_ids: ["EVIDENCE_SHARED"],
+            evidence_level: "reported_in_document",
+            interpretation_type: "direct_statement",
+          },
+          {
+            id: "finding-2",
+            statement: "The second claim is supported by another sentence.",
+            plain_explanation: "",
+            evidence_ids: ["EVIDENCE_SHARED"],
+            evidence_level: "reported_in_document",
+            interpretation_type: "direct_statement",
+          },
+        ],
+        authors_conclusions: [],
+        limitations: [],
+        medical_terms: [],
+        what_it_means: [],
+        what_it_does_not_mean: [],
+        applicability: [],
+        future_research: [],
+        question_suggestions: [],
+        questions_for_professional: [],
+        warnings: ["extractive_output"],
+      },
+      evidence: [
+        {
+          id: "row-first",
+          evidence_id: "EVIDENCE_SHARED",
+          finding_id: "finding-1",
+          chunk_id: "chunk-1",
+          quote: "The first claim source range.",
+          page_start: 1,
+          section_type: "results",
+        },
+        {
+          id: "row-second",
+          evidence_id: "EVIDENCE_SHARED",
+          finding_id: "finding-2",
+          chunk_id: "chunk-1",
+          quote: "The second claim source range.",
+          page_start: 1,
+          section_type: "results",
+        },
+      ],
+    });
+    api.getMedicalInsightConfig.mockResolvedValue(localConfig);
+
+    const user = userEvent.setup();
+    renderPanel();
+
+    const firstClaim = await screen.findByText("The first claim is supported by the first sentence.");
+    const secondClaim = screen.getByText("The second claim is supported by another sentence.");
+    await user.click(within(firstClaim.closest("article") as HTMLElement).getByRole("button", { name: /Page 1.*Results/i }));
+    expect(within(screen.getByRole("complementary")).getByText("The first claim source range.")).toBeInTheDocument();
+
+    await user.click(within(secondClaim.closest("article") as HTMLElement).getByRole("button", { name: /Page 1.*Results/i }));
+    expect(within(screen.getByRole("complementary")).getByText("The second claim source range.")).toBeInTheDocument();
   });
 
   it("shows each processing note only once", async () => {

@@ -16,6 +16,10 @@ import {
 } from "../../services/api";
 import LiteratureEvidencePanel from "./literature/LiteratureEvidencePanel";
 import QuestionSuggestionList from "./medical/QuestionSuggestionList";
+import {
+  buildMedicalInsightEvidenceIndexes,
+  evidenceClaimKey,
+} from "./medical/evidenceIndex";
 import { useClinicianQuestions } from "../../hooks/useClinicianQuestions";
 import {
   ApplicationUpdateIncompleteError,
@@ -168,7 +172,8 @@ function sampleSizeRows(label: string, value: string) {
 
 function findingEvidence(
   finding: MedicalInsightFinding,
-  evidenceById: Map<string, MedicalInsightEvidence>,
+  claimId: string,
+  evidenceByClaim: Map<string, MedicalInsightEvidence>,
   onSelect: (evidence: MedicalInsightEvidence) => void,
 ) {
   if (!finding.evidence_ids.length) {
@@ -178,7 +183,7 @@ function findingEvidence(
   return (
     <div className="insight-evidence-list">
       {finding.evidence_ids.map((evidenceId) => {
-        const evidence = evidenceById.get(evidenceId);
+        const evidence = evidenceByClaim.get(evidenceClaimKey(claimId, evidenceId));
         if (!evidence) return null;
         return (
           <button
@@ -199,12 +204,12 @@ function findingEvidence(
 function FindingList({
   title,
   items,
-  evidenceById,
+  evidenceByClaim,
   onSelectEvidence,
 }: {
   title: string;
   items: MedicalInsightFinding[];
-  evidenceById: Map<string, MedicalInsightEvidence>;
+  evidenceByClaim: Map<string, MedicalInsightEvidence>;
   onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
 }) {
   if (!items.length) return null;
@@ -221,7 +226,7 @@ function FindingList({
             {finding.interpretation_type !== "direct_statement" && finding.plain_explanation && (
               <p>{finding.plain_explanation}</p>
             )}
-            {findingEvidence(finding, evidenceById, onSelectEvidence)}
+            {findingEvidence(finding, finding.id, evidenceByClaim, onSelectEvidence)}
           </article>
         ))}
       </div>
@@ -231,13 +236,15 @@ function FindingList({
 
 function MethodItem({
   label,
+  claimId,
   item,
-  evidenceById,
+  evidenceByClaim,
   onSelectEvidence,
 }: {
   label: string;
+  claimId: string;
   item: MedicalInsightAttribute;
-  evidenceById: Map<string, MedicalInsightEvidence>;
+  evidenceByClaim: Map<string, MedicalInsightEvidence>;
   onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
 }) {
   const cohortRows = sampleSizeRows(label, item.value);
@@ -263,7 +270,8 @@ function MethodItem({
           evidence_level: "reported_in_document",
           interpretation_type: "direct_statement",
         },
-        evidenceById,
+        claimId,
+        evidenceByClaim,
         onSelectEvidence,
       )}
     </div>
@@ -273,7 +281,8 @@ function MethodItem({
 function ReportView({
   report,
   run,
-  evidenceById,
+  evidenceByClaim,
+  sourceEvidenceById,
   onSelectEvidence,
   onSaveSuggestion,
   savedSuggestionIds,
@@ -282,7 +291,8 @@ function ReportView({
 }: {
   report: MedicalInsightReport;
   run: MedicalInsightRun;
-  evidenceById: Map<string, MedicalInsightEvidence>;
+  evidenceByClaim: Map<string, MedicalInsightEvidence>;
+  sourceEvidenceById: Map<string, MedicalInsightEvidence>;
   onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
   onSaveSuggestion?: (suggestion: NonNullable<MedicalInsightReport["question_suggestions"]>[number]) => void;
   savedSuggestionIds?: ReadonlySet<string>;
@@ -293,23 +303,24 @@ function ReportView({
     run.provider === "extractive"
     || report.warnings.includes("extractive_output");
   const methodFields = [
-    ["Study design", report.study_methods?.design],
-    ["Population", report.study_methods?.population],
+    ["design", "Study design", report.study_methods?.design],
+    ["population", "Population", report.study_methods?.population],
     [
+      "what_was_measured",
       "What was measured",
       report.study_methods?.what_was_measured
         ?? report.study_methods?.human_animal_in_vitro,
     ],
-    ["Sample size", report.study_methods?.sample_size],
-    ["Comparator", report.study_methods?.comparator],
+    ["sample_size", "Sample size", report.study_methods?.sample_size],
+    ["comparator", "Comparator", report.study_methods?.comparator],
   ] as const;
-  const availableMethods = methodFields.filter(([, item]) =>
+  const availableMethods = methodFields.filter(([, , item]) =>
     Boolean(item?.value?.trim()) && item?.support_status !== "not_reported",
   );
-  const unavailableMethods = methodFields.filter(([, item]) =>
+  const unavailableMethods = methodFields.filter(([, , item]) =>
     !item?.value?.trim() || item?.support_status === "not_reported",
   );
-  const sourcePassages = [...evidenceById.values()];
+  const sourcePassages = [...sourceEvidenceById.values()];
   const processingWarnings = visibleProcessingWarnings(run.warnings);
   const hasAdditionalAnalysis = Boolean(
     report.limitations.length
@@ -336,7 +347,8 @@ function ReportView({
             evidence_level: "reported_in_document",
             interpretation_type: "summary",
           },
-          evidenceById,
+          "overview",
+          evidenceByClaim,
           onSelectEvidence,
         )}
       </section>
@@ -344,7 +356,7 @@ function ReportView({
       <FindingList
         title="Reported results"
         items={report.key_findings}
-        evidenceById={evidenceById}
+        evidenceByClaim={evidenceByClaim}
         onSelectEvidence={onSelectEvidence}
       />
       {!report.key_findings.length && report.warnings.includes("no_reliable_key_findings") && (
@@ -361,13 +373,13 @@ function ReportView({
             : "Authors’ conclusions"
         }
         items={report.authors_conclusions ?? []}
-        evidenceById={evidenceById}
+        evidenceByClaim={evidenceByClaim}
         onSelectEvidence={onSelectEvidence}
       />
 
       <QuestionSuggestionList
         report={report}
-        evidenceById={evidenceById}
+        evidenceByClaim={evidenceByClaim}
         onSelectEvidence={onSelectEvidence}
         onSaveSuggestion={onSaveSuggestion}
         savedSuggestionIds={savedSuggestionIds}
@@ -386,8 +398,14 @@ function ReportView({
             )}
           </summary>
           <div className="insight-method-list">
-            {availableMethods.map(([label, item]) => item && (
-              <MethodItem key={label} label={label} item={item} {...{ evidenceById, onSelectEvidence }} />
+            {availableMethods.map(([fieldName, label, item]) => item && (
+              <MethodItem
+                key={fieldName}
+                label={label}
+                claimId={`study_methods.${fieldName}`}
+                item={item}
+                {...{ evidenceByClaim, onSelectEvidence }}
+              />
             ))}
           </div>
           {availableMethods.length === 0 && (
@@ -397,7 +415,7 @@ function ReportView({
             <details className="insight-unavailable-methods">
               <summary>View unavailable fields</summary>
               <ul>
-                {unavailableMethods.map(([label]) => <li key={label}>{label} · Not found in analyzed text</li>)}
+                {unavailableMethods.map(([, label]) => <li key={label}>{label} · Not found in analyzed text</li>)}
               </ul>
             </details>
           )}
@@ -467,13 +485,13 @@ function ReportView({
               <FindingList
                 title="What this means"
                 items={report.what_it_means}
-                evidenceById={evidenceById}
+                evidenceByClaim={evidenceByClaim}
                 onSelectEvidence={onSelectEvidence}
               />
               <FindingList
                 title="What this does not mean"
                 items={report.what_it_does_not_mean}
-                evidenceById={evidenceById}
+                evidenceByClaim={evidenceByClaim}
                 onSelectEvidence={onSelectEvidence}
               />
             </>
@@ -481,19 +499,19 @@ function ReportView({
           <FindingList
             title="Limitations"
             items={report.limitations}
-            evidenceById={evidenceById}
+            evidenceByClaim={evidenceByClaim}
             onSelectEvidence={onSelectEvidence}
           />
           <FindingList
             title="Where the findings may apply"
             items={report.applicability ?? []}
-            evidenceById={evidenceById}
+            evidenceByClaim={evidenceByClaim}
             onSelectEvidence={onSelectEvidence}
           />
           <FindingList
             title="Questions for further research"
             items={report.future_research ?? []}
-            evidenceById={evidenceById}
+            evidenceByClaim={evidenceByClaim}
             onSelectEvidence={onSelectEvidence}
           />
 
@@ -514,7 +532,8 @@ function ReportView({
                         evidence_level: "reported_in_document",
                         interpretation_type: "summary",
                       },
-                      evidenceById,
+                      term.term,
+                      evidenceByClaim,
                       onSelectEvidence,
                     )}
                   </article>
@@ -714,8 +733,8 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     };
   }, [contextKey, run?.run_id, run?.status, setCurrentRun, setError, workspaceId]);
 
-  const evidenceById = useMemo(
-    () => new Map((run?.evidence ?? []).map((evidence) => [evidence.evidence_id, evidence])),
+  const evidenceIndexes = useMemo(
+    () => buildMedicalInsightEvidenceIndexes(run?.evidence ?? []),
     [run?.evidence],
   );
 
@@ -1047,7 +1066,8 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
           <ReportView
             report={report}
             run={run}
-            evidenceById={evidenceById}
+            evidenceByClaim={evidenceIndexes.byClaim}
+            sourceEvidenceById={evidenceIndexes.bySource}
             onSelectEvidence={setSelectedEvidence}
             onSaveSuggestion={(suggestion) => {
               void clinicianQuestions.saveQuestion({
@@ -1088,7 +1108,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
             workspaceId={workspaceId}
             analysisRunId={run.run_id}
             onEvidenceClick={(evidenceId) => {
-              const evidence = evidenceById.get(evidenceId);
+              const evidence = evidenceIndexes.bySource.get(evidenceId);
               if (evidence) setSelectedEvidence(evidence);
             }}
           />

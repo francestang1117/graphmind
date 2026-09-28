@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from pydantic import ValidationError
 
@@ -526,6 +528,90 @@ def test_extractive_provider_keeps_two_complete_conclusion_sentences_together():
     assert conclusion_row["quoted_text"].endswith(
         "These quantitative measurements may be useful for facilitating diagnosis."
     )
+
+
+@pytest.mark.parametrize(
+    ("source", "statement"),
+    [
+        (
+            "We determined the molecular profiles.\n"
+            "These measurements may be useful.",
+            "We determined the molecular profiles. These measurements may be useful.",
+        ),
+        (
+            "We determined the quantifi-\ncation profiles."
+            " These measurements may be useful.",
+            "We determined the quantification profiles. These measurements may be useful.",
+        ),
+        (
+            "We monitored the later-\nonset group. These measurements may be useful.",
+            "We monitored the later-onset group. These measurements may be useful.",
+        ),
+    ],
+)
+def test_conclusion_citation_matches_whitespace_and_pdf_hyphen_variants(source, statement):
+    context = _context(
+        ("EVIDENCE_001", "conclusion", "placeholder"),
+    )
+    context.evidence[0] = replace(
+        context.evidence[0],
+        text=source,
+        character_end=context.evidence[0].character_start + len(source),
+    )
+    report_payload = _report().model_dump()
+    report_payload["overview"]["evidence_ids"] = ["EVIDENCE_001"]
+    report_payload["key_findings"][0]["evidence_ids"] = ["EVIDENCE_001"]
+    report_payload["authors_conclusions"] = [
+        {
+            "id": "conclusion_001",
+            "statement": statement,
+            "plain_explanation": "This passage is from the conclusion section.",
+            "evidence_ids": ["EVIDENCE_001"],
+            "evidence_level": "reported_in_document",
+            "interpretation_type": "direct_statement",
+        }
+    ]
+    report = MedicalInsightReport.model_validate(report_payload)
+
+    validation = validate_citations(report, context)
+    assert validation.valid, validation.errors
+    row = next(
+        row for row in evidence_rows(report, context)
+        if row["finding_id"] == "conclusion_001"
+    )
+    assert row["quoted_text"] == source
+
+
+def test_conclusion_citation_mismatch_rejects_the_entire_source_chunk():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "conclusion",
+            "The authors reported a conclusion. Conflicts of interest were disclosed separately.",
+        ),
+        ("EVIDENCE_002", "results", "The paper reports a result."),
+    )
+    report_payload = _report().model_dump()
+    report_payload["overview"]["evidence_ids"] = ["EVIDENCE_002"]
+    report_payload["key_findings"][0]["evidence_ids"] = ["EVIDENCE_002"]
+    report_payload["authors_conclusions"] = [
+        {
+            "id": "conclusion_001",
+            "statement": "This sentence is not in the source passage.",
+            "plain_explanation": "This passage is from the conclusion section.",
+            "evidence_ids": ["EVIDENCE_001"],
+            "evidence_level": "reported_in_document",
+            "interpretation_type": "direct_statement",
+        }
+    ]
+    report = MedicalInsightReport.model_validate(report_payload)
+
+    validation = validate_citations(report, context)
+    assert not validation.valid
+    assert any("precise source range" in error for error in validation.errors)
+    rows = evidence_rows(report, context)
+    assert not any(row["finding_id"] == "conclusion_001" for row in rows)
+    assert all("Conflicts of interest" not in row["quoted_text"] for row in rows)
 
 
 def test_extractive_provider_does_not_report_discussion_as_result():
