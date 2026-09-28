@@ -2113,6 +2113,17 @@ button {
   margin: 5px 0 0;
 }
 
+.insight-source-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  max-width: 68ch;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: normal;
+}
+
 .insight-source-link {
   padding: 0;
   border: 0;

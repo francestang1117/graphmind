@@ -155,7 +155,19 @@ function passageExcerpt(evidence: MedicalInsightEvidence) {
     .split(/(?<=[.!?。！？])\s+/)
     .map((part) => part.trim())
     .filter(Boolean);
-  return sentences[0] || sourceText;
+  const firstSentence = sentences[0] || sourceText;
+  if (firstSentence.length <= 180) return firstSentence;
+  return `${firstSentence.slice(0, 177).trimEnd()}…`;
+}
+
+function coverageSummary(coverage: NonNullable<MedicalInsightReport["coverage"]>) {
+  const eligible = coverage.eligible_chunks ?? coverage.total_chunks;
+  const notIncluded = typeof coverage.source_chunks_total === "number"
+    ? Math.max(coverage.source_chunks_total - coverage.selected_chunks, 0)
+    : 0;
+  return `${coverage.selected_chunks} of ${eligible} eligible source chunks included${
+    notIncluded > 0 ? ` · ${notIncluded} not included` : ""
+  }`;
 }
 
 function sampleSizeRows(label: string, value: string) {
@@ -431,7 +443,7 @@ function ReportView({
                 <button type="button" className="insight-source-link" onClick={() => onSelectEvidence(evidence)}>
                   {locationLabel(evidence)}
                 </button>
-                <p>{passageExcerpt(evidence)}</p>
+                <p className="insight-source-summary">{passageExcerpt(evidence)}</p>
                 {passageExcerpt(evidence) !== evidence.quote && (
                   <details className="insight-full-passage">
                     <summary>View full passage</summary>
@@ -446,7 +458,10 @@ function ReportView({
 
       {report.coverage && (
         <details className="insight-report-section insight-details">
-          <summary>Analysis coverage</summary>
+          <summary>
+            Analysis coverage
+            <span className="insight-summary-count">{coverageSummary(report.coverage)}</span>
+          </summary>
           <div className="insight-coverage-grid">
             <span>
               {report.coverage.selected_chunks} of {(report.coverage.eligible_chunks ?? report.coverage.total_chunks)} eligible source chunks included

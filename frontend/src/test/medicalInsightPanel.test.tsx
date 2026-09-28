@@ -31,6 +31,11 @@ const currentRunRequest = Object.assign(new Error("analysis is outdated"), {
   response: { status: 409, data: { code: "analysis_outdated" } },
 });
 
+const noCurrentRunRequest = Object.assign(new Error("analysis has not started"), {
+  isAxiosError: true,
+  response: { status: 404, data: { code: "medical_analysis_not_found" } },
+});
+
 const localConfig = {
   enabled: true,
   configured: true,
@@ -102,6 +107,16 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
     expect(await screen.findByText("Waiting to analyze")).toBeInTheDocument();
     expect(screen.queryByText(/ary Gb3/)).not.toBeInTheDocument();
     expect(screen.queryByText("Objectives The study assessed a biomarker.")).not.toBeInTheDocument();
+  });
+
+  it("shows the analysis entry point when the document has no current run", async () => {
+    api.getCurrentMedicalInsights.mockRejectedValue(noCurrentRunRequest);
+    api.getMedicalInsightConfig.mockResolvedValue(localConfig);
+
+    renderPanel();
+
+    expect(await screen.findByRole("button", { name: "Analyze document" })).toBeInTheDocument();
+    expect(screen.queryByText("Could not load the current medical insight.")).not.toBeInTheDocument();
   });
 
   it("reloads the server configuration before retrying an unavailable outdated analysis", async () => {
@@ -340,7 +355,7 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
     expect(await screen.findByText("Source passages attached")).toBeInTheDocument();
     expect(await screen.findByText("Passages cited in this report")).toBeInTheDocument();
     expect(screen.queryByText("All displayed claims have validated source passages")).not.toBeInTheDocument();
-    expect(screen.getByText("1 of 1 eligible source chunks included")).toBeInTheDocument();
+    expect(screen.getByText("1 of 1 eligible source chunks included · 1 not included")).toBeInTheDocument();
     expect(screen.getByText("2 source chunks scanned before quality and scope filtering")).toBeInTheDocument();
     expect(screen.getByText("1 source chunks excluded for text quality")).toBeInTheDocument();
     expect(screen.getByText("Approximately 3,200 source tokens selected; limit 12,000")).toBeInTheDocument();
