@@ -791,6 +791,55 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
     }
   }, [contextKey, documentId, setCurrentRun, setError, workspaceId]);
 
+  const retryAnalysis = useCallback(async () => {
+    setConfigLoading(true);
+    setError("");
+    try {
+      const latestConfig = await getMedicalInsightConfig();
+      setAnalysisConfig(latestConfig);
+      const consented = latestConfig.requires_confirmation
+        && savedExternalConsent(latestConfig, documentId, workspaceId);
+      setExternalConsent(consented);
+
+      if (!latestConfig.enabled || !latestConfig.configured) {
+        setError("Medical analysis is not configured on the server.");
+        return;
+      }
+
+      const reanalyze = analysisOutdated || pendingReanalysis;
+      if (latestConfig.requires_confirmation && !consented) {
+        setPendingReanalysis(reanalyze);
+        setShowExternalConfirmation(true);
+        return;
+      }
+
+      await executeAnalysis(
+        reanalyze,
+        consented,
+        latestConfig.config_fingerprint,
+      );
+    } catch (requestError: unknown) {
+      if (isApplicationVersionError(requestError)) {
+        setRuntimeErrorState({ contextKey, versions: requestError.versions });
+        setCurrentRun(null);
+        setError("");
+        return;
+      }
+      setError("Could not load the medical analysis configuration.");
+    } finally {
+      setConfigLoading(false);
+    }
+  }, [
+    analysisOutdated,
+    contextKey,
+    documentId,
+    executeAnalysis,
+    pendingReanalysis,
+    setCurrentRun,
+    setError,
+    workspaceId,
+  ]);
+
   const runAnalysis = (reanalyze = false) => {
     if (!analysisConfig?.enabled || !analysisConfig.configured) {
       setError("Medical analysis is not configured on the server.");
@@ -930,7 +979,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
         <div className="parsed-state error" role="alert">
           <AlertCircle size={17} />
           <span>The saved analysis is outdated, and analysis is not available on the server.</span>
-          <button className="insight-retry" type="button" onClick={() => runAnalysis()}>
+          <button className="insight-retry" type="button" onClick={() => void retryAnalysis()}>
             Try again
           </button>
         </div>
@@ -991,7 +1040,7 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
           <AlertCircle size={17} />
           <span>{error}</span>
           {!run && (
-            <button className="insight-retry" type="button" onClick={() => runAnalysis()} disabled={starting}>
+            <button className="insight-retry" type="button" onClick={() => void retryAnalysis()} disabled={starting || configLoading}>
               Try again
             </button>
           )}

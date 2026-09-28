@@ -104,6 +104,28 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
     expect(screen.queryByText("Objectives The study assessed a biomarker.")).not.toBeInTheDocument();
   });
 
+  it("reloads the server configuration before retrying an unavailable outdated analysis", async () => {
+    const user = userEvent.setup();
+    api.getCurrentMedicalInsights.mockRejectedValue(currentRunRequest);
+    api.getMedicalInsightConfig
+      .mockResolvedValueOnce({ ...localConfig, configured: false })
+      .mockResolvedValueOnce(localConfig);
+    api.reanalyzeMedicalInsights.mockResolvedValue(queuedRun());
+
+    renderPanel();
+
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    await user.click(retry);
+
+    await waitFor(() => expect(api.reanalyzeMedicalInsights).toHaveBeenCalledWith(
+      "doc-1",
+      "workspace-1",
+      false,
+      "local-config-v2",
+    ));
+    expect(api.getMedicalInsightConfig).toHaveBeenCalledTimes(2);
+  });
+
   it("requires fresh confirmation before re-running an outdated external analysis", async () => {
     const user = userEvent.setup();
     api.getCurrentMedicalInsights.mockRejectedValue(currentRunRequest);
