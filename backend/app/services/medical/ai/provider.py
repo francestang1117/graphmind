@@ -879,6 +879,15 @@ def _summary(text: str, max_chars: int = 360) -> str:
     normalized = " ".join(str(text or "").split())
     if not normalized:
         return ""
+    # A repeated journal header can be persisted as a normal results chunk,
+    # for example ``Enders et al. Page 6``. It is not a finding, but a narrow
+    # author/page marker should not cause us to discard complete sentences that
+    # happen to cite the same author.
+    if re.fullmatch(
+        r"[A-Z][A-Za-z'’-]+(?:\s+[A-Z][A-Za-z'’-]+)*\s+et\s+al\.?(?:\s+Page\s+\d{1,4})?",
+        normalized,
+    ) or re.fullmatch(r"Page\s+\d{1,4}", normalized, re.I):
+        return ""
     if any(
         first.casefold() == second.casefold() and first != second
         for first, second in re.findall(
@@ -905,7 +914,10 @@ def _summary(text: str, max_chars: int = 360) -> str:
         r"\b[a-z]{2,}-\s+[A-Z][a-z]+", normalized
     ):
         return ""
-    match = re.search(r"[.!?。！？](?:\s|$)", normalized)
+    # Do not treat the period in an author citation such as ``et al.`` as the
+    # end of the source sentence. Otherwise a complete result beginning with
+    # an author citation is reduced to ``Enders et al.``.
+    match = re.search(r"(?<!et al)[.!?。！？](?:\s|$)", normalized, re.I)
     if match and match.end() <= max_chars:
         return normalized[: match.end()].strip()
     if len(normalized) <= max_chars:

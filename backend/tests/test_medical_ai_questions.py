@@ -447,6 +447,27 @@ def test_extractive_provider_does_not_turn_objectives_into_findings():
     assert statements == ["Results Fabry patients had higher biomarker levels."]
 
 
+def test_extractive_provider_does_not_turn_author_page_headers_into_findings():
+    context = _context(
+        ("EVIDENCE_000", "abstract", "This study examined pain responses in Fabry disease."),
+        ("EVIDENCE_001", "results", "Fabry patients had higher pain sensitivity."),
+        ("EVIDENCE_002", "results", "Enders et al. Page 6"),
+        (
+            "EVIDENCE_003",
+            "results",
+            "Enders et al. reported higher pain sensitivity after heat exposure.",
+        ),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    statements = [item["statement"] for item in output["key_findings"]]
+    assert statements == [
+        "Fabry patients had higher pain sensitivity.",
+        "Enders et al. reported higher pain sensitivity after heat exposure.",
+    ]
+
+
 def test_extractive_provider_separates_reported_results_from_authors_conclusions():
     context = _context(
         ("EVIDENCE_000", "abstract", "This study examined biomarkers in Fabry disease."),
