@@ -572,6 +572,74 @@ export interface DiseaseConceptSearchResult {
   items: DiseaseConceptOption[];
 }
 
+export type DiseaseGuideEvidenceStatus =
+  | "established"
+  | "clinical_research"
+  | "early_exploration";
+
+export interface DiseaseGuideSource {
+  id: string;
+  title: string;
+  organization: string;
+  url: string;
+  published_at: string | null;
+  checked_at: string;
+  source_type: "institutional" | "regulatory" | "clinical_registry" | "reference";
+}
+
+export interface DiseaseGuideText {
+  text: string;
+  source_ids: string[];
+}
+
+export interface DiseaseGuidePoint {
+  id: string;
+  text: string;
+  qualifier: string;
+  evidence_status: DiseaseGuideEvidenceStatus;
+  evidence_stage: string;
+  applicability: string;
+  region: string;
+  source_ids: string[];
+}
+
+export interface DiseaseGuideTopic {
+  id: string;
+  title: string;
+  question: string;
+  summary: DiseaseGuideText;
+  key_points: DiseaseGuidePoint[];
+}
+
+export interface DiseaseGuide {
+  schema_version: "disease-guide-v1";
+  concept_id: string;
+  language: "zh-CN" | "en";
+  region: string;
+  region_status: "verified" | "not_verified";
+  region_note: string;
+  reviewed_at: string;
+  title: string;
+  preferred_name_en: string;
+  preferred_name_zh: string;
+  overview: DiseaseGuideText;
+  topics: DiseaseGuideTopic[];
+  sources: DiseaseGuideSource[];
+}
+
+export interface DiseaseGuideSearchItem {
+  concept_id: string;
+  preferred_name_en: string;
+  preferred_name_zh: string;
+  matched_alias: string | null;
+  guide_status: "available" | "preparing";
+  guide_languages: string[];
+}
+
+export interface DiseaseGuideSearchResult {
+  items: DiseaseGuideSearchItem[];
+}
+
 export interface UnassignedDiseaseDocument {
   document_id: string;
   title: string;
@@ -1173,6 +1241,27 @@ export const searchDiseaseConcepts = (
   http
     .get<DiseaseConceptSearchResult>("/disease-profiles/concepts/search", {
       params: { q: query, limit },
+    })
+    .then((r) => r.data);
+
+export const searchDiseaseGuides = (
+  query: string,
+  limit = 20,
+): Promise<DiseaseGuideSearchResult> =>
+  http
+    .get<DiseaseGuideSearchResult>("/disease-guides/concepts/search", {
+      params: { q: query, limit },
+    })
+    .then((r) => r.data);
+
+export const getDiseaseGuide = (
+  conceptId: string,
+  language = "zh-CN",
+  region = "JP",
+): Promise<DiseaseGuide> =>
+  http
+    .get<DiseaseGuide>(`/disease-guides/${encodeURIComponent(conceptId)}`, {
+      params: { language, region },
     })
     .then((r) => r.data);
 

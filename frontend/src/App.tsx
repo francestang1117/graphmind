@@ -3,6 +3,7 @@ import {
   BookOpen,
   ClipboardList,
   CircleHelp,
+  Compass,
   FolderSearch,
   MessageSquare,
   MoreHorizontal,
@@ -22,27 +23,44 @@ import { useAppStore } from "./stores/appStore";
 import { useAuthStore } from "./stores/authStore";
 import VisitPreparationPanel from "./components/VisitPreparationPanel";
 import DiseaseProfilePanel from "./components/DiseaseProfilePanel";
+import DiseaseGuidePage from "./components/DiseaseGuidePage";
 
-type Tab = "upload" | "graph" | "search" | "chat" | "disease-profiles" | "visit-prep";
+type Tab = "explore" | "upload" | "graph" | "search" | "chat" | "disease-profiles" | "visit-prep";
+type NavTab = { id: Tab; label: string; title: string; icon: typeof Upload };
 
-const tabs: Array<{ id: Tab; label: string; title: string; icon: typeof Upload }> = [
-  { id: "upload", label: "Documents", title: "Documents", icon: Upload },
-  { id: "graph", label: "Graph", title: "Knowledge Graph", icon: Network },
-  { id: "search", label: "Search", title: "Semantic Search", icon: Search },
-  { id: "chat", label: "AI Chat", title: "AI Chat", icon: MessageSquare },
-  { id: "disease-profiles", label: "Disease Profiles", title: "Disease Research Profiles", icon: FolderSearch },
-  { id: "visit-prep", label: "Visit Prep", title: "Visit Preparation", icon: ClipboardList },
+const primaryTabs: NavTab[] = [
+  { id: "explore", label: "了解疾病", title: "了解疾病", icon: Compass },
+  { id: "upload", label: "我的资料", title: "我的资料", icon: Upload },
 ];
+
+const researchTabs: NavTab[] = [
+  { id: "disease-profiles", label: "研究依据", title: "Disease Research Profiles", icon: FolderSearch },
+  { id: "search", label: "PubMed 检索", title: "Semantic Search", icon: Search },
+  { id: "graph", label: "知识图谱", title: "Knowledge Graph", icon: Network },
+  { id: "chat", label: "AI Chat", title: "AI Chat", icon: MessageSquare },
+  { id: "visit-prep", label: "就诊准备", title: "Visit Preparation", icon: ClipboardList },
+];
+
+const tabTitles: Record<Tab, string> = {
+  explore: "了解疾病",
+  upload: "我的资料",
+  graph: "Knowledge Graph",
+  search: "Semantic Search",
+  chat: "AI Chat",
+  "disease-profiles": "Disease Research Profiles",
+  "visit-prep": "Visit Preparation",
+};
 
 function App() {
   // Keep tab state local; cross-panel data lives in the small Zustand store.
-  const [activeTab, setActiveTab] = useState<Tab>("upload");
+  const [activeTab, setActiveTab] = useState<Tab>("explore");
   const [authOpen, setAuthOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
-  const { files, backendOnline, setBackendOnline, graphStats, setFiles, setGraphStats, setConversationId } = useAppStore();
+  const { backendOnline, setBackendOnline, setFiles, setGraphStats, setConversationId } = useAppStore();
   const { user, ready: authReady, restore } = useAuthStore();
-  const active = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
+  const visibleWorkspaces = user?.id ? workspaces : [];
+  const visibleWorkspaceId = user?.id ? activeWorkspaceId : null;
 
   useEffect(() => {
     checkHealth()
@@ -67,7 +85,7 @@ function App() {
   }, [user?.id, setFiles, setGraphStats, setConversationId]);
 
   useEffect(() => {
-    if (!authReady) return undefined;
+    if (!authReady || !user?.id) return undefined;
 
     let cancelled = false;
     listWorkspaces()
@@ -98,70 +116,50 @@ function App() {
           <div className="kw-logo">
             <Zap size={21} />
           </div>
-          <span>KnowledgeWeave</span>
+          <span>GraphMind</span>
         </div>
 
         <nav className="kw-nav" aria-label="Primary">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                className={`kw-nav-item ${activeTab === tab.id ? "active" : ""}`}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                <Icon size={24} />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
+          {primaryTabs.map((tab) => <NavItem key={tab.id} tab={tab} activeTab={activeTab} onSelect={setActiveTab} />)}
+          <div className="kw-nav-section">
+            <span className="kw-nav-section-label">研究工具</span>
+            {researchTabs.map((tab) => <NavItem key={tab.id} tab={tab} activeTab={activeTab} onSelect={setActiveTab} />)}
+          </div>
         </nav>
 
         <div className="kw-side-footer">
-          <div className={`kw-status ${backendOnline ? "online" : "offline"}`}>
-            <span />
-            {backendOnline ? "Backend online" : "Backend offline"}
-          </div>
-          <div className="kw-stats">
-            <div>
-              <strong>{graphStats?.total_nodes ?? 24}</strong>
-              <span>nodes</span>
+          <details className="kw-developer-tools">
+            <summary>开发者</summary>
+            <div className={`kw-status ${backendOnline ? "online" : "offline"}`}>
+              <span />
+              {backendOnline ? "Backend online" : "Backend offline"}
             </div>
-            <div>
-              <strong>{graphStats?.total_edges ?? 18}</strong>
-              <span>edges</span>
-            </div>
-            <div>
-              <strong>{files.length}</strong>
-              <span>docs</span>
-            </div>
-          </div>
+            <a href="http://localhost:8000/docs" target="_blank" rel="noreferrer">
+              <BookOpen size={14} /> API docs
+            </a>
+          </details>
         </div>
       </aside>
 
       <main className="kw-main">
         <header className="kw-topbar">
-          <h1>{active.title}</h1>
+          <h1>{tabTitles[activeTab]}</h1>
           <div className="kw-top-actions">
             {(activeTab === "visit-prep" || activeTab === "disease-profiles") && (
               <label className="kw-workspace-picker">
-                <span>Research project</span>
-                <select
-                  aria-label="Research project"
-                  value={activeWorkspaceId ?? ""}
-                  onChange={(event) => setActiveWorkspaceId(event.target.value || null)}
-                >
-                  {workspaces.length === 0 && <option value="">No projects</option>}
-                  {workspaces.map((workspace) => (
+                  <span>Research project</span>
+                  <select
+                    aria-label="Research project"
+                    value={visibleWorkspaceId ?? ""}
+                    onChange={(event) => setActiveWorkspaceId(event.target.value || null)}
+                  >
+                  {visibleWorkspaces.length === 0 && <option value="">No projects</option>}
+                  {visibleWorkspaces.map((workspace) => (
                     <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
                   ))}
                 </select>
               </label>
             )}
-            <a className="kw-doc-button" href="http://localhost:8000/docs" target="_blank">
-              <BookOpen size={18} />
-              View docs
-            </a>
             <AuthControl onSignIn={() => setAuthOpen(true)} />
             <button className="kw-icon-button" aria-label="Help">
               <CircleHelp size={20} />
@@ -174,6 +172,12 @@ function App() {
 
         <section className="kw-content">
           <div className="kw-workspace" key={user?.id ?? "local-dev"}>
+            {activeTab === "explore" && (
+              <DiseaseGuidePage
+                onOpenMySources={() => setActiveTab("upload")}
+                onOpenResearch={() => setActiveTab("disease-profiles")}
+              />
+            )}
             {activeTab === "upload" && <UploadPanel />}
             {activeTab === "graph" && <GraphPanel />}
             {activeTab === "search" && <SearchPanel />}
@@ -196,6 +200,28 @@ function App() {
       </main>
       <AuthDialog open={authOpen} onClose={() => setAuthOpen(false)} />
     </div>
+  );
+}
+
+function NavItem({
+  tab,
+  activeTab,
+  onSelect,
+}: {
+  tab: NavTab;
+  activeTab: Tab;
+  onSelect: (tab: Tab) => void;
+}) {
+  const Icon = tab.icon;
+  return (
+    <button
+      type="button"
+      className={`kw-nav-item ${activeTab === tab.id ? "active" : ""}`}
+      onClick={() => onSelect(tab.id)}
+    >
+      <Icon size={20} />
+      <span>{tab.label}</span>
+    </button>
   );
 }
 
