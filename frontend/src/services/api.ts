@@ -151,6 +151,7 @@ export interface MedicalInsightEvidence {
   character_start?: number | null;
   character_end?: number | null;
   excerpt?: string;
+  source_text?: string;
   quality_score?: number;
   quality_flags?: string[];
 }

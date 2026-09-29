@@ -2003,14 +2003,39 @@ button {
 }
 
 .insight-details summary {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding-left: 18px;
   color: var(--text);
   font-size: 16px;
   font-weight: 650;
   cursor: pointer;
+}
+
+.insight-details > summary {
+  list-style: none;
+}
+
+.insight-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.insight-details > summary::before {
+  position: absolute;
+  left: 0;
+  color: var(--soft);
+  content: ">";
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  transform: translateY(-1px);
+}
+
+.insight-details[open] > summary::before {
+  content: "v";
 }
 
 .insight-summary-count {
@@ -2334,8 +2359,8 @@ button {
 }
 
 .insight-finding-heading strong {
-  font-weight: 520;
-  line-height: 1.6;
+  font-weight: 500;
+  line-height: 1.55;
 }
 
 .insight-term strong {
@@ -2732,6 +2757,11 @@ button {
   border-top: 1px solid var(--line);
   border-radius: 0;
   background: transparent;
+}
+
+.medical-insight-panel > .literature-evidence-panel {
+  border-top: 0;
+  padding-top: 20px;
 }
 
 .literature-panel-header,

@@ -161,13 +161,15 @@ function passageExcerpt(evidence: MedicalInsightEvidence) {
 }
 
 function coverageSummary(coverage: NonNullable<MedicalInsightReport["coverage"]>) {
-  const eligible = coverage.eligible_chunks ?? coverage.total_chunks;
-  const notIncluded = typeof coverage.source_chunks_total === "number"
-    ? Math.max(coverage.source_chunks_total - coverage.selected_chunks, 0)
-    : 0;
-  return `${coverage.selected_chunks} of ${eligible} eligible source chunks included${
-    notIncluded > 0 ? ` · ${notIncluded} not included` : ""
-  }`;
+  const eligible = coverage.eligible_chunks || coverage.total_chunks;
+  if (coverage.selected_chunks === eligible) {
+    return `All ${eligible} eligible passages included`;
+  }
+  return `${coverage.selected_chunks} of ${eligible} eligible passages included`;
+}
+
+function countLabel(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 function sampleSizeRows(label: string, value: string) {
@@ -332,7 +334,11 @@ function ReportView({
   const unavailableMethods = methodFields.filter(([, , item]) =>
     !item?.value?.trim() || item?.support_status === "not_reported",
   );
-  const sourcePassages = [...sourceEvidenceById.values()];
+  const sourcePassages = [...sourceEvidenceById.values()].map((evidence) => ({
+    evidence,
+    fullPassage: evidence.source_text?.trim() || evidence.quote,
+    preview: passageExcerpt(evidence),
+  }));
   const processingWarnings = visibleProcessingWarnings(run.warnings);
   const hasAdditionalAnalysis = Boolean(
     report.limitations.length
@@ -438,16 +444,16 @@ function ReportView({
         <details className="insight-report-section insight-details">
           <summary>Passages cited in this report <span className="insight-summary-count">{sourcePassages.length}</span></summary>
           <ol className="insight-source-passages">
-            {sourcePassages.map((evidence) => (
+            {sourcePassages.map(({ evidence, fullPassage, preview }) => (
               <li key={evidence.evidence_id}>
                 <button type="button" className="insight-source-link" onClick={() => onSelectEvidence(evidence)}>
                   {locationLabel(evidence)}
                 </button>
-                <p className="insight-source-summary">{passageExcerpt(evidence)}</p>
-                {passageExcerpt(evidence) !== evidence.quote && (
+                <p className="insight-source-summary">{preview}</p>
+                {preview !== fullPassage && (
                   <details className="insight-full-passage">
                     <summary>View full passage</summary>
-                    <p>{evidence.quote}</p>
+                    <p>{fullPassage}</p>
                   </details>
                 )}
               </li>
@@ -463,23 +469,20 @@ function ReportView({
             <span className="insight-summary-count">{coverageSummary(report.coverage)}</span>
           </summary>
           <div className="insight-coverage-grid">
-            <span>
-              {report.coverage.selected_chunks} of {(report.coverage.eligible_chunks ?? report.coverage.total_chunks)} eligible source chunks included
-            </span>
             {Boolean(report.coverage.source_chunks_total) && (
-              <span>{report.coverage.source_chunks_total} source chunks scanned before quality and scope filtering</span>
+              <span>{countLabel(report.coverage.source_chunks_total ?? 0, "source passage")} scanned</span>
             )}
             {Boolean(report.coverage.quality_filtered_chunks) && (
-              <span>{report.coverage.quality_filtered_chunks} source chunks excluded for text quality</span>
+              <span>{countLabel(report.coverage.quality_filtered_chunks ?? 0, "source passage")} excluded for text quality</span>
             )}
             {Boolean(report.coverage.scope_excluded_chunks) && (
-              <span>{report.coverage.scope_excluded_chunks} source chunks excluded by evidence scope</span>
+              <span>{countLabel(report.coverage.scope_excluded_chunks ?? 0, "source passage")} excluded by evidence scope</span>
             )}
             {Boolean(report.coverage.duplicate_chunks) && (
-              <span>{report.coverage.duplicate_chunks} duplicate source chunks removed</span>
+              <span>{countLabel(report.coverage.duplicate_chunks ?? 0, "duplicate source passage")} removed</span>
             )}
             {Boolean(report.coverage.budget_excluded_chunks) && (
-              <span>{report.coverage.budget_excluded_chunks} eligible chunks not included because of the context limit</span>
+              <span>{countLabel(report.coverage.budget_excluded_chunks ?? 0, "eligible passage")} not included because of the context limit</span>
             )}
             <span>
               Approximately {report.coverage.selected_tokens.toLocaleString()} source tokens selected; limit {report.coverage.max_input_tokens.toLocaleString()}
@@ -1177,7 +1180,9 @@ export default function MedicalInsightPanel({ documentId, title, workspaceId, on
             }}
           />
           <p className="insight-disclaimer">
-            AI-generated document explanation only. It is not a diagnosis or treatment recommendation.
+            {run.provider === "extractive"
+              ? "This report selects and links passages from the source document. It is not medical advice."
+              : "AI-generated document explanation only. It is not a diagnosis or treatment recommendation."}
           </p>
         </>
       )}

@@ -16,6 +16,7 @@ from app.core.database import SessionLocal, db_enabled
 from app.core.config import settings
 from app.core.workspace import default_workspace_id
 from app.services.medical.ai.citation_validator import evidence_rows
+from app.services.medical.ai.context_builder import redact_sensitive_fields
 from app.services.medical.ai.exceptions import MedicalInsightError
 from app.services.medical.ai.question_templates import normalize_saved_question_payload
 from app.services.medical.ai.models import MedicalInsightReport
@@ -942,6 +943,24 @@ def _run_payload(db, row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
         .where(MedicalAnalysisEvidenceRecord.run_id == row.id)
         .order_by(MedicalAnalysisEvidenceRecord.finding_id, MedicalAnalysisEvidenceRecord.id)
     ).all()
+    chunk_ids = {item.chunk_id for item in evidence if item.chunk_id}
+    source_text_by_chunk_id: dict[str, str] = {}
+    if chunk_ids:
+        chunks = db.scalars(
+            select(ParsedChunkRecord)
+            .where(
+                ParsedChunkRecord.id.in_(chunk_ids),
+                ParsedChunkRecord.document_id == row.document_id,
+                ParsedChunkRecord.user_id == row.user_id,
+                ParsedChunkRecord.workspace_id == row.workspace_id,
+            )
+        ).all()
+        for chunk in chunks:
+            source_text = chunk.text or ""
+            if row.redact_pii:
+                source_text, _ = redact_sensitive_fields(source_text)
+            if source_text.strip():
+                source_text_by_chunk_id[chunk.id] = source_text
     payload["evidence"] = [
         {
             "id": item.id,
@@ -954,7 +973,10 @@ def _run_payload(db, row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
             "page_start": item.page_start,
             "page_end": item.page_end,
             "quote": item.quoted_text,
-            "excerpt": _evidence_excerpt(item.quoted_text),
+            "excerpt": _evidence_excerpt(
+                source_text_by_chunk_id.get(item.chunk_id, item.quoted_text)
+            ),
+            "source_text": source_text_by_chunk_id.get(item.chunk_id),
             "character_start": item.character_start,
             "character_end": item.character_end,
             "quality_score": item.quality_score,

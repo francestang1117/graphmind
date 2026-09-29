@@ -297,6 +297,12 @@ def test_pdf_reparse_and_reopen_only_returns_new_readable_analysis(tmp_path, mon
     assert "Author Two" not in population
     assert report["study_methods"]["what_was_measured"]["support_status"] == "supported"
     assert report["study_methods"]["human_animal_in_vitro"]["support_status"] == "not_reported"
+    assert reopened["evidence"]
+    assert all(evidence.get("source_text") for evidence in reopened["evidence"])
+    assert all(
+        evidence["quote"] in evidence["source_text"]
+        for evidence in reopened["evidence"]
+    )
 
     reopened_again = asyncio.run(
         medical_insights.get_current_medical_insights(

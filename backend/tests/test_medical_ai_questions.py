@@ -318,6 +318,35 @@ def test_question_citations_support_and_safety_are_checked_like_other_report_con
     assert not validate_safety(unsafe).valid
 
 
+def test_evidence_rows_handles_medical_terms_with_methods_and_questions():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "population",
+            "The study included adults with the condition and measured Gb3.",
+        )
+    )
+    report_payload = _structured_report(_question()).model_dump()
+    report_payload["medical_terms"] = [
+        {
+            "term": "Gb3",
+            "explanation": "Gb3 is a lipid biomarker.",
+            "evidence_ids": ["EVIDENCE_001"],
+        }
+    ]
+    report = MedicalInsightReport.model_validate(report_payload)
+
+    validation = validate_citations(report, context)
+    rows = evidence_rows(report, context)
+
+    assert validation.valid, validation.errors
+    assert {row["finding_id"] for row in rows} >= {
+        "Gb3",
+        "study_methods.population",
+        "question:question_001",
+    }
+
+
 def test_extractable_finding_citations_are_bounded_to_the_claim_sentence():
     context = _context(
         (

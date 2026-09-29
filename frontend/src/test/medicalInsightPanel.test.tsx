@@ -355,10 +355,63 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
     expect(await screen.findByText("Source passages attached")).toBeInTheDocument();
     expect(await screen.findByText("Passages cited in this report")).toBeInTheDocument();
     expect(screen.queryByText("All displayed claims have validated source passages")).not.toBeInTheDocument();
-    expect(screen.getByText("1 of 1 eligible source chunks included · 1 not included")).toBeInTheDocument();
-    expect(screen.getByText("2 source chunks scanned before quality and scope filtering")).toBeInTheDocument();
-    expect(screen.getByText("1 source chunks excluded for text quality")).toBeInTheDocument();
+    expect(screen.getByText("All 1 eligible passages included")).toBeInTheDocument();
+    expect(screen.getByText("2 source passages scanned")).toBeInTheDocument();
+    expect(screen.getByText("1 source passage excluded for text quality")).toBeInTheDocument();
     expect(screen.getByText("Approximately 3,200 source tokens selected; limit 12,000")).toBeInTheDocument();
+  });
+
+  it("labels eligible passages separately when the context budget excludes some", async () => {
+    api.getCurrentMedicalInsights.mockResolvedValue({
+      ...queuedRun(),
+      status: "succeeded",
+      report: {
+        schema_version: "medical-insights-v3",
+        document_kind: "research_paper",
+        language: "en",
+        overview: {
+          title: "Fabry disease biomarker study",
+          summary: "The study examined biomarkers in adults with Fabry disease.",
+          study_type: "Research paper",
+          evidence_ids: [],
+        },
+        study_methods: {},
+        key_findings: [],
+        authors_conclusions: [],
+        limitations: [],
+        medical_terms: [],
+        what_it_means: [],
+        what_it_does_not_mean: [],
+        applicability: [],
+        future_research: [],
+        question_suggestions: [],
+        questions_for_professional: [],
+        warnings: [],
+        coverage: {
+          complete: false,
+          selected_chunks: 1,
+          total_chunks: 2,
+          source_chunks_total: 4,
+          eligible_chunks: 2,
+          quality_filtered_chunks: 1,
+          scope_excluded_chunks: 1,
+          duplicate_chunks: 0,
+          budget_excluded_chunks: 1,
+          selected_tokens: 12000,
+          max_input_tokens: 12000,
+          included_sections: ["results"],
+          omitted_sections: ["discussion"],
+        },
+      },
+      evidence: [],
+    });
+    api.getMedicalInsightConfig.mockResolvedValue(localConfig);
+
+    renderPanel();
+
+    expect(await screen.findByText("1 of 2 eligible passages included")).toBeInTheDocument();
+    expect(screen.getByText("4 source passages scanned")).toBeInTheDocument();
+    expect(screen.getByText("1 eligible passage not included because of the context limit")).toBeInTheDocument();
   });
 
   it("opens the citation range belonging to each claim when source ids are shared", async () => {
@@ -438,6 +491,69 @@ describe("MedicalInsightPanel outdated analysis recovery", () => {
 
     await user.click(within(secondClaim.closest("article") as HTMLElement).getByRole("button", { name: /Page 1.*Results/i }));
     expect(within(screen.getByRole("complementary")).getByText("The second claim source range.")).toBeInTheDocument();
+  });
+
+  it("opens the exact overview sentence when the scope passage starts with background", async () => {
+    api.getCurrentMedicalInsights.mockResolvedValue({
+      ...queuedRun(),
+      status: "succeeded",
+      report: {
+        schema_version: "medical-insights-v3",
+        document_kind: "research_paper",
+        language: "en",
+        overview: {
+          title: "Fabry disease biomarker study",
+          summary: "The present study determined biomarker profiles across clinical phenotypes.",
+          study_type: "Research paper",
+          evidence_ids: ["EVIDENCE_SCOPE"],
+        },
+        study_methods: {},
+        key_findings: [],
+        authors_conclusions: [],
+        limitations: [],
+        medical_terms: [],
+        what_it_means: [],
+        what_it_does_not_mean: [],
+        applicability: [],
+        future_research: [],
+        question_suggestions: [],
+        questions_for_professional: [],
+        warnings: ["extractive_output"],
+      },
+      evidence: [{
+        id: "row-overview",
+        evidence_id: "EVIDENCE_SCOPE",
+        finding_id: "overview",
+        chunk_id: "chunk-scope",
+        section_id: "section-scope",
+        section_type: "scope",
+        section_title: "Scope",
+        quote: "The present study determined biomarker profiles across clinical phenotypes.",
+        excerpt: "The disease is characterized by biomarker accumulation. The present study determined biomarker profiles across clinical phenotypes.",
+        source_text: "The disease is characterized by biomarker accumulation. The present study determined biomarker profiles across clinical phenotypes.",
+        page_start: 1,
+      }],
+    });
+    api.getMedicalInsightConfig.mockResolvedValue(localConfig);
+
+    const user = userEvent.setup();
+    renderPanel();
+
+    const overview = await screen.findByRole("heading", { name: "About this paper" });
+    const overviewSection = overview.closest("section") as HTMLElement;
+    await user.click(within(overviewSection).getByRole("button", { name: /Page 1.*Scope/i }));
+
+    const source = within(screen.getByRole("complementary"));
+    const quote = source.getByText("The present study determined biomarker profiles across clinical phenotypes.");
+    expect(quote).toBeInTheDocument();
+    expect(quote).toHaveTextContent(
+      "The present study determined biomarker profiles across clinical phenotypes.",
+    );
+    expect(quote).not.toHaveTextContent(
+      "The disease is characterized by biomarker accumulation.",
+    );
+    await user.click(screen.getByText("View full passage"));
+    expect(screen.getByText("The disease is characterized by biomarker accumulation. The present study determined biomarker profiles across clinical phenotypes.")).toBeInTheDocument();
   });
 
   it("shows each processing note only once", async () => {
