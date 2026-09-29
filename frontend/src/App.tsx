@@ -57,10 +57,22 @@ function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceInfo[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
+  const [loadedWorkspaceScope, setLoadedWorkspaceScope] = useState<string | null>(null);
   const { backendOnline, setBackendOnline, setFiles, setGraphStats, setConversationId } = useAppStore();
   const { user, ready: authReady, restore } = useAuthStore();
-  const visibleWorkspaces = user?.id ? workspaces : [];
-  const visibleWorkspaceId = user?.id ? activeWorkspaceId : null;
+  const needsWorkspace = activeTab === "disease-profiles" || activeTab === "visit-prep";
+  const workspaceScope = `${activeTab}:${user?.id ?? "guest"}:${workspaceEpoch}`;
+  const workspaceIsCurrent = loadedWorkspaceScope === workspaceScope;
+  const visibleWorkspaces = workspaceIsCurrent ? workspaces : [];
+  const visibleWorkspaceId = workspaceIsCurrent ? activeWorkspaceId : null;
+
+  const selectTab = (tab: Tab) => {
+    if (needsWorkspace || tab === "disease-profiles" || tab === "visit-prep") {
+      setWorkspaceEpoch((current) => current + 1);
+    }
+    setActiveTab(tab);
+  };
 
   useEffect(() => {
     checkHealth()
@@ -85,13 +97,15 @@ function App() {
   }, [user?.id, setFiles, setGraphStats, setConversationId]);
 
   useEffect(() => {
-    if (!authReady || !user?.id) return undefined;
+    if (!authReady) return undefined;
+    if (!needsWorkspace) return undefined;
 
     let cancelled = false;
     listWorkspaces()
       .then((items) => {
         if (cancelled) return;
         setWorkspaces(items);
+        setLoadedWorkspaceScope(workspaceScope);
         setActiveWorkspaceId((current) => (
           current && items.some((item) => item.id === current)
             ? current
@@ -101,13 +115,14 @@ function App() {
       .catch(() => {
         if (!cancelled) {
           setWorkspaces([]);
+          setLoadedWorkspaceScope(workspaceScope);
           setActiveWorkspaceId(null);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [authReady, user?.id]);
+  }, [authReady, needsWorkspace, user?.id, workspaceScope]);
 
   return (
     <div className="kw-shell">
@@ -120,10 +135,10 @@ function App() {
         </div>
 
         <nav className="kw-nav" aria-label="Primary">
-          {primaryTabs.map((tab) => <NavItem key={tab.id} tab={tab} activeTab={activeTab} onSelect={setActiveTab} />)}
+          {primaryTabs.map((tab) => <NavItem key={tab.id} tab={tab} activeTab={activeTab} onSelect={selectTab} />)}
           <div className="kw-nav-section">
             <span className="kw-nav-section-label">研究工具</span>
-            {researchTabs.map((tab) => <NavItem key={tab.id} tab={tab} activeTab={activeTab} onSelect={setActiveTab} />)}
+            {researchTabs.map((tab) => <NavItem key={tab.id} tab={tab} activeTab={activeTab} onSelect={selectTab} />)}
           </div>
         </nav>
 
