@@ -5963,6 +5963,16 @@ button {
 
 .disease-guide-next-step { align-items: center; margin-top: 57px; }
 .disease-guide-next-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 9px; }
+.disease-guide-sources { max-width: 860px; margin-top: 43px; padding-top: 27px; border-top: 1px solid var(--line); scroll-margin-top: 24px; }
+.disease-guide-sources-intro { max-width: 68ch; margin: -2px 0 24px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.disease-guide-source-groups { display: grid; gap: 26px; }
+.disease-guide-source-group h4 { margin: 0 0 9px; color: var(--text); font-size: 14px; }
+.disease-guide-source-list { display: grid; gap: 0; }
+.disease-guide-source-item { display: grid; gap: 4px; padding: 12px 0; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.disease-guide-source-item:last-child { border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.disease-guide-source-item a { display: inline-flex; align-items: center; gap: 5px; width: fit-content; max-width: 100%; color: var(--blue); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.disease-guide-source-item a:hover { text-decoration: underline; }
+.disease-guide-source-item span { color: var(--soft); font-size: 12px; line-height: 1.5; }
 .disease-guide-loading { padding: 40px 0; color: var(--muted); font-size: 14px; }
 .disease-guide-empty-state { display: grid; justify-items: start; gap: 11px; max-width: 560px; margin: 80px auto; color: var(--blue); }
 .disease-guide-empty-state h2 { margin: 0; color: var(--text); font-size: 24px; }
@@ -6000,5 +6010,6 @@ button {
   .disease-guide-primary-action,
   .disease-guide-secondary-action { width: 100%; }
   .disease-guide-next-actions { width: 100%; }
+  .disease-guide-sources { margin-top: 37px; padding-top: 23px; }
   .disease-guide-source-drawer { padding: 22px 18px; }
 }

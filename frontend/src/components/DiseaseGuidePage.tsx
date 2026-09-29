@@ -5,7 +5,6 @@ import type { DiseaseGuidePoint, DiseaseGuideSearchItem, DiseaseGuideSource } fr
 
 interface DiseaseGuidePageProps {
   onOpenMySources: () => void;
-  onOpenResearch: () => void;
 }
 
 const FABRY_CONCEPT_ID = "mesh:D000795";
@@ -16,7 +15,23 @@ const evidenceLabels: Record<DiseaseGuidePoint["evidence_status"], string> = {
   early_exploration: "早期探索",
 };
 
-function DiseaseGuidePage({ onOpenMySources, onOpenResearch }: DiseaseGuidePageProps) {
+const sourceGroupDefinitions: Array<{
+  label: string;
+  types: DiseaseGuideSource["source_type"][];
+}> = [
+  { label: "疾病基础资料", types: ["institutional", "reference"] },
+  { label: "日本药品资料", types: ["regulatory"] },
+  { label: "研究登记", types: ["clinical_registry"] },
+];
+
+function scrollToGuideSources() {
+  const target = document.getElementById("disease-guide-sources");
+  if (target && typeof target.scrollIntoView === "function") {
+    target.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+}
+
+function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
   const [query, setQuery] = useState("");
   const [selectedConcept, setSelectedConcept] = useState<DiseaseGuideSearchItem | null>(null);
   const [openSourceId, setOpenSourceId] = useState<string | null>(null);
@@ -120,7 +135,9 @@ function DiseaseGuidePage({ onOpenMySources, onOpenResearch }: DiseaseGuidePageP
           <BookOpen size={30} />
           <h2>{selectedConcept.preferred_name_zh || selectedConcept.preferred_name_en}</h2>
           <p>我们已识别这个疾病概念，但公共指南正在准备中。现在可以先使用研究工具查看自己的资料。</p>
-          <button type="button" className="disease-guide-primary-action" onClick={onOpenResearch}>打开研究工具</button>
+          <button type="button" className="disease-guide-primary-action" onClick={onOpenMySources}>
+            <Upload size={16} /> 查看我的资料
+          </button>
         </section>
       </div>
     );
@@ -204,16 +221,58 @@ function DiseaseGuidePage({ onOpenMySources, onOpenResearch }: DiseaseGuidePageP
           <section className="disease-guide-next-step">
             <div>
               <span className="disease-guide-section-kicker">下一步</span>
-              <h3>想核对论文和原文？</h3>
-              <p>研究依据会把具体论文、研究对象和可定位的原文放在一起；它与这份公共指南分开管理。</p>
+              <h3>想核对这份指南的依据？</h3>
+              <p>先查看本指南使用的机构资料、药品资料和研究登记；需要整理自己的论文时，再进入我的资料。</p>
             </div>
             <div className="disease-guide-next-actions">
-              <button type="button" className="disease-guide-primary-action" onClick={onOpenResearch}>
-                <BookOpen size={16} /> 查看研究依据
+              <button
+                type="button"
+                className="disease-guide-primary-action"
+                onClick={scrollToGuideSources}
+              >
+                <BookOpen size={16} /> 查看本指南参考资料
               </button>
               <button type="button" className="disease-guide-secondary-action" onClick={onOpenMySources}>
                 <Upload size={16} /> 上传自己的资料
               </button>
+            </div>
+          </section>
+
+          <section
+            id="disease-guide-sources"
+            className="disease-guide-sources"
+            aria-labelledby="disease-guide-sources-title"
+          >
+            <div className="disease-guide-section-heading">
+              <div>
+                <span className="disease-guide-section-kicker">可核查</span>
+                <h3 id="disease-guide-sources-title">本指南参考资料</h3>
+              </div>
+              <span className="disease-guide-topic-count">{guideQuery.data.sources.length} 项来源</span>
+            </div>
+            <p className="disease-guide-sources-intro">
+              每条说明都来自下列公开资料。打开原始来源可查看完整内容和最新版本。
+            </p>
+            <div className="disease-guide-source-groups">
+              {sourceGroupDefinitions.map((group) => {
+                const sources = guideQuery.data.sources.filter((source) => group.types.includes(source.source_type));
+                if (sources.length === 0) return null;
+                return (
+                  <div className="disease-guide-source-group" key={group.label}>
+                    <h4>{group.label}</h4>
+                    <div className="disease-guide-source-list">
+                      {sources.map((source) => (
+                        <article className="disease-guide-source-item" key={source.id}>
+                          <a href={source.url} target="_blank" rel="noreferrer">
+                            {source.title} <ExternalLink size={13} aria-hidden="true" />
+                          </a>
+                          <span>{source.organization} · 核查至 {source.checked_at}</span>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
 

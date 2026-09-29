@@ -88,7 +88,6 @@ describe("DiseaseGuidePage", () => {
   it("starts with disease search and opens a source-backed public guide", async () => {
     const user = userEvent.setup();
     const onOpenMySources = vi.fn();
-    const onOpenResearch = vi.fn();
     api.searchDiseaseGuides.mockResolvedValue({
       items: [{
         concept_id: "mesh:D000795",
@@ -102,7 +101,7 @@ describe("DiseaseGuidePage", () => {
     api.getDiseaseGuide.mockResolvedValue(guide);
 
     render(
-      <DiseaseGuidePage onOpenMySources={onOpenMySources} onOpenResearch={onOpenResearch} />,
+      <DiseaseGuidePage onOpenMySources={onOpenMySources} />,
       { wrapper },
     );
 
@@ -123,8 +122,9 @@ describe("DiseaseGuidePage", () => {
     expect(screen.getByRole("link", { name: /打开原始来源/ })).toHaveAttribute("href", source.url);
 
     await user.click(screen.getByRole("button", { name: "关闭来源" }));
-    await user.click(screen.getByRole("button", { name: /查看研究依据/ }));
-    expect(onOpenResearch).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: /查看本指南参考资料/ }));
+    expect(screen.getByRole("heading", { name: "本指南参考资料" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Fabry disease/ })).toHaveAttribute("href", source.url);
     await user.click(screen.getByRole("button", { name: /上传自己的资料/ }));
     expect(onOpenMySources).toHaveBeenCalledTimes(1);
   });
@@ -142,12 +142,15 @@ describe("DiseaseGuidePage", () => {
       }],
     });
 
-    render(<DiseaseGuidePage onOpenMySources={vi.fn()} onOpenResearch={vi.fn()} />, { wrapper });
+    const onOpenMySources = vi.fn();
+    render(<DiseaseGuidePage onOpenMySources={onOpenMySources} />, { wrapper });
     await user.type(screen.getByPlaceholderText("搜索疾病名称，例如：法布雷病"), "糖尿病");
     await user.click((await screen.findAllByRole("button", { name: /糖尿病 Diabetes Mellitus/ }))[0]);
 
     expect(await screen.findByText(/公共指南正在准备中/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "打开研究工具" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "查看我的资料" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "查看我的资料" }));
+    expect(onOpenMySources).toHaveBeenCalledTimes(1);
     expect(api.getDiseaseGuide).not.toHaveBeenCalled();
   });
 
@@ -156,7 +159,7 @@ describe("DiseaseGuidePage", () => {
     api.getDiseaseGuide.mockResolvedValue(guide);
 
     render(
-      <DiseaseGuidePage onOpenMySources={vi.fn()} onOpenResearch={vi.fn()} />,
+      <DiseaseGuidePage onOpenMySources={vi.fn()} />,
       { wrapper },
     );
     await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));

@@ -34,7 +34,7 @@ const primaryTabs: NavTab[] = [
 ];
 
 const researchTabs: NavTab[] = [
-  { id: "disease-profiles", label: "研究依据", title: "Disease Research Profiles", icon: FolderSearch },
+  { id: "disease-profiles", label: "我的研究项目", title: "我的研究项目", icon: FolderSearch },
   { id: "search", label: "PubMed 检索", title: "Semantic Search", icon: Search },
   { id: "graph", label: "知识图谱", title: "Knowledge Graph", icon: Network },
   { id: "chat", label: "AI Chat", title: "AI Chat", icon: MessageSquare },
@@ -175,7 +175,6 @@ function App() {
             {activeTab === "explore" && (
               <DiseaseGuidePage
                 onOpenMySources={() => setActiveTab("upload")}
-                onOpenResearch={() => setActiveTab("disease-profiles")}
               />
             )}
             {activeTab === "upload" && <UploadPanel />}
