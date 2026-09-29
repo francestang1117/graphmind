@@ -134,6 +134,78 @@ def test_citations_require_current_evidence_and_reject_references():
     assert any("unknown evidence id" in error for error in unknown.errors)
 
 
+def test_citation_rows_handle_terms_methods_and_questions_without_term_quote_matching():
+    source_text = "The study included adults with the condition. The study measured Gb3."
+    context = AnalysisContext(
+        title="Example paper",
+        document_kind="research_paper",
+        language="en",
+        evidence=[
+            EvidenceItem(
+                evidence_id="EVIDENCE_001",
+                chunk_id="chunk-1",
+                section_id="section-1",
+                section_type="methods",
+                section_title="Methods",
+                page_start=1,
+                page_end=1,
+                character_start=0,
+                character_end=len(source_text),
+                text=source_text,
+                token_count=10,
+                source_index=1,
+            )
+        ],
+    )
+    payload = _report("EVIDENCE_001").model_dump()
+    payload["medical_terms"] = [
+        {
+            "term": "Gb3",
+            # This phrase is present in the source, but the explanation is a
+            # user-facing definition rather than an extractive claim.
+            "explanation": "measured Gb3",
+            "evidence_ids": ["EVIDENCE_001"],
+        }
+    ]
+    payload["study_methods"] = {
+        "population": {
+            "value": "The study included adults with the condition.",
+            "support_status": "supported",
+            "evidence_ids": ["EVIDENCE_001"],
+        }
+    }
+    payload["question_suggestions"] = [
+        {
+            "id": "question_001",
+            "question": "Which people were included in this study?",
+            "rationale": "The source describes the study population.",
+            "category": "applicability",
+            "topic": "study_population",
+            "source_kind": "study_methods",
+            "source_id": "population",
+            "evidence_ids": ["EVIDENCE_001"],
+            "interpretation_type": "inference",
+        }
+    ]
+    report = MedicalInsightReport.model_validate(payload)
+
+    validation = validate_citations(report, context)
+    rows = evidence_rows(report, context)
+    rows_by_id = {row["finding_id"]: row for row in rows}
+
+    assert validation.valid, validation.errors
+    assert {
+        "Gb3",
+        "study_methods.population",
+        "question:question_001",
+    } <= rows_by_id.keys()
+    assert rows_by_id["study_methods.population"]["quoted_text"] == (
+        "The study included adults with the condition."
+    )
+    assert rows_by_id["Gb3"]["quoted_text"] == source_text
+    assert rows_by_id["question:question_001"]["quoted_text"] == source_text
+
+
 def test_safety_validator_rejects_personal_treatment_instructions():
     payload = _report("EVIDENCE_001").model_dump()
     payload["key_findings"] = [

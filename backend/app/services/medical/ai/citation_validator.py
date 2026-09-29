@@ -223,10 +223,6 @@ def _claim_statement(report: MedicalInsightReport, finding_id: str) -> str:
             if item.id == finding_id:
                 return item.statement
 
-    for item in report.medical_terms:
-        if item.term == finding_id:
-            return item.explanation
-
     for field_name, item in report.study_methods.model_dump().items():
         if finding_id == f"study_methods.{field_name}":
             return str(item.get("value") or "")
