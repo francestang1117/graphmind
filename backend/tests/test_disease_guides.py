@@ -2,16 +2,27 @@
 
 import asyncio
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 import pytest
 from pydantic import ValidationError
 
+from app.api.endpoints import disease_guides
 from app.api.endpoints.disease_guides import (
     get_disease_guide,
     search_disease_guide_concepts,
 )
-from app.core.errors import AppError
+from app.core.errors import AppError, register_error_handlers
 from app.services.medical.disease_guide.models import DiseaseGuide
 from app.services.medical.disease_guide.repository import load_guides
+
+
+@pytest.fixture()
+def public_guide_client() -> TestClient:
+    app = FastAPI()
+    register_error_handlers(app)
+    app.include_router(disease_guides.router, prefix="/api/v1")
+    return TestClient(app)
 
 
 def test_fabry_guide_has_sources_and_review_dates_for_every_claim() -> None:
@@ -78,15 +89,31 @@ def test_public_guide_does_not_require_a_workspace_or_private_documents() -> Non
     assert "analyses" not in payload
 
 
-def test_unverified_region_is_explicitly_marked_instead_of_inventing_approval_status() -> None:
-    guide = asyncio.run(
-        get_disease_guide("mesh:D000795", language="zh-CN", region="US")
+def test_direct_service_path_rejects_unsupported_region() -> None:
+    with pytest.raises(AppError) as exc:
+        asyncio.run(
+            get_disease_guide("mesh:D000795", language="zh-CN", region="US")
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.code == "guide_region_not_available"
+
+
+def test_public_guide_http_region_is_explicitly_limited_to_japan(public_guide_client) -> None:
+    japan = public_guide_client.get(
+        "/api/v1/disease-guides/mesh%3AD000795",
+        params={"language": "zh-CN", "region": "JP"},
+    )
+    united_states = public_guide_client.get(
+        "/api/v1/disease-guides/mesh%3AD000795",
+        params={"language": "zh-CN", "region": "US"},
     )
 
-    assert guide.region == "US"
-    assert guide.region_status == "not_verified"
-    assert "US" in guide.region_note
-    assert "未知" in guide.region_note
+    assert japan.status_code == 200
+    assert japan.json()["region"] == "JP"
+    assert united_states.status_code == 422
+    assert united_states.json()["code"] == "guide_region_not_available"
+    assert united_states.json()["details"]["available_regions"] == ["JP"]
 
 
 def test_known_disease_without_a_guide_returns_a_preparing_state() -> None:

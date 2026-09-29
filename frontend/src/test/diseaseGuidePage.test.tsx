@@ -150,4 +150,19 @@ describe("DiseaseGuidePage", () => {
     expect(screen.getByRole("button", { name: "打开研究工具" })).toBeInTheDocument();
     expect(api.getDiseaseGuide).not.toHaveBeenCalled();
   });
+
+  it("does not offer an unverified region selector for Japan-only treatment information", async () => {
+    const user = userEvent.setup();
+    api.getDiseaseGuide.mockResolvedValue(guide);
+
+    render(
+      <DiseaseGuidePage onOpenMySources={vi.fn()} onOpenResearch={vi.fn()} />,
+      { wrapper },
+    );
+    await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));
+
+    expect(await screen.findByText("治疗信息按日本资料核查")).toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: "地区" })).not.toBeInTheDocument();
+    expect(api.getDiseaseGuide).toHaveBeenCalledWith("mesh:D000795", "zh-CN", "JP");
+  });
 });

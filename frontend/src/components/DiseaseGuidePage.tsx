@@ -20,12 +20,11 @@ function DiseaseGuidePage({ onOpenMySources, onOpenResearch }: DiseaseGuidePageP
   const [query, setQuery] = useState("");
   const [selectedConcept, setSelectedConcept] = useState<DiseaseGuideSearchItem | null>(null);
   const [openSourceId, setOpenSourceId] = useState<string | null>(null);
-  const [region, setRegion] = useState("JP");
   const searchQuery = useDiseaseGuideSearch(query);
   const guideQuery = useDiseaseGuide(
     selectedConcept?.guide_status === "available" ? selectedConcept.concept_id : null,
     "zh-CN",
-    region,
+    "JP",
   );
   const selectedSource = useMemo<DiseaseGuideSource | null>(() => {
     if (!guideQuery.data || !openSourceId) return null;
@@ -42,13 +41,11 @@ function DiseaseGuidePage({ onOpenMySources, onOpenResearch }: DiseaseGuidePageP
       guide_languages: ["zh-CN"],
     });
     setOpenSourceId(null);
-    setRegion("JP");
   };
 
   const selectConcept = (concept: DiseaseGuideSearchItem) => {
     setSelectedConcept(concept);
     setOpenSourceId(null);
-    setRegion("JP");
   };
 
   if (!selectedConcept) {
@@ -150,21 +147,8 @@ function DiseaseGuidePage({ onOpenMySources, onOpenResearch }: DiseaseGuidePageP
             <p>先了解基本概念、可能影响和治疗方向，再进入研究依据查看论文与原文。</p>
             <div className="disease-guide-meta">
               <span><ShieldCheck size={14} /> 内容核查至 {guideQuery.data.reviewed_at}</span>
-              <span className={guideQuery.data.region_status === "verified" ? "verified" : "unverified"}>
-                {guideQuery.data.region_status === "verified" ? "日本资料已核对" : "当地监管状态未核对"}
-              </span>
-              <label className="disease-guide-region-picker">
-                <span>地区</span>
-                <select value={region} onChange={(event) => setRegion(event.target.value)}>
-                  <option value="JP">日本</option>
-                  <option value="US">美国</option>
-                  <option value="EU">欧盟/其他</option>
-                </select>
-              </label>
+              <span className="verified">治疗信息按日本资料核查</span>
             </div>
-            {guideQuery.data.region_status === "not_verified" && (
-              <p className="disease-guide-region-note">{guideQuery.data.region_note}</p>
-            )}
           </header>
 
           <section className="disease-guide-overview" aria-labelledby="disease-guide-overview-title">

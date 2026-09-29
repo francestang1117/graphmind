@@ -12,20 +12,9 @@ class DiseaseGuideService:
         guide = disease_guide_repository.get(concept_id, language)
         if guide is None:
             return None
-        requested_region = region.strip().upper()
-        if not requested_region or requested_region == guide.region.upper():
-            return guide
-
-        return guide.model_copy(
-            update={
-                "region": requested_region,
-                "region_status": "not_verified",
-                "region_note": (
-                    f"治疗和监管信息目前只按 {guide.region.upper()} 资料核对；"
-                    f"{requested_region} 的批准状态未知，请核对当地监管机构。"
-                ),
-            }
-        )
+        if region.strip().upper() != guide.region.upper():
+            return None
+        return guide
 
     def concept_exists(self, concept_id: str) -> bool:
         return disease_guide_repository.concept_exists(concept_id)
