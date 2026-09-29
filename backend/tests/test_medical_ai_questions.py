@@ -318,6 +318,23 @@ def test_question_citations_support_and_safety_are_checked_like_other_report_con
     assert not validate_safety(unsafe).valid
 
 
+def test_extractable_finding_citations_are_bounded_to_the_claim_sentence():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "results",
+            "Enders et al. Page 6 The paper reports a result. "
+            "A later sentence belongs to the same source chunk.",
+        )
+    )
+
+    report = _report()
+    rows = evidence_rows(report, context)
+    finding_row = next(row for row in rows if row["finding_id"] == "finding_001")
+
+    assert finding_row["quoted_text"] == "The paper reports a result."
+
+
 @pytest.mark.parametrize(
     "question",
     [

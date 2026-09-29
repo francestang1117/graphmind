@@ -147,16 +147,17 @@ def _citation_span(
     finding_id: str,
     item: EvidenceItem,
 ) -> tuple[str, int | None, int | None] | None:
-    """Keep conclusion citations inside the conclusion, not its disclosure tail."""
+    """Prefer an exact claim range while preserving safe fallback behavior."""
     conclusion = next(
         (entry for entry in report.authors_conclusions if entry.id == finding_id),
         None,
     )
-    if conclusion is None:
+    statement = _claim_statement(report, finding_id)
+    if not statement:
         return item.text, item.character_start, item.character_end
 
     source, offsets = _normalized_with_offsets(item.text)
-    statement = " ".join(conclusion.statement.split()).strip()
+    statement = " ".join(statement.split()).strip()
     start = source.find(statement)
     if not statement or start < 0:
         source, offsets = _normalized_with_offsets(
@@ -164,7 +165,7 @@ def _citation_span(
             remove_soft_hyphens=True,
         )
         statement = _normalized_for_match(
-            conclusion.statement,
+            statement,
             remove_soft_hyphens=True,
         )
         start = source.find(statement)
@@ -174,12 +175,20 @@ def _citation_span(
             compact_hyphen_spacing=True,
         )
         statement = _normalized_for_match(
-            conclusion.statement,
+            statement,
             compact_hyphen_spacing=True,
         )
         start = source.find(statement)
     if not statement or start < 0:
-        return None
+        # Conclusion claims must fail closed because their chunk can contain
+        # disclosures or references. Other claim types may be provider
+        # summaries, so keep their existing whole-chunk fallback when an
+        # exact extractive range is unavailable.
+        return (
+            None
+            if conclusion is not None
+            else (item.text, item.character_start, item.character_end)
+        )
 
     end = start + len(statement)
     raw_start = offsets[start]
@@ -195,6 +204,30 @@ def _citation_span(
         else item.character_end
     )
     return item.text[raw_start:raw_end], character_start, character_end
+
+
+def _claim_statement(report: MedicalInsightReport, finding_id: str) -> str:
+    if finding_id == "overview":
+        return report.overview.summary
+
+    for field_name in (
+        "key_findings",
+        "authors_conclusions",
+        "limitations",
+        "what_it_means",
+        "what_it_does_not_mean",
+        "applicability",
+        "future_research",
+        "medical_terms",
+    ):
+        for item in getattr(report, field_name):
+            if item.id == finding_id:
+                return item.statement
+
+    for field_name, item in report.study_methods.model_dump().items():
+        if finding_id == f"study_methods.{field_name}":
+            return str(item.get("value") or "")
+    return ""
 
 
 def _normalized_with_offsets(
