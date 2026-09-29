@@ -433,6 +433,28 @@ def test_extractive_provider_rejects_author_names_as_population_evidence():
     assert "15 classic Fabry men" not in population["value"]
 
 
+def test_extractive_provider_prefers_animal_cohort_over_neuron_eligibility_text():
+    context = _context(
+        (
+            "EVIDENCE_001",
+            "methods",
+            "Neurons were included in analyses if they responded to either the experimental stimulus or 50 mM KCl.",
+        ),
+        (
+            "EVIDENCE_002",
+            "methods",
+            "Both male and female Fabry rats were used throughout experimentation.",
+        ),
+    )
+
+    output = ExtractiveMedicalAIProvider().generate("prompt", context)
+
+    population = output["study_methods"]["population"]
+    assert population["support_status"] == "supported"
+    assert "Fabry rats" in population["value"]
+    assert "Neurons were included" not in population["value"]
+
+
 def test_extractive_provider_does_not_turn_objectives_into_findings():
     context = _context(
         ("EVIDENCE_001", "abstract", "Objectives The study assessed a biomarker."),
@@ -454,6 +476,11 @@ def test_extractive_provider_does_not_turn_author_page_headers_into_findings():
         ("EVIDENCE_002", "results", "Enders et al. Page 6"),
         (
             "EVIDENCE_003",
+            "results",
+            "Enders et al. Page 6 Fabry disease, we compared pain sensitivity after heat exposure.",
+        ),
+        (
+            "EVIDENCE_004",
             "results",
             "Enders et al. reported higher pain sensitivity after heat exposure.",
         ),

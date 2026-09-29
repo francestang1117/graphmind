@@ -416,6 +416,18 @@ _CJK_SUBJECT_MARKERS = re.compile(
     r"患者|受试者|人类|人体|动物|小鼠|大鼠|体外|细胞系|"
     r"组织样本|组织切片|肿瘤组织|病理组织|组织培养|组织学"
 )
+_ANIMAL_POPULATION_EVIDENCE = re.compile(
+    r"\b(?:rats?|mice|animals?|rabbits?|monkeys?)\b"
+    r"[^.!?]{0,100}\b(?:were|was)\s+"
+    r"(?:used|included|studied|tested|assigned|exposed)\b"
+    r"|\b(?:were|was)\s+(?:used|included|studied|tested|assigned|exposed)\b"
+    r"[^.!?]{0,100}\b(?:rats?|mice|animals?|rabbits?|monkeys?)\b",
+    re.I,
+)
+_NEURON_ONLY_EVIDENCE = re.compile(
+    r"\bneurons?\b|\b(?:DRG|soma)\b|\bKCl\b|\bcalcium imaging\b",
+    re.I,
+)
 
 
 def _population_marker_found(text: str) -> bool:
@@ -439,10 +451,13 @@ def _population_sentence_supported(text: str) -> bool:
     value = str(text or "").strip()
     if not value or _looks_like_author_metadata(value):
         return False
+    if _NEURON_ONLY_EVIDENCE.search(value) and not _ENGLISH_SUBJECT_MARKERS.search(value):
+        return False
     return bool(
         _POPULATION_COUNT_EVIDENCE.search(value)
         or _POPULATION_GROUP_EVIDENCE.search(value)
         or _CJK_POPULATION_GROUP_EVIDENCE.search(value)
+        or _ANIMAL_POPULATION_EVIDENCE.search(value)
     )
 
 
@@ -878,6 +893,25 @@ def _question_suggestion(
 def _summary(text: str, max_chars: int = 360) -> str:
     normalized = " ".join(str(text or "").split())
     if not normalized:
+        return ""
+    normalized = re.sub(
+        r"^[A-Z][A-Za-z'’-]+(?:\s+[A-Z][A-Za-z'’-]+)*\s+et\s+al\.?\s+Page\s+\d{1,4}\s+",
+        "",
+        normalized,
+        count=1,
+        flags=re.I,
+    )
+    if not normalized:
+        return ""
+    if re.match(
+        r"^[A-Z][A-Za-z'’-]+(?:\s+[A-Za-z][A-Za-z'’-]+){0,5},\s+"
+        r"(?:we|and|but|while|because)\b",
+        normalized,
+        re.I,
+    ):
+        # A page break can leave the tail of a sentence after a repeated
+        # header, such as ``Fabry disease, we compared ...``. It is not safe
+        # to present that fragment as an independent reported result.
         return ""
     # A repeated journal header can be persisted as a normal results chunk,
     # for example ``Enders et al. Page 6``. It is not a finding, but a narrow
