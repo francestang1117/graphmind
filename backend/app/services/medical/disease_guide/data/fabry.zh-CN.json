@@ -126,10 +126,10 @@
           "region": "JP",
           "source_ids": ["genereviews-fabry", "pmda-fabrazyme"]
         },
-        {
-          "id": "treatment-chaperone",
-          "text": "分子伴侣治疗可用于部分携带特定、对药物有反应的 GLA 变异的成人患者；并非所有患者都符合条件。",
-          "qualifier": "日本监管资料中的适用条件需要结合确认的 GLA 变异和医生评估；其他地区状态未知。",
+      {
+        "id": "treatment-chaperone",
+        "text": "在日本，米加拉司他是一种针对特定、对药物有反应的 GLA 基因变异的治疗选择。现行说明书涵盖成人和 12 岁以上儿童，但是否符合条件还需要核对基因变异及其他因素。",
+        "qualifier": "儿童使用需要特别考虑体重；12 岁以上 16 岁以下且体重低于 45 kg 的儿童未纳入相关临床试验。日本以外的批准状态未知。",
           "evidence_status": "established",
           "evidence_stage": "已用于临床；适用条件受标签限制",
           "applicability": "地区批准、年龄和变异适用性都应以当地最新说明书为准。",
@@ -222,7 +222,7 @@
       "id": "pmda-galafold",
       "title": "Galafold package information",
       "organization": "Japan PMDA",
-      "url": "https://www.pmda.go.jp/drugs/2022/P20221213001/112604000_23000AMX00463_B100_1.pdf",
+      "url": "https://www.pmda.go.jp/PmdaSearch/rdDetail/iyaku/3999045M1028_1?user=1",
       "published_at": null,
       "checked_at": "2026-09-30",
       "source_type": "regulatory"

@@ -32,6 +32,21 @@ def test_fabry_guide_has_sources_and_review_dates_for_every_claim() -> None:
                 assert point.region == "JP"
 
 
+def test_fabry_chaperone_entry_uses_current_japan_scope_and_label() -> None:
+    guide = load_guides()[("mesh:D000795", "zh-CN")]
+    treatment = next(topic for topic in guide.topics if topic.id == "treatments")
+    chaperone = next(point for point in treatment.key_points if point.id == "treatment-chaperone")
+    source = next(source for source in guide.sources if source.id == "pmda-galafold")
+
+    assert str(source.url) == "https://www.pmda.go.jp/PmdaSearch/rdDetail/iyaku/3999045M1028_1?user=1"
+    assert "成人和 12 岁以上儿童" in chaperone.text
+    assert "特定" in chaperone.text
+    assert "GLA" in chaperone.text
+    assert "体重" in chaperone.qualifier
+    assert "45 kg" in chaperone.qualifier
+    assert source.checked_at == guide.reviewed_at
+
+
 def test_guide_rejects_a_claim_that_references_an_unknown_source() -> None:
     payload = load_guides()[("mesh:D000795", "zh-CN")].model_dump(mode="json")
     payload["overview"]["source_ids"] = ["source-that-does-not-exist"]
