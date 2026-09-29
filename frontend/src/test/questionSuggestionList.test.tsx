@@ -7,16 +7,18 @@ import type {
   MedicalInsightReport,
   MedicalQuestionSuggestion,
 } from "../services/api";
+import { buildMedicalInsightEvidenceIndexes } from "../components/upload/medical/evidenceIndex";
 
 function evidence(
   evidenceId: string,
   pageStart: number,
   sectionTitle: string,
+  findingId = "question:question-1",
 ): MedicalInsightEvidence {
   return {
     id: `row-${evidenceId}`,
     evidence_id: evidenceId,
-    finding_id: "finding-1",
+    finding_id: findingId,
     chunk_id: `chunk-${evidenceId}`,
     section_id: "section-1",
     section_type: "results",
@@ -72,16 +74,19 @@ function report(
 
 function renderList(
   currentReport: MedicalInsightReport,
-  evidenceById = new Map<string, MedicalInsightEvidence>([
+  sourceEvidenceById = new Map<string, MedicalInsightEvidence>([
     ["EVIDENCE_001", evidence("EVIDENCE_001", 3, "Results")],
     ["EVIDENCE_002", evidence("EVIDENCE_002", 5, "Limitations")],
   ]),
 ) {
   const onSelectEvidence = vi.fn();
+  const evidenceByClaim = buildMedicalInsightEvidenceIndexes(
+    [...sourceEvidenceById.values()],
+  ).byClaim;
   render(
     <QuestionSuggestionList
       report={currentReport}
-      evidenceById={evidenceById}
+      evidenceByClaim={evidenceByClaim}
       onSelectEvidence={onSelectEvidence}
     />,
   );
@@ -130,6 +135,48 @@ describe("QuestionSuggestionList", () => {
     await user.click(screen.getByRole("button", { name: /Page 5.*Limitations/i }));
 
     expect(onSelectEvidence).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps claim-specific excerpts separate when claims share an evidence id", async () => {
+    const first = evidence("EVIDENCE_SHARED", 3, "Results", "question:question-1");
+    const second = {
+      ...first,
+      id: "row-second",
+      finding_id: "question:question-2",
+      quote: "The second claim has a different source range.",
+    };
+    const evidenceByClaim = buildMedicalInsightEvidenceIndexes([first, second]).byClaim;
+    const onSelectEvidence = vi.fn();
+    render(
+      <QuestionSuggestionList
+        report={report({
+          question_suggestions: [
+            suggestion({ evidence_ids: ["EVIDENCE_SHARED"] }),
+            suggestion({
+              id: "question-2",
+              question: "What should I clarify about the reported result?",
+              evidence_ids: ["EVIDENCE_SHARED"],
+            }),
+          ],
+        })}
+        evidenceByClaim={evidenceByClaim}
+        onSelectEvidence={onSelectEvidence}
+      />,
+    );
+
+    const user = userEvent.setup();
+    const sourceButtons = screen.getAllByRole("button", { name: /Page 3.*Results/i });
+    await user.click(sourceButtons[0]);
+    await user.click(sourceButtons[1]);
+
+    expect(onSelectEvidence.mock.calls[0][0]).toMatchObject({
+      finding_id: "question:question-1",
+      quote: "Source passage for EVIDENCE_SHARED",
+    });
+    expect(onSelectEvidence.mock.calls[1][0]).toMatchObject({
+      finding_id: "question:question-2",
+      quote: "The second claim has a different source range.",
+    });
   });
 
   it("copies the question and rationale in a readable format", async () => {
@@ -184,21 +231,21 @@ describe("QuestionSuggestionList", () => {
     }));
 
     expect(screen.getByText("What should I discuss with a professional?")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Questions to discuss with a healthcare professional" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Questions for your clinician" })).toBeInTheDocument();
   });
 
   it("does not show legacy questions in a V3 report", () => {
     renderList(report({ questions_for_professional: ["Uncited legacy question."] }));
 
     expect(screen.queryByText("Uncited legacy question.")).not.toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Questions to discuss with a healthcare professional" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Questions for your clinician" })).not.toBeInTheDocument();
   });
 
   it("returns no section when both question formats are empty", () => {
     const { container } = render(
       <QuestionSuggestionList
         report={report()}
-        evidenceById={new Map()}
+        evidenceByClaim={new Map()}
         onSelectEvidence={vi.fn()}
       />,
     );

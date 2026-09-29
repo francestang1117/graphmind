@@ -45,9 +45,19 @@ Rules:
   needs at least one Evidence ID. If the source does not say something, omit it
   or state that it was not found; do not fill it from general knowledge.
 - Keep direct statements, summaries, inferences, and uncertainty distinct.
-- Fill study_methods with design, population, human/animal/in-vitro status,
-  sample size, and comparator. Use support_status=not_reported and the exact
+- Put measured observations from results or outcomes in ``key_findings``.
+  Put statements from a conclusion section in ``authors_conclusions`` instead;
+  preserve uncertainty such as "may be useful" and do not present an authors'
+  interpretation as a measured result.
+- Fill study_methods with design, population, what_was_measured, sample size,
+  and comparator. ``what_was_measured`` must name an explicitly measured
+  analyte, specimen, biomarker, outcome, or other object; it is not a
+  human/animal/in-vitro classification. Use support_status=not_reported and the exact
   text "Not reported in the selected source evidence." when absent.
+- Keep ``population`` focused on the named study groups and analysis cohorts;
+  do not repeat every group count there when ``sample_size`` can carry those
+  counts. Use ``sample_size`` for the group-by-group numbers and keep
+  ``comparator`` focused on the comparison groups.
 - Explain applicability separately from findings. Add future_research items
   only for open questions or next steps stated or directly supported by the
   document; do not invent a research agenda.

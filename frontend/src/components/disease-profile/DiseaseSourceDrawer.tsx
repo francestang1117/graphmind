@@ -91,8 +91,22 @@ export default function DiseaseSourceDrawer({
         {item.explanation && <p className="disease-source-explanation">{item.explanation}</p>}
         {item.value && <p className="disease-source-main-text"><strong>{item.title}: </strong>{item.value}</p>}
         {item.question && <p className="disease-source-main-text"><strong>{item.question}</strong></p>}
+        {item.evidence_truncated && (
+          <p className="disease-profile-warning">
+            Showing {item.evidence.length} of {item.evidence_total} evidence sources.
+          </p>
+        )}
         {item.evidence.map((source) => (
-          <article className="disease-source-quote" key={`${source.evidence_id ?? source.external_id}:${source.section_title}`}>
+          <article
+            className="disease-source-quote"
+            key={[
+              source.document_id ?? "no-document",
+              source.analysis_run_id ?? "no-run",
+              source.evidence_id ?? source.external_id ?? "no-evidence",
+              source.section_title,
+              source.page_start ?? "no-page",
+            ].join(":")}
+          >
             <div className="disease-source-quote-meta">
               <span>{source.document_title || source.source || "Source"}</span>
               {source.page_start && <span>Page {source.page_start}{source.page_end && source.page_end !== source.page_start ? `–${source.page_end}` : ""}</span>}

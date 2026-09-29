@@ -14,6 +14,7 @@ from app.api.endpoints.documents_with_markdown import (
     document_summary,
     get_cached_parse,
     parse_document_file,
+    pdf_parser_refresh_required,
 )
 from app.core.config import settings
 from app.core.database import db_enabled
@@ -201,7 +202,7 @@ async def get_parsed_document(
         raise HTTPException(status_code=404, detail="File not found")
 
     parsed = get_cached_parse(filename, user_id, workspace_id)
-    if not parsed:
+    if not parsed or pdf_parser_refresh_required(filename, metadata, parsed):
         try:
             parsed = parse_document_file(
                 filename,
@@ -262,7 +263,11 @@ async def get_medical_analysis(
     if not metadata:
         raise HTTPException(status_code=404, detail="File not found")
 
-    analysis = medical_repository.get_analysis(
+    parsed = get_cached_parse(metadata["filename"], user_id, scope)
+    requires_parser_refresh = pdf_parser_refresh_required(
+        metadata["filename"], metadata, parsed
+    )
+    analysis = None if requires_parser_refresh else medical_repository.get_analysis(
         metadata.get("document_id", identifier),
         user_id=user_id,
         workspace_id=scope,
@@ -271,9 +276,9 @@ async def get_medical_analysis(
         return analysis
 
     # A cache-only setup can still serve an analysis that was generated before
-    # database persistence was enabled.
-    parsed = get_cached_parse(metadata["filename"], user_id, scope)
-    if not parsed:
+    # database persistence was enabled. A PDF parser upgrade must take the
+    # same path so its new source hash can stale the old analysis safely.
+    if not parsed or requires_parser_refresh:
         try:
             parsed = parse_document_file(
                 metadata["filename"],

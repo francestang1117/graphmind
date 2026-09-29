@@ -17,6 +17,14 @@ _REFERENCE_SECTION_TYPES = {
     "reference_list",
     "references_and_bibliography",
 }
+_NON_MEDICAL_SECTION_TYPES = _REFERENCE_SECTION_TYPES | {
+    "supplementary",
+    "acknowledgements",
+    "acknowledgments",
+    "funding",
+    "author_contributions",
+    "conflicts_of_interest",
+}
 
 
 @dataclass
@@ -53,8 +61,22 @@ def validate_citations(
                 item_valid = False
                 continue
             cited.add(evidence_id)
-            if _section_key(source.section_type) in _REFERENCE_SECTION_TYPES:
-                errors.append(f"{label} cites a references section")
+            source_section = _section_key(source.section_type)
+            if source_section in _NON_MEDICAL_SECTION_TYPES:
+                errors.append(
+                    f"{label} cites a references section"
+                    if source_section in _REFERENCE_SECTION_TYPES
+                    else f"{label} cites a non-medical section"
+                )
+                item_valid = False
+                continue
+            if (
+                getattr(item, "id", None) in _author_conclusion_ids(report)
+                and _citation_span(report, item.id, source) is None
+            ):
+                errors.append(
+                    f"{label} could not be matched to a precise source range"
+                )
                 item_valid = False
         if item_valid:
             supported_items += 1
@@ -86,12 +108,20 @@ def evidence_rows(
     for finding_id, evidence_ids in _report_citations(report):
         for evidence_id in evidence_ids:
             item = by_id.get(evidence_id)
-            if not item or _section_key(item.section_type) in _REFERENCE_SECTION_TYPES:
+            if not item or _section_key(item.section_type) in _NON_MEDICAL_SECTION_TYPES:
                 continue
             key = (finding_id, evidence_id)
             if key in seen:
                 continue
             seen.add(key)
+            span = _citation_span(
+                report,
+                finding_id,
+                item,
+            )
+            if span is None:
+                continue
+            quoted_text, character_start, character_end = span
             rows.append(
                 {
                     "finding_id": finding_id,
@@ -102,12 +132,155 @@ def evidence_rows(
                     "section_title": item.section_title,
                     "page_start": item.page_start,
                     "page_end": item.page_end,
-                    "quoted_text": item.text,
-                    "character_start": item.character_start,
-                    "character_end": item.character_end,
+                    "quoted_text": quoted_text,
+                    "character_start": character_start,
+                    "character_end": character_end,
+                    "quality_score": item.quality_score,
+                    "quality_flags": list(item.quality_flags),
                 }
             )
     return rows
+
+
+def _citation_span(
+    report: MedicalInsightReport,
+    finding_id: str,
+    item: EvidenceItem,
+) -> tuple[str, int | None, int | None] | None:
+    """Prefer an exact claim range while preserving safe fallback behavior."""
+    conclusion = next(
+        (entry for entry in report.authors_conclusions if entry.id == finding_id),
+        None,
+    )
+    statement = _claim_statement(report, finding_id)
+    if not statement:
+        return item.text, item.character_start, item.character_end
+
+    source, offsets = _normalized_with_offsets(item.text)
+    statement = " ".join(statement.split()).strip()
+    start = source.find(statement)
+    if not statement or start < 0:
+        source, offsets = _normalized_with_offsets(
+            item.text,
+            remove_soft_hyphens=True,
+        )
+        statement = _normalized_for_match(
+            statement,
+            remove_soft_hyphens=True,
+        )
+        start = source.find(statement)
+    if start < 0:
+        source, offsets = _normalized_with_offsets(
+            item.text,
+            compact_hyphen_spacing=True,
+        )
+        statement = _normalized_for_match(
+            statement,
+            compact_hyphen_spacing=True,
+        )
+        start = source.find(statement)
+    if not statement or start < 0:
+        # Conclusion claims must fail closed because their chunk can contain
+        # disclosures or references. Other claim types may be provider
+        # summaries, so keep their existing whole-chunk fallback when an
+        # exact extractive range is unavailable.
+        return (
+            None
+            if conclusion is not None
+            else (item.text, item.character_start, item.character_end)
+        )
+
+    end = start + len(statement)
+    raw_start = offsets[start]
+    raw_end = offsets[end - 1] + 1
+    character_start = (
+        item.character_start + raw_start
+        if item.character_start is not None
+        else None
+    )
+    character_end = (
+        item.character_start + raw_end
+        if item.character_start is not None
+        else item.character_end
+    )
+    return item.text[raw_start:raw_end], character_start, character_end
+
+
+def _claim_statement(report: MedicalInsightReport, finding_id: str) -> str:
+    if finding_id == "overview":
+        return report.overview.summary
+
+    for field_name in (
+        "key_findings",
+        "authors_conclusions",
+        "limitations",
+        "what_it_means",
+        "what_it_does_not_mean",
+        "applicability",
+        "future_research",
+    ):
+        for item in getattr(report, field_name):
+            if item.id == finding_id:
+                return item.statement
+
+    for field_name, item in report.study_methods.model_dump().items():
+        if finding_id == f"study_methods.{field_name}":
+            return str(item.get("value") or "")
+    return ""
+
+
+def _normalized_with_offsets(
+    text: str,
+    *,
+    remove_soft_hyphens: bool = False,
+    compact_hyphen_spacing: bool = False,
+) -> tuple[str, list[int]]:
+    """Normalize source text while retaining offsets into the raw text."""
+    characters: list[str] = []
+    offsets: list[int] = []
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if remove_soft_hyphens and character == "-":
+            next_index = index + 1
+            if next_index < len(text) and text[next_index].isspace():
+                index = next_index
+                while index < len(text) and text[index].isspace():
+                    index += 1
+                continue
+        if character.isspace():
+            if compact_hyphen_spacing and characters and characters[-1] == "-":
+                index += 1
+                continue
+            if characters and characters[-1] != " ":
+                characters.append(" ")
+                offsets.append(index)
+            index += 1
+            continue
+        characters.append(character)
+        offsets.append(index)
+        index += 1
+    if characters and characters[-1] == " ":
+        characters.pop()
+        offsets.pop()
+    return "".join(characters), offsets
+
+
+def _normalized_for_match(
+    text: str,
+    *,
+    remove_soft_hyphens: bool = False,
+    compact_hyphen_spacing: bool = False,
+) -> str:
+    return _normalized_with_offsets(
+        text,
+        remove_soft_hyphens=remove_soft_hyphens,
+        compact_hyphen_spacing=compact_hyphen_spacing,
+    )[0]
+
+
+def _author_conclusion_ids(report: MedicalInsightReport) -> set[str]:
+    return {item.id for item in report.authors_conclusions}
 
 
 def _core_items(
@@ -116,6 +289,7 @@ def _core_items(
     yield "overview", report.overview, report.overview.evidence_ids
     for field_name in (
         "key_findings",
+        "authors_conclusions",
         "limitations",
         "what_it_means",
         "what_it_does_not_mean",
@@ -137,6 +311,7 @@ def _report_citations(report: MedicalInsightReport) -> Iterable[tuple[str, list[
     yield "overview", report.overview.evidence_ids
     for field_name in (
         "key_findings",
+        "authors_conclusions",
         "limitations",
         "what_it_means",
         "what_it_does_not_mean",

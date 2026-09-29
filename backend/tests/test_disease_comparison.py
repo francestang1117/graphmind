@@ -264,6 +264,24 @@ def test_builder_preserves_document_order_and_all_five_methods():
     assert not any("contrad" in warning.lower() for warning in preview.warnings)
 
 
+def test_builder_merges_repeated_template_questions_across_documents():
+    preview = build_comparison_preview(
+        concept_id="mesh:D000795",
+        inputs=[_input("doc-1"), _input("doc-2")],
+        language="en",
+    )
+
+    population_questions = [
+        question
+        for question in preview.discussion_questions
+        if question.topic == "population"
+    ]
+    assert len(population_questions) == 1
+    assert population_questions[0].document_ids == ["doc-1", "doc-2"]
+    assert population_questions[0].analysis_run_ids == ["run-doc-1", "run-doc-2"]
+    assert len(population_questions[0].evidence) == 2
+
+
 def test_builder_marks_missing_coverage_unknown_and_not_reported_without_evidence():
     record = _input("doc-1")
     record["analyses"][0]["report"]["study_methods"]["comparator"] = {
@@ -279,7 +297,7 @@ def test_builder_marks_missing_coverage_unknown_and_not_reported_without_evidenc
 
     document = preview.documents[0]
     assert document.coverage_status == "unknown"
-    assert document.methods.comparator.value == "所选分析证据未报告此字段。"
+    assert document.methods.comparator.value == "原文证据说明该字段未报告。"
     assert document.methods.comparator.evidence == []
     assert "comparison_coverage_unknown" in preview.warnings
 
@@ -418,8 +436,13 @@ def test_builder_reports_valid_evidence_count_before_preview_limit(
         if question.document_id == "doc-evidence-count"
     ]
     assert questions
-    assert all(question.evidence_total == expected_total for question in questions)
-    assert all(question.evidence_truncated is expected_truncated for question in questions)
+    questions_by_topic = {question.topic: question for question in questions}
+    # The repeated population template is merged across both selected documents,
+    # while the limitation question only has a source in the first document.
+    assert questions_by_topic["population"].evidence_total == expected_total + 1
+    assert questions_by_topic["study_limitation"].evidence_total == expected_total
+    assert questions_by_topic["population"].evidence_truncated is (expected_total + 1 > 5)
+    assert questions_by_topic["study_limitation"].evidence_truncated is expected_truncated
 
 
 def test_builder_counts_only_unique_current_valid_evidence():

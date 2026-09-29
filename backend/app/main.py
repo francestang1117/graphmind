@@ -14,6 +14,11 @@ from app.core.errors import register_error_handlers
 from app.core.metrics import configure_metrics
 from app.core.rate_limit import configure_rate_limiting
 from app.core.sentry import configure_sentry
+from app.services.document_parser import PDF_TEXT_PARSER_VERSION
+from app.services.medical.ai.versions import (
+    ANALYSIS_PIPELINE_VERSION,
+    MEDICAL_INSIGHT_API_CONTRACT_VERSION,
+)
 
 import uvicorn
 
@@ -48,7 +53,29 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[
+        "X-GraphMind-Backend-Commit",
+        "X-GraphMind-Frontend-Commit",
+        "X-GraphMind-Parser-Version",
+        "X-GraphMind-Analysis-Pipeline",
+        "X-GraphMind-Insight-Contract",
+        "X-GraphMind-Analysis-Model",
+    ],
 )
+
+
+@app.middleware("http")
+async def attach_runtime_versions(request, call_next):
+    response = await call_next(request)
+    response.headers["X-GraphMind-Backend-Commit"] = settings.GIT_SHA or "unknown"
+    response.headers["X-GraphMind-Frontend-Commit"] = request.headers.get(
+        "X-GraphMind-Frontend-Commit", "unknown"
+    )
+    response.headers["X-GraphMind-Parser-Version"] = PDF_TEXT_PARSER_VERSION
+    response.headers["X-GraphMind-Analysis-Pipeline"] = ANALYSIS_PIPELINE_VERSION
+    response.headers["X-GraphMind-Insight-Contract"] = MEDICAL_INSIGHT_API_CONTRACT_VERSION
+    response.headers["X-GraphMind-Analysis-Model"] = settings.MEDICAL_AI_MODEL
+    return response
 
 configure_rate_limiting(app)
 configure_metrics(app)

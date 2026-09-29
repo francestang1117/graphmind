@@ -252,6 +252,7 @@ def _insight_pipeline_failure(
         or "references section" in value
         or "citation coverage" in value
         or "no core findings" in value
+        or "no evidence chunks" in value
         for value in lowered
     )
     support_valid = not any(

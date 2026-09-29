@@ -37,8 +37,8 @@ _TOPIC_SOURCES: dict[str, tuple[str, str | None]] = {
 _TEMPLATES: dict[str, dict[str, tuple[str, str]]] = {
     "en": {
         "study_population": (
-            "Which people were included in this study, and who was not included?",
-            "The source describes a study population, so a healthcare professional can help explain who the findings may apply to.",
+            "Which study groups were included, and how might they differ from my situation?",
+            "The source describes the study groups, so a healthcare professional can help explain whether they are relevant to your situation.",
         ),
         "study_design": (
             "What aspects of the study design affect who these findings may apply to?",
@@ -67,8 +67,8 @@ _TEMPLATES: dict[str, dict[str, tuple[str, str]]] = {
     },
     "zh": {
         "study_population": (
-            "这项研究纳入了哪些人，没有纳入哪些人？",
-            "原文描述了研究人群，专业人员可以帮助解释这些结果可能适用于哪些人。",
+            "这项研究纳入了哪些人群？这些人群与我的情况有什么不同？",
+            "原文描述了研究人群，专业人员可以帮助解释这些人群是否与您的情况相关。",
         ),
         "study_design": (
             "研究设计中的哪些因素会影响这些结果适用于哪些人？",
@@ -97,8 +97,8 @@ _TEMPLATES: dict[str, dict[str, tuple[str, str]]] = {
     },
     "ja": {
         "study_population": (
-            "この研究にはどのような人が含まれ、誰が含まれていませんか？",
-            "原文は研究対象者を説明しているため、専門家に結果がどのような人に当てはまり得るか確認できます。",
+            "この研究にはどのような集団が含まれ、私の状況とどのように異なりますか？",
+            "原文は研究集団を説明しているため、自分の状況との関連を専門家に確認できます。",
         ),
         "study_design": (
             "研究デザインのどの点が、結果を当てはめられる人に影響しますか？",

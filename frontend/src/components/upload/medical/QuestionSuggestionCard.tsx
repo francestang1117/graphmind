@@ -4,6 +4,7 @@ import type {
   MedicalInsightEvidence,
   MedicalQuestionSuggestion,
 } from "../../../services/api";
+import { evidenceClaimKey } from "./evidenceIndex";
 
 const CATEGORY_LABELS: Record<string, string> = {
   clarify_finding: "Helps clarify the finding",
@@ -15,7 +16,7 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 interface Props {
   suggestion: MedicalQuestionSuggestion;
-  evidenceById: Map<string, MedicalInsightEvidence>;
+  evidenceByClaim: Map<string, MedicalInsightEvidence>;
   onSelectEvidence: (evidence: MedicalInsightEvidence) => void;
   onSave?: () => void;
   saved?: boolean;
@@ -35,7 +36,7 @@ function locationLabel(evidence: MedicalInsightEvidence) {
 
 export default function QuestionSuggestionCard({
   suggestion,
-  evidenceById,
+  evidenceByClaim,
   onSelectEvidence,
   onSave,
   saved = false,
@@ -71,58 +72,62 @@ export default function QuestionSuggestionCard({
   }
 
   const evidence = suggestion.evidence_ids
-    .map((evidenceId) => evidenceById.get(evidenceId))
+    .map((evidenceId) => evidenceByClaim.get(evidenceClaimKey(`question:${suggestion.id}`, evidenceId)))
     .filter((item): item is MedicalInsightEvidence => Boolean(item));
 
   return (
-    <article className="insight-question-card">
+    <article className="insight-question-item">
       <div className="insight-question-header">
         <span className="insight-question-category">
           {CATEGORY_LABELS[suggestion.category] || "Discussion question"}
         </span>
-        <button
-          className="insight-question-copy"
-          type="button"
-          onClick={copyQuestion}
-          title={copied ? "Question copied" : "Copy this question"}
-          aria-label={copied ? "Question copied" : "Copy this question"}
-        >
-          {copied ? <Check size={14} /> : <Copy size={14} />}
-          <span>{copied ? "Copied" : "Copy"}</span>
-        </button>
-        {onSave && (
-          <button
-            className="insight-question-save"
-            type="button"
-            onClick={onSave}
-            disabled={saved || saving}
-            title={saved ? "Question saved" : stale ? "Refresh saved source" : "Save for visit preparation"}
-            aria-label={saved ? "Question saved" : stale ? "Refresh saved source" : "Save question for visit preparation"}
-          >
-            {saving ? <Loader2 className="spin" size={14} /> : saved ? <Check size={14} /> : <Bookmark size={14} />}
-            <span>{saved ? "Saved" : stale ? "Refresh" : "Save"}</span>
-          </button>
-        )}
       </div>
-      <p className="insight-question-text">{suggestion.question}</p>
-      <p className="insight-question-rationale">{suggestion.rationale}</p>
-      {evidence.length > 0 && (
-        <div className="insight-question-evidence">
-          <span className="insight-question-evidence-label">Based on</span>
-          {evidence.map((item) => (
+      <h4 className="insight-question-text">{suggestion.question}</h4>
+      <p className="insight-question-rationale"><strong>Why ask:</strong> {suggestion.rationale}</p>
+      <div className="insight-question-footer">
+        {evidence.length > 0 && (
+          <div className="insight-question-evidence">
+            <span className="insight-question-evidence-label">Source</span>
+            {evidence.map((item) => (
+              <button
+                className="insight-evidence-button"
+                key={item.id || item.evidence_id}
+                type="button"
+                onClick={() => onSelectEvidence(item)}
+                title="Show the source passage"
+              >
+                <FileText size={12} />
+                {locationLabel(item)}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="insight-question-actions">
+          <button
+            className="insight-question-copy"
+            type="button"
+            onClick={copyQuestion}
+            title={copied ? "Question copied" : "Copy this question"}
+            aria-label={copied ? "Question copied" : "Copy this question"}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            <span>{copied ? "Copied" : "Copy"}</span>
+          </button>
+          {onSave && (
             <button
-              className="insight-evidence-button"
-              key={item.id || item.evidence_id}
+              className="insight-question-save"
               type="button"
-              onClick={() => onSelectEvidence(item)}
-              title="Show the source passage"
+              onClick={onSave}
+              disabled={saved || saving}
+              title={saved ? "Question saved" : stale ? "Refresh saved source" : "Save for visit preparation"}
+              aria-label={saved ? "Question saved" : stale ? "Refresh saved source" : "Save question for visit preparation"}
             >
-              <FileText size={12} />
-              {locationLabel(item)}
+              {saving ? <Loader2 className="spin" size={14} /> : saved ? <Check size={14} /> : <Bookmark size={14} />}
+              <span>{saved ? "Saved" : stale ? "Refresh" : "Save"}</span>
             </button>
-          ))}
+          )}
         </div>
-      )}
+      </div>
       {copyError && (
         <p className="insight-question-error">
           Could not copy this question. Please select the text manually.

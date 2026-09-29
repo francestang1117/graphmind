@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
@@ -15,6 +16,7 @@ from app.core.database import SessionLocal, db_enabled
 from app.core.config import settings
 from app.core.workspace import default_workspace_id
 from app.services.medical.ai.citation_validator import evidence_rows
+from app.services.medical.ai.context_builder import redact_sensitive_fields
 from app.services.medical.ai.exceptions import MedicalInsightError
 from app.services.medical.ai.question_templates import normalize_saved_question_payload
 from app.services.medical.ai.models import MedicalInsightReport
@@ -509,6 +511,11 @@ class AnalysisRepository:
                             quoted_text=evidence["quoted_text"],
                             character_start=evidence.get("character_start"),
                             character_end=evidence.get("character_end"),
+                            quality_score=int(evidence.get("quality_score", 100) or 0),
+                            quality_flags_json=json.dumps(
+                                evidence.get("quality_flags", []),
+                                ensure_ascii=False,
+                            ),
                         )
                     )
 
@@ -936,6 +943,24 @@ def _run_payload(db, row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
         .where(MedicalAnalysisEvidenceRecord.run_id == row.id)
         .order_by(MedicalAnalysisEvidenceRecord.finding_id, MedicalAnalysisEvidenceRecord.id)
     ).all()
+    chunk_ids = {item.chunk_id for item in evidence if item.chunk_id}
+    source_text_by_chunk_id: dict[str, str] = {}
+    if chunk_ids:
+        chunks = db.scalars(
+            select(ParsedChunkRecord)
+            .where(
+                ParsedChunkRecord.id.in_(chunk_ids),
+                ParsedChunkRecord.document_id == row.document_id,
+                ParsedChunkRecord.user_id == row.user_id,
+                ParsedChunkRecord.workspace_id == row.workspace_id,
+            )
+        ).all()
+        for chunk in chunks:
+            source_text = chunk.text or ""
+            if row.redact_pii:
+                source_text, _ = redact_sensitive_fields(source_text)
+            if source_text.strip():
+                source_text_by_chunk_id[chunk.id] = source_text
     payload["evidence"] = [
         {
             "id": item.id,
@@ -948,8 +973,14 @@ def _run_payload(db, row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
             "page_start": item.page_start,
             "page_end": item.page_end,
             "quote": item.quoted_text,
+            "excerpt": _evidence_excerpt(
+                source_text_by_chunk_id.get(item.chunk_id, item.quoted_text)
+            ),
+            "source_text": source_text_by_chunk_id.get(item.chunk_id),
             "character_start": item.character_start,
             "character_end": item.character_end,
+            "quality_score": item.quality_score,
+            "quality_flags": _loads_json(item.quality_flags_json, []),
         }
         for item in evidence
     ]
@@ -994,6 +1025,15 @@ def _run_dict(row: "MedicalAnalysisRunRecord") -> dict[str, Any]:
 def _evidence_id(run_id: str, evidence: dict[str, Any]) -> str:
     raw = f"{run_id}|{evidence['finding_id']}|{evidence['evidence_id']}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _evidence_excerpt(text: str) -> str:
+    """Keep source browsing readable while retaining the full quote in storage."""
+    value = " ".join(str(text or "").split()).strip()
+    sentences = [part.strip() for part in re.split(r"(?<=[.!?。！？])\s+", value) if part.strip()]
+    if len(sentences) <= 3:
+        return value
+    return " ".join(sentences[:3])
 
 
 def _loads_json(value: str, default: Any) -> Any:

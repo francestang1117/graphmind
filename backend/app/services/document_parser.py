@@ -22,13 +22,17 @@ import csv
 import json
 import logging
 import re
+import unicodedata
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from xml.etree import ElementTree
 from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
+
+
+PDF_TEXT_PARSER_VERSION = "document-parser-pdf-readable-v7"
 
 
 # Parsed document shape
@@ -83,6 +87,67 @@ class ParsedDocument:
     reading_time_min: int = 0
 
 
+@dataclass(frozen=True)
+class PdfLayoutRegion:
+    """A visually coherent region of one PDF page."""
+
+    top: float
+    bottom: float
+    mode: str
+    column_boundary: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "top": round(self.top, 2),
+            "bottom": round(self.bottom, 2),
+            "mode": self.mode,
+            "column_boundary": (
+                round(self.column_boundary, 2)
+                if self.column_boundary is not None
+                else None
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class PdfExtractedBlock:
+    """A page block kept with enough geometry to gate medical evidence."""
+
+    page: int
+    kind: str
+    column: str
+    top: float
+    bottom: float
+    x0: float
+    x1: float
+    text: str
+    reconstructed: bool = False
+    quality_flags: tuple[str, ...] = ()
+    char_start: int = 0
+    char_end: int = 0
+
+    @property
+    def medical_evidence(self) -> bool:
+        return self.kind == "body"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "page": self.page,
+            "kind": self.kind,
+            "block_type": self.kind,
+            "column": self.column,
+            "top": round(self.top, 2),
+            "bottom": round(self.bottom, 2),
+            "x0": round(self.x0, 2),
+            "x1": round(self.x1, 2),
+            "reconstructed": self.reconstructed,
+            "quality_flags": list(self.quality_flags),
+            "medical_evidence": self.medical_evidence,
+            "char_start": self.char_start,
+            "char_end": self.char_end,
+        }
+
+
 # Shared chunking
 
 def _chunk(text: str, chunk_size: int = 800, overlap: int = 150,
@@ -103,6 +168,1035 @@ def _chunk(text: str, chunk_size: int = 800, overlap: int = 150,
                            "start": start, "end": min(end, len(text)), **meta})
         start = end - overlap
     return chunks
+
+
+def _normalise_pdf_text(text: str) -> str:
+    """Apply only layout-safe PDF cleanup before chunking and citation."""
+    normalized = unicodedata.normalize("NFKC", str(text or ""))
+    normalized = normalized.replace("\u00a0", " ").replace("\u200b", "")
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in normalized.splitlines()]
+    # Repair only known line-ending forms. Semantic compounds such as
+    # ``later-onset`` and ``non-small-cell`` keep their hyphen, while visible
+    # PDF artifacts such as ``informa- tion`` are normalized before chunking.
+    repaired: list[str] = []
+    for line in lines:
+        line = _repair_inline_pdf_hyphenation(line)
+        if repaired:
+            joined = _join_pdf_line_ending(repaired[-1], line)
+            if joined is not None:
+                repaired[-1] = joined
+                continue
+        repaired.append(line)
+    return "\n".join(repaired).strip()
+
+
+def _glued_text_score(text: str) -> int:
+    """Return a conservative signal for text that lost most word spaces."""
+    normalized = _normalise_pdf_text(text)
+    if len(normalized) < 80:
+        return 0
+    tokens = re.findall(r"[A-Za-z]+", normalized)
+    long_tokens = sum(1 for token in tokens if len(token) >= 32)
+    average_token_length = (
+        sum(len(token) for token in tokens) / len(tokens) if tokens else 0
+    )
+    whitespace_ratio = sum(character.isspace() for character in normalized) / len(normalized)
+    # One long gene, disease, or author name is normal in a medical paper.
+    # Require a second independent signal before treating the page as glued.
+    score = int(long_tokens >= 1)
+    if average_token_length >= 24:
+        score += 1
+    if whitespace_ratio < 0.015:
+        score += 1
+    return score
+
+
+_COMMON_GLUE_MARKERS = re.compile(
+    r"\b(?:(?:the|a|an|this|that|patients?|participants?|study|were|was|"
+    r"is|are|with|during|received|enrolled)"
+    r"(?:the|a|an|this|that|patients?|participants?|study|were|was|"
+    r"is|are|with|during|received|enrolled))\b",
+    re.I,
+)
+
+
+_SCIENTIFIC_SINGLE_LETTER_TERMS = {"p", "n", "t", "b", "r", "x", "y", "z", "f"}
+_SCIENTIFIC_TERM_FOLLOWERS = {
+    "value",
+    "values",
+    "cell",
+    "cells",
+    "helper",
+    "lymphocyte",
+    "lymphocytes",
+    "control",
+    "controls",
+    "patient",
+    "patients",
+    "threshold",
+    "thresholds",
+    "axis",
+    "axes",
+    "score",
+    "scores",
+    "test",
+    "tests",
+    "statistic",
+    "statistics",
+    "group",
+    "groups",
+}
+
+
+_FRAGMENTABLE_WORDS = {
+    "the",
+    "this",
+    "that",
+    "is",
+    "are",
+    "not",
+    "with",
+    "during",
+    "patient",
+    "patients",
+    "participant",
+    "participants",
+    "study",
+    "were",
+    "was",
+    "received",
+    "enrolled",
+}
+
+
+def _fragmentation_score(text: str) -> int:
+    """Penalize only one-letter tokens that clearly split a common word."""
+    tokens = re.findall(r"[A-Za-z]+", text)
+    score = 0
+    for index, token in enumerate(tokens):
+        if len(token) != 1:
+            continue
+        if index + 1 < len(tokens) and (
+            f"{token}{tokens[index + 1]}".lower() in _FRAGMENTABLE_WORDS
+        ):
+            score += 1
+        elif index > 0 and (
+            f"{tokens[index - 1]}{token}".lower() in _FRAGMENTABLE_WORDS
+        ):
+            score += 1
+    return score
+
+
+def _scientific_spacing_score(text: str) -> int:
+    """Reward spacing after common single-letter scientific symbols."""
+    tokens = re.findall(r"[A-Za-z]+", text)
+    return sum(
+        1
+        for index, token in enumerate(tokens[:-1])
+        if token.lower() in _SCIENTIFIC_SINGLE_LETTER_TERMS
+        and tokens[index + 1].lower() in _SCIENTIFIC_TERM_FOLLOWERS
+    )
+
+
+def _pdf_candidate_rank(text: str, candidate_priority: int = 0) -> tuple[int, int, int, int, int]:
+    """Prefer readable extraction without rewarding accidental word fragments."""
+    normalized = _normalise_pdf_text(text)
+    if not normalized:
+        return (999, 999, 999, 999, candidate_priority)
+    latin_count = len(re.findall(r"[A-Za-z]", normalized))
+    non_space_count = len(re.findall(r"\S", normalized))
+    if latin_count / max(1, non_space_count) < 0.5:
+        return (
+            _glued_text_score(normalized),
+            0,
+            _fragmentation_score(normalized),
+            0,
+            candidate_priority,
+        )
+    suspicious_glue = len(_COMMON_GLUE_MARKERS.findall(normalized))
+    return (
+        _glued_text_score(normalized),
+        suspicious_glue,
+        _fragmentation_score(normalized),
+        -_scientific_spacing_score(normalized),
+        candidate_priority,
+    )
+
+
+def _reconstruct_pdf_words(page: Any) -> str:
+    """Rebuild lines from pdfplumber word boxes when text extraction glues words."""
+    usable = _extract_pdf_words(page)
+    if not usable:
+        return ""
+
+    # Coordinates are optional in lightweight test doubles and in a few PDF
+    # backends. In that case, the provider's word order is the least invasive
+    # fallback; never invent boundaries inside one reported word.
+    if not any("top" in word or "doctop" in word for word in usable):
+        return " ".join(str(word.get("text") or "").strip() for word in usable)
+
+    line_groups = _pdf_line_groups(usable)
+    column_boundary = _pdf_column_boundary(usable, page)
+    if column_boundary is None:
+        return "\n".join(_pdf_word_lines(usable))
+
+    split_indices = [
+        index
+        for index, line in enumerate(line_groups)
+        if _pdf_line_has_gutter(line, column_boundary, page)
+    ]
+    if not split_indices:
+        return "\n".join(_pdf_word_lines(usable))
+
+    first_split = min(split_indices)
+    last_split = max(split_indices)
+    output: list[str] = []
+    left_column: list[list[dict[str, Any]]] = []
+    right_column: list[list[dict[str, Any]]] = []
+
+    def flush_columns() -> None:
+        output.extend(_pdf_render_lines(left_column))
+        output.extend(_pdf_render_lines(right_column))
+        left_column.clear()
+        right_column.clear()
+
+    for index, line in enumerate(line_groups):
+        inside_column_region = first_split <= index <= last_split
+        if not inside_column_region:
+            flush_columns()
+            rendered = _pdf_render_line(line)
+            if rendered:
+                output.append(rendered)
+            continue
+
+        left = [word for word in line if float(word.get("x0", 0) or 0) <= column_boundary]
+        right = [word for word in line if float(word.get("x0", 0) or 0) > column_boundary]
+        if left and right and _pdf_line_has_gutter(line, column_boundary, page):
+            left_column.append(left)
+            right_column.append(right)
+        elif left and not right:
+            left_column.append(left)
+        elif right and not left:
+            right_column.append(right)
+        else:
+            # A line spanning the page, such as a subheading or table row,
+            # must stay intact and separates adjacent column segments.
+            flush_columns()
+            rendered = _pdf_render_line(line)
+            if rendered:
+                output.append(rendered)
+
+    flush_columns()
+    return "\n".join(output)
+
+
+def _pdf_line_groups(words: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    positioned = sorted(
+        words,
+        key=lambda word: (
+            float(word.get("top", word.get("doctop", 0)) or 0),
+            float(word.get("x0", 0) or 0),
+        ),
+    )
+    lines: list[list[dict[str, Any]]] = []
+    line_tops: list[float] = []
+    for word in positioned:
+        top = float(word.get("top", word.get("doctop", 0)) or 0)
+        line_index = next(
+            (index for index, line_top in enumerate(line_tops) if abs(top - line_top) <= 3),
+            None,
+        )
+        if line_index is None:
+            line_tops.append(top)
+            lines.append([word])
+        else:
+            lines[line_index].append(word)
+    return lines
+
+
+def _extract_pdf_words(page: Any) -> list[dict[str, Any]]:
+    """Read positioned words once, while supporting small test doubles."""
+    try:
+        words = page.extract_words(keep_blank_chars=False, use_text_flow=False)
+    except TypeError:
+        try:
+            words = page.extract_words()
+        except (AttributeError, ValueError, TypeError):
+            return []
+    except (AttributeError, ValueError):
+        return []
+    if not isinstance(words, list):
+        return []
+    return [
+        word
+        for word in words
+        if isinstance(word, dict) and str(word.get("text") or "").strip()
+    ]
+
+
+def _pdf_layout_info(page: Any) -> dict[str, Any]:
+    """Detect a stable two-column layout without guessing from text alone."""
+    words = _extract_pdf_words(page)
+    positioned = [
+        word
+        for word in words
+        if "top" in word or "doctop" in word
+    ]
+    if not positioned:
+        return {
+            "mode": "full_width",
+            "column_count": 1,
+            "column_boundary": None,
+            "confidence": 0.0,
+            "stable": False,
+            "regions": [],
+        }
+
+    lines = _pdf_line_groups(positioned)
+    boundary = _pdf_column_boundary(positioned, page)
+    if boundary is None:
+        return {
+            "mode": "full_width",
+            "column_count": 1,
+            "column_boundary": None,
+            "confidence": 0.55,
+            "stable": True,
+            "regions": [
+                region.to_dict()
+                for region in _pdf_regions(lines, None, page)
+            ],
+        }
+
+    split_indices = [
+        index
+        for index, line in enumerate(lines)
+        if _pdf_line_has_gutter(line, boundary, page)
+    ]
+    stable = len(split_indices) >= 2
+    if not stable:
+        return {
+            "mode": "ambiguous",
+            "column_count": 2,
+            "column_boundary": boundary,
+            "confidence": 0.35,
+            "stable": False,
+            "regions": [],
+        }
+
+    confidence = min(0.99, 0.65 + min(len(split_indices), 6) * 0.05)
+    return {
+        "mode": "columns",
+        "column_count": 2,
+        "column_boundary": boundary,
+        "confidence": confidence,
+        "stable": True,
+        "regions": [
+            region.to_dict()
+            for region in _pdf_regions(lines, boundary, page)
+        ],
+    }
+
+
+def _pdf_regions(
+    lines: list[list[dict[str, Any]]],
+    boundary: float | None,
+    page: Any,
+) -> list[PdfLayoutRegion]:
+    """Describe full-width separators and the column body for metadata."""
+    if not lines:
+        return []
+    modes: list[str] = []
+    for line in lines:
+        modes.append(
+            "columns"
+            if boundary is not None and _pdf_line_has_gutter(line, boundary, page)
+            else "full_width"
+        )
+
+    regions: list[PdfLayoutRegion] = []
+    start = 0
+    for index in range(1, len(lines) + 1):
+        if index < len(lines) and modes[index] == modes[start]:
+            continue
+        first = lines[start]
+        last = lines[index - 1]
+        top = min(float(word.get("top", word.get("doctop", 0)) or 0) for word in first)
+        bottom = max(
+            float(word.get("bottom", word.get("top", word.get("doctop", 0))) or 0)
+            for word in last
+        )
+        regions.append(
+            PdfLayoutRegion(
+                top=top,
+                bottom=bottom,
+                mode=modes[start],
+                column_boundary=boundary if modes[start] == "columns" else None,
+            )
+        )
+        start = index
+    return regions
+
+
+def _pdf_line_has_gutter(
+    line: list[dict[str, Any]], boundary: float, page: Any
+) -> bool:
+    left = [word for word in line if float(word.get("x0", 0) or 0) <= boundary]
+    right = [word for word in line if float(word.get("x0", 0) or 0) > boundary]
+    if not left or not right:
+        return False
+
+    left_edge = max(
+        float(word.get("x1", word.get("x0", 0)) or 0) for word in left
+    )
+    right_edge = min(float(word.get("x0", 0) or 0) for word in right)
+    gap = right_edge - left_edge
+    page_width = float(getattr(page, "width", 0) or 0)
+    if page_width:
+        # Real journal PDFs often leave only 1.5-2% of the page width between
+        # columns. The old 3%/18pt threshold missed those pages and let
+        # pdfplumber's interleaved text order reach the medical pipeline.
+        return gap >= max(8.0, page_width * 0.015)
+    line_span = max(float(word.get("x0", 0) or 0) for word in line) - min(
+        float(word.get("x0", 0) or 0) for word in line
+    )
+    return gap >= max(8.0, line_span * 0.05)
+
+
+def _pdf_column_boundary(
+    words: list[dict[str, Any]], page: Any
+) -> float | None:
+    """Find a repeated central gutter in the page's visual text lines.
+
+    A whole-page ``x0`` gap is not reliable: every line in a real two-column
+    paper starts at a slightly different word position, so the gutter may be
+    only an 11pt gap while the set of all x positions has no large hole. A
+    repeated line-level gap is a much stronger signal and also avoids treating
+    one wide word space in a single-column heading as a column boundary.
+    """
+    positioned = [
+        word for word in words
+        if "top" in word or "doctop" in word
+    ]
+    lines = _pdf_line_groups(positioned or words)
+    page_width = float(getattr(page, "width", 0) or 0)
+    minimum_boundary = page_width * 0.25 if page_width else None
+    maximum_boundary = page_width * 0.75 if page_width else None
+    if page_width:
+        minimum_gap = max(8.0, page_width * 0.015)
+    else:
+        positions = [float(word.get("x0", 0) or 0) for word in words]
+        span = max(positions, default=0.0) - min(positions, default=0.0)
+        # Without a page width there is not enough geometry to recognize a
+        # narrow real gutter. Keep the conservative sparse-page fallback.
+        minimum_gap = max(72.0, span * 0.2)
+
+    # Each candidate is the midpoint of an actual word gap within one visual
+    # line. Cluster nearby midpoints so a stable gutter wins over incidental
+    # spacing elsewhere on a page.
+    candidates: list[tuple[float, float, int]] = []
+    for line_index, line in enumerate(lines):
+        ordered = sorted(line, key=lambda word: float(word.get("x0", 0) or 0))
+        for previous, following in zip(ordered, ordered[1:]):
+            previous_end = float(
+                previous.get("x1", previous.get("x0", 0)) or 0
+            )
+            following_start = float(following.get("x0", 0) or 0)
+            gap = following_start - previous_end
+            boundary = (previous_end + following_start) / 2
+            if gap < minimum_gap:
+                continue
+            if minimum_boundary is not None and not (
+                minimum_boundary <= boundary <= maximum_boundary
+            ):
+                continue
+            candidates.append((boundary, gap, line_index))
+
+    if not candidates:
+        return None
+
+    candidates.sort(key=lambda candidate: candidate[0])
+    clusters: list[list[tuple[float, float, int]]] = []
+    for candidate in candidates:
+        if not clusters or candidate[0] - clusters[-1][-1][0] > 14.0:
+            clusters.append([candidate])
+        else:
+            clusters[-1].append(candidate)
+
+    best_score: tuple[int, int, float, float] | None = None
+    best_boundary: float | None = None
+    for cluster in clusters:
+        line_indexes = {candidate[2] for candidate in cluster}
+        boundary = sorted(candidate[0] for candidate in cluster)[len(cluster) // 2]
+        split_lines = sum(
+            _pdf_line_has_gutter(line, boundary, page)
+            for line in lines
+        )
+        if split_lines < 1:
+            continue
+        # A real page needs repeated support. Keep two-line synthetic fixtures
+        # useful for unit tests, while requiring more evidence on dense pages.
+        minimum_support = 2 if len(lines) <= 8 else max(4, len(lines) // 20)
+        if len(lines) == 1 and max(candidate[1] for candidate in cluster) >= (
+            max(72.0, page_width * 0.25) if page_width else minimum_gap
+        ):
+            minimum_support = 1
+        if split_lines < minimum_support:
+            continue
+        distance_from_center = (
+            -abs(boundary - page_width / 2)
+            if page_width
+            else 0.0
+        )
+        median_gap = sorted(candidate[1] for candidate in cluster)[len(cluster) // 2]
+        support = (split_lines, len(line_indexes), distance_from_center, median_gap)
+        if best_score is None or support > best_score:
+            best_score = support
+            best_boundary = boundary
+
+    return best_boundary
+
+
+def _pdf_word_lines(words: list[dict[str, Any]]) -> list[str]:
+    return _pdf_render_lines(_pdf_line_groups(words))
+
+
+def _pdf_render_lines(lines: list[list[dict[str, Any]]]) -> list[str]:
+    """Render lines and repair only safe visual line-ending hyphenation."""
+    output: list[str] = []
+    for line in lines:
+        rendered = _pdf_render_line(line)
+        if not rendered:
+            continue
+        if output:
+            joined = _join_pdf_line_ending(output[-1], rendered)
+            if joined is not None:
+                output[-1] = joined
+                continue
+        output.append(rendered)
+    return output
+
+
+_SAFE_LINE_BREAK_WORDS = {
+    "accumulation",
+    "analysis",
+    "analogs",
+    "although",
+    "attenuation",
+    "associated",
+    "automatic",
+    "adversely",
+    "antibodies",
+    "basis",
+    "biomarkers",
+    "characterized",
+    "classification",
+    "classified",
+    "concentration",
+    "concentrations",
+    "consent",
+    "considered",
+    "controls",
+    "creatinine",
+    "columns",
+    "comprising",
+    "challenges",
+    "detected",
+    "determined",
+    "diagnosis",
+    "diagnostic",
+    "deviation",
+    "decrease",
+    "decreased",
+    "detection",
+    "differentiated",
+    "disease",
+    "disorder",
+    "dramatically",
+    "endothelium",
+    "enzyme",
+    "evaluation",
+    "examination",
+    "examinations",
+    "excessive",
+    "expected",
+    "expressed",
+    "facilitating",
+    "findings",
+    "frequently",
+    "heterogeneous",
+    "hypohidrosis",
+    "identification",
+    "increases",
+    "individual",
+    "information",
+    "indicating",
+    "isoforms",
+    "labelled",
+    "manifestations",
+    "measured",
+    "measurement",
+    "metabolic",
+    "monitoring",
+    "mixtures",
+    "mobile",
+    "neutralizing",
+    "neurons",
+    "pathogenesis",
+    "participants",
+    "patients",
+    "performed",
+    "phenotype",
+    "proliferation",
+    "profiles",
+    "quantified",
+    "quantification",
+    "randomized",
+    "regarding",
+    "replacement",
+    "related",
+    "reports",
+    "respectively",
+    "reveals",
+    "samples",
+    "significance",
+    "spectrometry",
+    "substrates",
+    "systematic",
+    "therapeutic",
+    "using",
+    "various",
+    "warrant",
+}
+_HYPHENATED_WORD_PREFIXES = {
+    "anti",
+    "case",
+    "cross",
+    "dose",
+    "later",
+    "long",
+    "multi",
+    "non",
+    "post",
+    "pre",
+    "short",
+    "small",
+    "well",
+}
+
+
+def _join_pdf_line_ending(previous: str, following: str) -> str | None:
+    """Join a visual line break without destroying scientific compounds."""
+    if not previous.endswith("-"):
+        return None
+    if not following[:1].islower():
+        if any(ord(char) > 127 for char in previous):
+            return f"{previous}{following}"
+        return None
+
+    match = re.search(r"([A-Za-z]+)-$", previous)
+    if not match:
+        return f"{previous}{following}"
+    prefix = match.group(1).lower()
+    suffix_match = re.match(r"([a-z]+)", following)
+    suffix = suffix_match.group(1).lower() if suffix_match else ""
+    if not suffix:
+        return f"{previous}{following}"
+
+    # An internal hyphen is evidence that the first hyphen is semantic, as in
+    # non-small-cell or well-established. Preserve both parts as one phrase.
+    if "-" in suffix or prefix in _HYPHENATED_WORD_PREFIXES:
+        return f"{previous}{following}"
+
+    if f"{prefix}{suffix}" in _SAFE_LINE_BREAK_WORDS:
+        return f"{previous[:-1]}{following}"
+
+    # Unknown short fragments stay visibly hyphenated so the evidence gate can
+    # reject them instead of silently inventing a word boundary.
+    return f"{previous}{following}"
+
+
+_INLINE_PDF_HYPHENATION = re.compile(
+    r"(?P<left>[A-Za-z\u0370-\u03ff]+)-\s+(?P<right>[A-Za-z][A-Za-z-]*)"
+)
+
+
+def _repair_inline_pdf_hyphenation(text: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        if any(ord(char) > 127 for char in match.group("left")):
+            return f"{match.group('left')}-{match.group('right')}"
+        joined = _join_pdf_line_ending(
+            f"{match.group('left')}-",
+            match.group("right"),
+        )
+        return joined or match.group(0)
+
+    repaired = _INLINE_PDF_HYPHENATION.sub(replace, text)
+
+    def join_known_fragment(match: re.Match[str]) -> str:
+        left = match.group("left")
+        right = match.group("right")
+        if f"{left}{right}".lower() in _SAFE_LINE_BREAK_WORDS:
+            return f"{left}{right}"
+        return match.group(0)
+
+    return re.sub(
+        r"(?P<left>[A-Za-z]{2,})-(?P<right>[a-z]{2,})",
+        join_known_fragment,
+        repaired,
+    )
+
+
+def _pdf_render_line(line: list[dict[str, Any]]) -> str:
+    ordered = sorted(line, key=lambda word: float(word.get("x0", 0) or 0))
+    parts: list[str] = []
+    for word in ordered:
+        value = str(word.get("text") or "").strip()
+        if not value:
+            continue
+        if not parts:
+            parts.append(value)
+            continue
+        previous = parts[-1]
+        if previous.endswith(("-", "–", "—")):
+            parts[-1] = f"{previous}{value}"
+        elif previous.endswith(("(", "[", "{", "/")):
+            parts.append(value)
+        elif value.startswith((".", ",", ";", ":", "!", "?", ")", "]", "}")):
+            parts[-1] = f"{previous}{value}"
+        else:
+            parts.append(value)
+    return " ".join(parts)
+
+
+_PDF_CAPTION_LINE = re.compile(
+    r"^(?:figure|fig\.?|table|scheme|chart)\s*\d+\s*[.:：-]?\s*\S|"
+    r"^(?:table|表)\s*[.:：-]\s*\S|"
+    r"^(?:图|図|表)\s*\d+\s*[.:：-]?\s*\S",
+    re.I,
+)
+_PDF_HEADING_LINE = re.compile(
+    r"^(?:abstract|background|introduction|materials?\s+and\s+methods?|"
+    r"methods?|study\s+(?:subjects?|population|design)|results?|discussion|"
+    r"conclusions?|limitations?|references?|keywords?|acknowledg(?:e)?ments?|"
+    r"funding|conflicts?\s+of\s+interest|目的|方法|结果|讨论|结论|参考文献)$",
+    re.I,
+)
+_PDF_METADATA_LINE = re.compile(
+    r"(?:\bdoi\s*:\s*10\.|https?://doi\.org/10\.|\bpmid\s*[:#]?\s*\d+|"
+    r"\bissn\s*[:#]?\s*\d{4}[-–]\d{3}[0-9xX]|copyright|©|"
+    r"\b[A-Z][A-Za-z.&'-]+\s+\d{1,3}\s*:\s*\d{1,5}[-–]\d{1,5})",
+    re.I,
+)
+
+
+def _pdf_line_record(
+    words: list[dict[str, Any]],
+    *,
+    column: str,
+    reconstructed: bool,
+) -> dict[str, Any] | None:
+    text = _pdf_render_line(words)
+    if not text:
+        return None
+    top = min(float(word.get("top", word.get("doctop", 0)) or 0) for word in words)
+    bottom = max(
+        float(word.get("bottom", word.get("top", word.get("doctop", 0))) or 0)
+        for word in words
+    )
+    return {
+        "words": words,
+        "text": text,
+        "column": column,
+        "top": top,
+        "bottom": bottom,
+        "x0": min(float(word.get("x0", 0) or 0) for word in words),
+        "x1": max(
+            float(word.get("x1", word.get("x0", 0)) or 0) for word in words
+        ),
+        "reconstructed": reconstructed,
+    }
+
+
+def _pdf_reconstructed_line_records(page: Any) -> list[dict[str, Any]]:
+    """Return visual lines in reading order, retaining their column identity."""
+    usable = _extract_pdf_words(page)
+    positioned = [
+        word for word in usable if "top" in word or "doctop" in word
+    ]
+    if not positioned:
+        return []
+
+    line_groups = _pdf_line_groups(positioned)
+    boundary = _pdf_column_boundary(positioned, page)
+    if boundary is None:
+        return [
+            record
+            for line in line_groups
+            if (record := _pdf_line_record(
+                line, column="full_width", reconstructed=False
+            ))
+        ]
+
+    split_indices = [
+        index
+        for index, line in enumerate(line_groups)
+        if _pdf_line_has_gutter(line, boundary, page)
+    ]
+    if not split_indices:
+        return [
+            record
+            for line in line_groups
+            if (record := _pdf_line_record(
+                line, column="full_width", reconstructed=False
+            ))
+        ]
+
+    first_split = min(split_indices)
+    last_split = max(split_indices)
+    output: list[dict[str, Any]] = []
+    left_column: list[dict[str, Any]] = []
+    right_column: list[dict[str, Any]] = []
+
+    def flush_columns() -> None:
+        output.extend(left_column)
+        output.extend(right_column)
+        left_column.clear()
+        right_column.clear()
+
+    for index, line in enumerate(line_groups):
+        inside_column_region = first_split <= index <= last_split
+        if not inside_column_region:
+            flush_columns()
+            record = _pdf_line_record(
+                line, column="full_width", reconstructed=False
+            )
+            if record:
+                output.append(record)
+            continue
+
+        left = [
+            word for word in line
+            if float(word.get("x0", 0) or 0) <= boundary
+        ]
+        right = [
+            word for word in line
+            if float(word.get("x0", 0) or 0) > boundary
+        ]
+        if left and right and _pdf_line_has_gutter(line, boundary, page):
+            left_record = _pdf_line_record(
+                left, column="left", reconstructed=True
+            )
+            right_record = _pdf_line_record(
+                right, column="right", reconstructed=True
+            )
+            if left_record:
+                left_column.append(left_record)
+            if right_record:
+                right_column.append(right_record)
+        elif left and not right:
+            record = _pdf_line_record(left, column="left", reconstructed=True)
+            if record:
+                left_column.append(record)
+        elif right and not left:
+            record = _pdf_line_record(right, column="right", reconstructed=True)
+            if record:
+                right_column.append(record)
+        else:
+            # A spanning line is a page-level separator. Never attach it to a
+            # body block from either column.
+            flush_columns()
+            record = _pdf_line_record(
+                line, column="full_width", reconstructed=False
+            )
+            if record:
+                output.append(record)
+
+    flush_columns()
+    return output
+
+
+def _pdf_line_kind(record: dict[str, Any]) -> str:
+    text = str(record.get("text") or "").strip()
+    if re.fullmatch(
+        r"(?:page\s+)?\d{1,4}(?:\s*/\s*\d{1,4})?",
+        text,
+        re.I,
+    ):
+        return "footer"
+    if _PDF_CAPTION_LINE.search(text):
+        return "figure_caption" if re.match(r"^(?:fig(?:ure)?\.?|图|図)", text, re.I) else "table_caption"
+    if _PDF_METADATA_LINE.search(text):
+        return "metadata"
+    if len(text) <= 120 and (
+        _PDF_HEADING_LINE.fullmatch(text)
+        or (text.isupper() and len(text.split()) <= 12)
+    ):
+        return "heading"
+    return "body"
+
+
+def _pdf_block_flags(kind: str, reconstructed: bool) -> tuple[str, ...]:
+    flags: list[str] = []
+    if reconstructed:
+        flags.append("pdf_layout_reconstructed")
+    if kind in {"header", "footer"}:
+        flags.append("header_footer_contamination")
+    elif kind in {"figure_caption", "table_caption"}:
+        flags.append("caption_body_mixed")
+    elif kind in {"heading", "metadata"}:
+        flags.append("heading_body_duplicated" if kind == "heading" else "reference_like")
+    return tuple(flags)
+
+
+def _pdf_extract_blocks(page: Any, page_number: int = 0) -> tuple[list[dict[str, Any]], str]:
+    """Build conservative page blocks before section chunking.
+
+    The generic page text remains available for the document viewer. Medical
+    evidence later uses only body blocks, so captions and page furniture cannot
+    silently become a supported field just because they share a page.
+    """
+    records = _pdf_reconstructed_line_records(page)
+    if not records:
+        return [], ""
+
+    page_height = float(getattr(page, "height", 0) or 0)
+    blocks: list[PdfExtractedBlock] = []
+    current: list[dict[str, Any]] = []
+    current_kind = ""
+
+    def flush() -> None:
+        nonlocal current, current_kind
+        if not current:
+            return
+        kind = current_kind or "body"
+        text = "\n".join(_pdf_render_line(record["words"]) for record in current).strip()
+        if text:
+            blocks.append(
+                PdfExtractedBlock(
+                    page=page_number,
+                    kind=kind,
+                    column=str(current[0].get("column") or "full_width"),
+                    top=min(float(record["top"]) for record in current),
+                    bottom=max(float(record["bottom"]) for record in current),
+                    x0=min(float(record["x0"]) for record in current),
+                    x1=max(float(record["x1"]) for record in current),
+                    text=text,
+                    reconstructed=any(bool(record.get("reconstructed")) for record in current),
+                    quality_flags=_pdf_block_flags(
+                        kind, any(bool(record.get("reconstructed")) for record in current)
+                    ),
+                )
+            )
+        current = []
+        current_kind = ""
+
+    for record in records:
+        kind = _pdf_line_kind(record)
+        if current:
+            previous = current[-1]
+            gap = max(0.0, float(record["top"]) - float(previous["bottom"]))
+            line_height = max(1.0, float(previous["bottom"]) - float(previous["top"]))
+            compatible = (
+                record.get("column") == previous.get("column")
+                and gap <= max(12.0, line_height * 2.4)
+            )
+            # Captions often wrap onto ordinary-looking lines. Keep those
+            # lines together, but never let a caption absorb a new heading.
+            if (
+                current_kind in {"figure_caption", "table_caption"}
+                and kind == "body"
+                and compatible
+            ):
+                kind = current_kind
+            if not compatible or kind != current_kind:
+                flush()
+        if not current:
+            current_kind = kind
+        current.append(record)
+    flush()
+
+    # Repeated short lines at the top/bottom of later pages are journal
+    # furniture, even when they do not contain an explicit DOI or page number.
+    normalized_counts: dict[str, set[int]] = {}
+    for block in blocks:
+        normalized = " ".join(block.text.lower().split())
+        if len(normalized) <= 120 and normalized:
+            normalized_counts.setdefault(normalized, set()).add(block.page)
+    page_height = page_height or 800.0
+    repeated: list[PdfExtractedBlock] = []
+    for block in blocks:
+        normalized = " ".join(block.text.lower().split())
+        near_edge = block.top <= page_height * 0.12 or block.bottom >= page_height * 0.88
+        if (
+            block.kind == "body"
+            and near_edge
+            and len(normalized_counts.get(normalized, set())) >= 2
+        ):
+            kind = "header" if block.top <= page_height * 0.12 else "footer"
+            repeated.append(
+                replace(
+                    block,
+                    kind=kind,
+                    quality_flags=_pdf_block_flags(kind, block.reconstructed),
+                )
+            )
+        else:
+            repeated.append(block)
+
+    # Normalize each block before assigning offsets. The page text used by the
+    # medical structure parser is reconstructed from these same blocks; doing
+    # this before offset calculation keeps captions, headings, and footers
+    # aligned with the source ranges after hyphen repair.
+    normalized_blocks: list[PdfExtractedBlock] = []
+    for block in repeated:
+        text = _normalise_pdf_text(block.text)
+        if text:
+            normalized_blocks.append(replace(block, text=text))
+
+    positioned_blocks: list[PdfExtractedBlock] = []
+    cursor = 0
+    for block in normalized_blocks:
+        if not block.text:
+            continue
+        positioned = replace(
+            block,
+            char_start=cursor,
+            char_end=cursor + len(block.text),
+        )
+        positioned_blocks.append(positioned)
+        cursor += len(block.text) + 1
+
+    rendered = "\n".join(block.text for block in positioned_blocks).strip()
+    # Keep text only inside the parser's in-memory handoff. The persisted
+    # metadata below strips it because the actual source text already lives in
+    # chunks and sections.
+    block_dicts = []
+    for block in positioned_blocks:
+        item = block.to_dict()
+        item["text"] = block.text
+        block_dicts.append(item)
+    return block_dicts, rendered
+
+
+def _page_has_extractable_objects(page: Any) -> bool:
+    """Distinguish a blank page from an image/graphics-only scanned page."""
+    return any(
+        bool(getattr(page, attribute, None))
+        for attribute in ("chars", "images", "rects", "lines", "curves")
+    )
+
+
+def _aggregate_pdf_quality(
+    *,
+    unreadable_pages: list[int],
+    reconstructed_pages: list[int],
+    page_count: int,
+) -> str:
+    if unreadable_pages:
+        return "unreadable"
+    if reconstructed_pages:
+        return "degraded"
+    return "good" if page_count else "unreadable"
 
 
 # Markdown files
@@ -290,11 +1384,39 @@ class PDFParser:
         import pdfplumber
 
         all_text, tables, sections, chunks, headings = [], [], [], [], []
+        unreadable_pages: list[int] = []
+        reconstructed_pages: list[int] = []
+        extraction_warnings: list[str] = []
+        page_layouts: list[dict[str, Any]] = []
+        pdf_blocks: list[dict[str, Any]] = []
+        raw_text_offset = 0
 
         with pdfplumber.open(str(path)) as pdf:
             pdf_title = self._metadata_title(getattr(pdf, "metadata", None))
             for page_num, page in enumerate(pdf.pages, 1):
-                page_text = page.extract_text() or ""
+                page_text, quality, page_warnings = self._extract_page_text(page)
+                if quality == "unreadable":
+                    unreadable_pages.append(page_num)
+                if "pdf_text_reconstructed" in page_warnings:
+                    reconstructed_pages.append(page_num)
+                layout = getattr(self, "_last_pdf_layout", None) or _pdf_layout_info(page)
+                page_layouts.append({
+                    "page": page_num,
+                    "page_height": float(getattr(page, "height", 0) or 0),
+                    "page_width": float(getattr(page, "width", 0) or 0),
+                    **layout,
+                })
+                extraction_warnings.extend(
+                    f"{warning}_page_{page_num}" if warning == "pdf_text_unreadable" else warning
+                    for warning in page_warnings
+                )
+                page_blocks = list(getattr(self, "_last_pdf_blocks", []) or [])
+                for block in page_blocks:
+                    block = dict(block)
+                    block["page"] = page_num
+                    block["char_start"] = raw_text_offset + int(block.get("char_start", 0) or 0)
+                    block["char_end"] = raw_text_offset + int(block.get("char_end", 0) or 0)
+                    pdf_blocks.append(block)
                 all_text.append(page_text)
                 headings.extend(self._extract_layout_headings(page, page_num))
 
@@ -312,7 +1434,23 @@ class PDFParser:
                     sections.append(Section(title=f"Page {page_num}",
                                             level=0, content=page_text))
                     chunks.extend(_chunk(page_text, chunk_type="page",
-                                         meta={"page": page_num}))
+                                         meta={
+                                             "page": page_num,
+                                             # Kept for the document browser and
+                                             # legacy search, not for medical
+                                             # evidence selection.
+                                             "medical_evidence": False,
+                                             "block_type": "page_text",
+                                         }))
+                raw_text_offset += len(page_text) + 2
+
+        # Repeated journal furniture is easier to identify after all pages are
+        # available. Preserve it for browsing, but mark it unusable evidence.
+        pdf_blocks = self._mark_repeated_pdf_furniture(pdf_blocks, page_layouts)
+        pdf_blocks = [
+            {key: value for key, value in block.items() if key != "text"}
+            for block in pdf_blocks
+        ]
 
         full_text = "\n\n".join(all_text)
         words = len(full_text.split())
@@ -321,8 +1459,26 @@ class PDFParser:
             "filename": path.name,
             "pages": len(all_text),
             "parser": "pdfplumber",
+            "parser_version": PDF_TEXT_PARSER_VERSION,
             "headings": headings,
             "table_count": len(tables),
+            "text_quality": _aggregate_pdf_quality(
+                unreadable_pages=unreadable_pages,
+                reconstructed_pages=reconstructed_pages,
+                page_count=len(all_text),
+            ),
+            "extraction_warnings": list(dict.fromkeys(extraction_warnings)),
+            "unreadable_pages": unreadable_pages,
+            "reconstructed_pages": reconstructed_pages,
+            "page_layouts": page_layouts,
+            "pdf_blocks": pdf_blocks,
+            "extraction_method": (
+                "pdfplumber-coordinate-columns"
+                if any(layout.get("mode") == "columns" for layout in page_layouts)
+                else "pdfplumber-mixed"
+                if reconstructed_pages
+                else "pdfplumber-text"
+            ),
         }
         if pdf_title:
             metadata["title"] = pdf_title
@@ -339,6 +1495,47 @@ class PDFParser:
             word_count   = words,
             reading_time_min = max(1, words // 250),
         )
+
+    @staticmethod
+    def _mark_repeated_pdf_furniture(
+        blocks: list[dict[str, Any]],
+        page_layouts: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Mark repeated short edge text as header/footer without deleting it."""
+        page_heights = {
+            int(layout.get("page", 0) or 0): float(layout.get("page_height", 0) or 0)
+            for layout in page_layouts
+        }
+        counts: dict[str, set[int]] = {}
+        for block in blocks:
+            normalized = " ".join(str(block.get("text") or "").lower().split())
+            if normalized and len(normalized) <= 120:
+                counts.setdefault(normalized, set()).add(int(block.get("page", 0) or 0))
+
+        result: list[dict[str, Any]] = []
+        for block in blocks:
+            updated = dict(block)
+            normalized = " ".join(str(block.get("text") or "").lower().split())
+            page = int(block.get("page", 0) or 0)
+            height = page_heights.get(page) or 800.0
+            near_top = float(block.get("top", 0) or 0) <= height * 0.12
+            near_bottom = float(block.get("bottom", 0) or 0) >= height * 0.88
+            if (
+                block.get("kind") == "body"
+                and len(normalized) <= 120
+                and len(counts.get(normalized, set())) >= 2
+                and (near_top or near_bottom)
+            ):
+                kind = "header" if near_top else "footer"
+                updated["kind"] = kind
+                updated["block_type"] = kind
+                updated["medical_evidence"] = False
+                flags = list(updated.get("quality_flags") or [])
+                if "header_footer_contamination" not in flags:
+                    flags.append("header_footer_contamination")
+                updated["quality_flags"] = flags
+            result.append(updated)
+        return result
 
     def _normalise_table(self, table: Any) -> tuple[list[str], list[list[str]]]:
         """Clean pdfplumber table output before it becomes searchable text."""
@@ -358,6 +1555,87 @@ class PDFParser:
         headers = [cell or f"Column {index + 1}" for index, cell in enumerate(padded[0])]
         rows = padded[1:]
         return headers, rows
+
+    def _extract_page_text(self, page: Any) -> tuple[str, str, list[str]]:
+        """Extract one page without silently repairing unknown word boundaries.
+
+        Some PDFs report a very small gap between glyphs. pdfplumber then joins
+        adjacent words even though the PDF still exposes separate word boxes.
+        We first retry with a tighter tolerance, and only then use those boxes
+        to rebuild lines. If neither path produces readable text, the page is
+        marked unreadable so downstream medical analysis can stop safely.
+        """
+        layout = _pdf_layout_info(page)
+        self._last_pdf_layout = layout
+        self._last_pdf_blocks, reconstructed_text = _pdf_extract_blocks(page)
+        candidates: list[str] = []
+        try:
+            candidates.append(
+                _normalise_pdf_text(
+                    page.extract_text(x_tolerance=1.5, y_tolerance=3) or ""
+                )
+            )
+        except TypeError:
+            candidates.append(_normalise_pdf_text(page.extract_text() or ""))
+        except (AttributeError, ValueError):
+            candidates.append("")
+
+        try:
+            candidates.append(
+                _normalise_pdf_text(
+                    page.extract_text(x_tolerance=0.5, y_tolerance=3) or ""
+                )
+            )
+        except (TypeError, AttributeError, ValueError):
+            pass
+
+        usable = [candidate for candidate in candidates if candidate.strip()]
+        best = min(
+            enumerate(usable),
+            key=lambda candidate: _pdf_candidate_rank(candidate[1], candidate[0]),
+            default=(0, ""),
+        )[1]
+        warnings: list[str] = []
+
+        # A normal-spaced text extraction can still interleave two columns.
+        # Coordinate reconstruction therefore wins whenever the layout detector
+        # has enough repeated gutter evidence, before text-candidate ranking.
+        if layout.get("column_count", 1) >= 2 and layout.get("stable"):
+            reconstructed = reconstructed_text or _reconstruct_pdf_words(page)
+            if reconstructed:
+                # _pdf_extract_blocks() has already normalized each block and
+                # calculated offsets from those exact strings. Re-normalizing
+                # the joined page here could change block offsets again.
+                best = (
+                    reconstructed
+                    if reconstructed_text
+                    else _normalise_pdf_text(reconstructed)
+                )
+                warnings.append("pdf_text_reconstructed")
+            else:
+                warnings.append("pdf_layout_ambiguous")
+                return best, "unreadable", warnings
+        elif layout.get("mode") == "ambiguous":
+            warnings.append("pdf_layout_ambiguous")
+            return best, "unreadable", warnings
+        elif not best or _glued_text_score(best) >= 2:
+            reconstructed = reconstructed_text or _reconstruct_pdf_words(page)
+            if reconstructed and (
+                not best or _glued_text_score(reconstructed) < _glued_text_score(best)
+            ):
+                best = _normalise_pdf_text(reconstructed)
+                warnings.append("pdf_text_reconstructed")
+
+        if not best.strip():
+            if _page_has_extractable_objects(page):
+                warnings.append("pdf_text_unreadable")
+                return "", "unreadable", warnings
+            return "", "good", warnings
+
+        if _glued_text_score(best) >= 2:
+            warnings.append("pdf_text_unreadable")
+            return best, "unreadable", warnings
+        return best, "good", warnings
 
     def _extract_layout_headings(self, page: Any, page_num: int) -> list[dict]:
         """Best-effort heading hints from pdfplumber font sizes."""
@@ -382,7 +1660,12 @@ class PDFParser:
         from PyPDF2 import PdfReader
         reader = PdfReader(str(path))
         pdf_title = self._metadata_title(getattr(reader, "metadata", None))
-        pages = [p.extract_text() or "" for p in reader.pages]
+        pages = [_normalise_pdf_text(p.extract_text() or "") for p in reader.pages]
+        unreadable_pages = [
+            index
+            for index, page_text in enumerate(pages, start=1)
+            if _glued_text_score(page_text) >= 2 or not page_text.strip()
+        ]
         full_text = "\n\n".join(pages)
         sections = [Section(f"Page {i+1}", 0, t) for i, t in enumerate(pages) if t.strip()]
         chunks = []
@@ -394,6 +1677,19 @@ class PDFParser:
             "filename": path.name,
             "pages": len(pages),
             "parser": "PyPDF2",
+            "parser_version": PDF_TEXT_PARSER_VERSION,
+            "text_quality": _aggregate_pdf_quality(
+                unreadable_pages=unreadable_pages,
+                reconstructed_pages=[],
+                page_count=len(pages),
+            ),
+            "extraction_warnings": [
+                *("pdf_text_unreadable_page_%s" % page for page in unreadable_pages),
+            ],
+            "unreadable_pages": unreadable_pages,
+            "reconstructed_pages": [],
+            "page_layouts": [],
+            "extraction_method": "PyPDF2-text",
         }
         if pdf_title:
             metadata["title"] = pdf_title

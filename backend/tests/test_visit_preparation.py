@@ -302,7 +302,7 @@ def test_save_question_is_server_bound_and_idempotent():
         assert source_refreshed_again is False
         assert item["id"] == again["id"]
         assert item["question"] == (
-            "Which people were included in this study, and who was not included?"
+            "Which study groups were included, and how might they differ from my situation?"
         )
         assert item["evidence_ids"] == ["EVIDENCE_001"]
         assert item["source_status"] == "current"
