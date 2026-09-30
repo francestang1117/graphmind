@@ -9,7 +9,12 @@ import {
   registerAccount,
 } from "../services/api";
 import {
+  beginLogout,
+  beginSessionTransition,
   clearTokens,
+  finishLogout,
+  getSessionVersion,
+  isLogoutInProgress,
   saveAccessToken,
 } from "../services/authSession";
 
@@ -17,6 +22,8 @@ interface AuthState {
   user: User | null;
   ready: boolean;
   busy: boolean;
+  logoutInProgress: boolean;
+  sessionVersion: number;
   error: string;
   restore: () => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
@@ -38,26 +45,35 @@ export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   ready: false,
   busy: false,
+  logoutInProgress: false,
+  sessionVersion: getSessionVersion(),
   error: "",
 
   restore: async () => {
+    const requestVersion = getSessionVersion();
     try {
       const user = await getCurrentUser();
+      if (requestVersion !== getSessionVersion() || isLogoutInProgress()) return;
       set({ user, ready: true, error: "" });
     } catch {
+      if (requestVersion !== getSessionVersion() || isLogoutInProgress()) return;
       clearTokens();
       set({ user: null, ready: true });
     }
   },
 
   login: async (email, password) => {
-    set({ busy: true, error: "" });
+    const requestVersion = beginSessionTransition();
+    set({ busy: true, error: "", sessionVersion: requestVersion });
     try {
       const tokens = await loginAccount(email, password);
+      if (requestVersion !== getSessionVersion()) return;
       saveAccessToken(tokens.access_token);
       const user = await getCurrentUser();
-      set({ user, busy: false });
+      if (requestVersion !== getSessionVersion()) return;
+      set({ user, busy: false, sessionVersion: requestVersion });
     } catch (error) {
+      if (requestVersion !== getSessionVersion()) return;
       clearTokens();
       set({ busy: false, error: messageFor(error) });
       throw error;
@@ -65,13 +81,17 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   register: async (email, password, name) => {
-    set({ busy: true, error: "" });
+    const requestVersion = beginSessionTransition();
+    set({ busy: true, error: "", sessionVersion: requestVersion });
     try {
       const tokens = await registerAccount(email, password, name);
+      if (requestVersion !== getSessionVersion()) return;
       saveAccessToken(tokens.access_token);
       const user = await getCurrentUser();
-      set({ user, busy: false });
+      if (requestVersion !== getSessionVersion()) return;
+      set({ user, busy: false, sessionVersion: requestVersion });
     } catch (error) {
+      if (requestVersion !== getSessionVersion()) return;
       clearTokens();
       set({ busy: false, error: messageFor(error) });
       throw error;
@@ -79,13 +99,17 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   finishOAuth: async (code) => {
-    set({ busy: true, error: "" });
+    const requestVersion = beginSessionTransition();
+    set({ busy: true, error: "", sessionVersion: requestVersion });
     try {
       const tokens = await exchangeOAuthCode(code);
+      if (requestVersion !== getSessionVersion()) return;
       saveAccessToken(tokens.access_token);
       const user = await getCurrentUser();
-      set({ user, busy: false });
+      if (requestVersion !== getSessionVersion()) return;
+      set({ user, busy: false, sessionVersion: requestVersion });
     } catch (error) {
+      if (requestVersion !== getSessionVersion()) return;
       clearTokens();
       set({ busy: false, error: messageFor(error) });
       throw error;
@@ -93,11 +117,26 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
-    set({ user: null, error: "" });
+    if (isLogoutInProgress()) return;
+    const requestVersion = beginLogout();
+    set({
+      user: null,
+      error: "",
+      busy: false,
+      logoutInProgress: true,
+      sessionVersion: requestVersion,
+    });
     try {
       await logoutAccount();
     } finally {
       clearTokens();
+      finishLogout();
+      set({
+        user: null,
+        busy: false,
+        logoutInProgress: false,
+        sessionVersion: getSessionVersion(),
+      });
     }
   },
 

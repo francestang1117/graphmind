@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   BookOpen,
   ClipboardList,
@@ -60,10 +60,20 @@ function App() {
   const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
   const [loadedWorkspaceScope, setLoadedWorkspaceScope] = useState<string | null>(null);
   const { backendOnline, setBackendOnline, setFiles, setGraphStats, setConversationId } = useAppStore();
-  const { user, ready: authReady, restore } = useAuthStore();
+  const {
+    user,
+    ready: authReady,
+    restore,
+    logoutInProgress = false,
+    sessionVersion = 0,
+  } = useAuthStore();
   const needsWorkspace = activeTab === "disease-profiles" || activeTab === "visit-prep";
-  const workspaceScope = `${activeTab}:${user?.id ?? "guest"}:${workspaceEpoch}`;
-  const workspaceIsCurrent = loadedWorkspaceScope === workspaceScope;
+  const workspaceScope = `${activeTab}:${user?.id ?? "guest"}:${sessionVersion}:${workspaceEpoch}`;
+  const workspaceScopeRef = useRef(workspaceScope);
+  useLayoutEffect(() => {
+    workspaceScopeRef.current = workspaceScope;
+  }, [workspaceScope]);
+  const workspaceIsCurrent = !logoutInProgress && loadedWorkspaceScope === workspaceScope;
   const visibleWorkspaces = workspaceIsCurrent ? workspaces : [];
   const visibleWorkspaceId = workspaceIsCurrent ? activeWorkspaceId : null;
 
@@ -98,31 +108,36 @@ function App() {
 
   useEffect(() => {
     if (!authReady) return undefined;
-    if (!needsWorkspace) return undefined;
+    if (!needsWorkspace || logoutInProgress) return undefined;
 
     let cancelled = false;
+    const requestScope = workspaceScope;
+    const requestUserId = user?.id ?? null;
     listWorkspaces()
       .then((items) => {
-        if (cancelled) return;
-        setWorkspaces(items);
-        setLoadedWorkspaceScope(workspaceScope);
+        if (cancelled || workspaceScopeRef.current !== requestScope) return;
+        const scopedItems = requestUserId
+          ? items.filter((item) => item.user_id === requestUserId)
+          : items.filter((item) => item.id === "local-dev" || item.user_id === "local-dev");
+        setWorkspaces(scopedItems);
+        setLoadedWorkspaceScope(requestScope);
         setActiveWorkspaceId((current) => (
-          current && items.some((item) => item.id === current)
+          current && scopedItems.some((item) => item.id === current)
             ? current
-            : items[0]?.id ?? null
+            : scopedItems[0]?.id ?? null
         ));
       })
       .catch(() => {
-        if (!cancelled) {
+        if (!cancelled && workspaceScopeRef.current === requestScope) {
           setWorkspaces([]);
-          setLoadedWorkspaceScope(workspaceScope);
+          setLoadedWorkspaceScope(requestScope);
           setActiveWorkspaceId(null);
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [authReady, needsWorkspace, user?.id, workspaceScope]);
+  }, [authReady, needsWorkspace, logoutInProgress, user?.id, workspaceScope]);
 
   return (
     <div className="kw-shell">

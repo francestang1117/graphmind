@@ -1,5 +1,5 @@
 import { ArrowLeft, BookOpen, ExternalLink, Search, ShieldCheck, Upload, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useDiseaseGuide, useDiseaseGuideSearch } from "../hooks/useDiseaseGuide";
 import type { DiseaseGuidePoint, DiseaseGuideSearchItem, DiseaseGuideSource } from "../services/api";
 
@@ -35,6 +35,9 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
   const [query, setQuery] = useState("");
   const [selectedConcept, setSelectedConcept] = useState<DiseaseGuideSearchItem | null>(null);
   const [openSourceId, setOpenSourceId] = useState<string | null>(null);
+  const sourceDrawerRef = useRef<HTMLElement | null>(null);
+  const sourceTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const sourceWasOpenRef = useRef(false);
   const searchQuery = useDiseaseGuideSearch(query);
   const guideQuery = useDiseaseGuide(
     selectedConcept?.guide_status === "available" ? selectedConcept.concept_id : null,
@@ -46,6 +49,66 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
     return guideQuery.data.sources.find((source) => source.id === openSourceId) ?? null;
   }, [guideQuery.data, openSourceId]);
 
+  const openSource = useCallback((sourceId: string, trigger: HTMLButtonElement) => {
+    sourceTriggerRef.current = trigger;
+    setOpenSourceId(sourceId);
+  }, []);
+
+  const closeSource = useCallback(() => {
+    setOpenSourceId(null);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedSource) {
+      if (sourceWasOpenRef.current) {
+        sourceWasOpenRef.current = false;
+        sourceTriggerRef.current?.focus();
+      }
+      return undefined;
+    }
+
+    sourceWasOpenRef.current = true;
+    const drawer = sourceDrawerRef.current;
+    if (!drawer) return undefined;
+
+    drawer.focus();
+    const focusableSelector = "button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeSource();
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const focusable = Array.from(drawer.querySelectorAll<HTMLElement>(focusableSelector));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        drawer.focus();
+        return;
+      }
+
+      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+      if (event.shiftKey && (currentIndex <= 0 || currentIndex === -1)) {
+        event.preventDefault();
+        focusable[focusable.length - 1].focus();
+      } else if (!event.shiftKey && (currentIndex === focusable.length - 1 || currentIndex === -1)) {
+        event.preventDefault();
+        focusable[0].focus();
+      }
+    };
+    const keepFocusInside = (event: FocusEvent) => {
+      if (!drawer.contains(event.target as Node)) drawer.focus();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("focusin", keepFocusInside);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("focusin", keepFocusInside);
+    };
+  }, [closeSource, selectedSource]);
+
   const openFabryGuide = () => {
     setSelectedConcept({
       concept_id: FABRY_CONCEPT_ID,
@@ -55,11 +118,13 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
       guide_status: "available",
       guide_languages: ["zh-CN"],
     });
+    sourceTriggerRef.current = null;
     setOpenSourceId(null);
   };
 
   const selectConcept = (concept: DiseaseGuideSearchItem) => {
     setSelectedConcept(concept);
+    sourceTriggerRef.current = null;
     setOpenSourceId(null);
   };
 
@@ -175,7 +240,7 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
             <SourceLinks
               sourceIds={guideQuery.data.overview.source_ids}
               sources={guideQuery.data.sources}
-              onOpen={setOpenSourceId}
+              onOpen={openSource}
             />
           </section>
 
@@ -201,7 +266,7 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
                   <SourceLinks
                     sourceIds={topic.summary.source_ids}
                     sources={guideQuery.data.sources}
-                    onOpen={setOpenSourceId}
+                    onOpen={openSource}
                   />
                   <div className="disease-guide-points">
                     {topic.key_points.map((point) => (
@@ -209,7 +274,7 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
                         key={point.id}
                         point={point}
                         sources={guideQuery.data.sources}
-                        onOpenSource={setOpenSourceId}
+                        onOpenSource={openSource}
                       />
                     ))}
                   </div>
@@ -277,12 +342,14 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
           </section>
 
           {selectedSource && (
-            <div className="disease-guide-source-backdrop" role="presentation" onClick={() => setOpenSourceId(null)}>
+            <div className="disease-guide-source-backdrop" role="presentation" onClick={closeSource}>
               <aside
                 className="disease-guide-source-drawer"
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="disease-guide-source-title"
+                ref={sourceDrawerRef}
+                tabIndex={-1}
                 onClick={(event) => event.stopPropagation()}
               >
                 <div className="disease-guide-source-heading">
@@ -290,7 +357,7 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
                     <span className="disease-guide-section-kicker">来源</span>
                     <h3 id="disease-guide-source-title">{selectedSource.title}</h3>
                   </div>
-                  <button type="button" className="disease-guide-icon-button" aria-label="关闭来源" onClick={() => setOpenSourceId(null)}>
+                  <button type="button" className="disease-guide-icon-button" aria-label="关闭来源" onClick={closeSource}>
                     <X size={18} />
                   </button>
                 </div>
@@ -315,7 +382,7 @@ function GuidePoint({
 }: {
   point: DiseaseGuidePoint;
   sources: DiseaseGuideSource[];
-  onOpenSource: (sourceId: string) => void;
+  onOpenSource: (sourceId: string, trigger: HTMLButtonElement) => void;
 }) {
   return (
     <article className="disease-guide-point">
@@ -340,7 +407,7 @@ function SourceLinks({
 }: {
   sourceIds: string[];
   sources: DiseaseGuideSource[];
-  onOpen: (sourceId: string) => void;
+  onOpen: (sourceId: string, trigger: HTMLButtonElement) => void;
 }) {
   const sourceById = new Map(sources.map((source) => [source.id, source]));
   return (
@@ -349,8 +416,8 @@ function SourceLinks({
         <button
           type="button"
           key={sourceId}
-          aria-label={`查看来源 · ${sourceById.get(sourceId)?.organization ?? sourceId}`}
-          onClick={() => onOpen(sourceId)}
+          aria-label={`查看来源 · ${sourceById.get(sourceId)?.organization ?? sourceId} · ${sourceById.get(sourceId)?.title ?? sourceId}`}
+          onClick={(event) => onOpen(sourceId, event.currentTarget)}
         >
           查看来源 · {sourceById.get(sourceId)?.organization ?? sourceId}
         </button>

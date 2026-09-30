@@ -7,7 +7,7 @@ interface AuthControlProps {
 }
 
 export default function AuthControl({ onSignIn }: AuthControlProps) {
-  const { user, ready, logout } = useAuthStore();
+  const { user, ready, logout, logoutInProgress } = useAuthStore();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
 
@@ -20,6 +20,7 @@ export default function AuthControl({ onSignIn }: AuthControlProps) {
   }, []);
 
   if (!ready) return <div className="auth-control-placeholder" />;
+  if (logoutInProgress) return <div className="auth-control-placeholder">Signing out…</div>;
   if (!user) {
     return (
       <button className="auth-sign-in" onClick={onSignIn}>

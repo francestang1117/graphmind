@@ -57,10 +57,19 @@ const workspace = {
   updated_at: "2026-09-30T00:00:00Z",
 };
 
+const privateWorkspace = {
+  ...workspace,
+  id: "account-a-workspace",
+  user_id: "previous-user",
+  name: "Account A research",
+};
+
 function configureAuth(user: { id: string } | null) {
   authStore.useAuthStore.mockReturnValue({
     user,
     ready: true,
+    logoutInProgress: false,
+    sessionVersion: 0,
     restore: vi.fn(),
   });
 }
@@ -107,7 +116,7 @@ describe("App workspace loading", () => {
       ready: true,
       restore: vi.fn(),
     }));
-    api.listWorkspaces.mockResolvedValueOnce([workspace]).mockImplementationOnce(() => {
+    api.listWorkspaces.mockResolvedValueOnce([privateWorkspace]).mockImplementationOnce(() => {
       window.dispatchEvent(new Event(api.AUTH_REQUIRED_EVENT));
       return Promise.reject(new Error("unauthorized"));
     });
@@ -115,7 +124,7 @@ describe("App workspace loading", () => {
     const view = render(<App />);
 
     await user.click(screen.getByRole("button", { name: "我的研究项目" }));
-    await waitFor(() => expect(screen.getByRole("option", { name: "Local development" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("option", { name: "Account A research" })).toBeInTheDocument());
 
     currentUser = null;
     view.rerender(<App />);
@@ -128,14 +137,17 @@ describe("App workspace loading", () => {
 
   it("hides the previous workspace while the next account is still loading", async () => {
     let currentUser: { id: string } | null = { id: "previous-user" };
-    let resolveNextWorkspaces: ((items: typeof workspace[]) => void) | undefined;
+    let sessionVersion = 0;
+    let resolveNextWorkspaces: ((items: typeof privateWorkspace[]) => void) | undefined;
     authStore.useAuthStore.mockImplementation(() => ({
       user: currentUser,
       ready: true,
+      logoutInProgress: false,
+      sessionVersion,
       restore: vi.fn(),
     }));
     api.listWorkspaces
-      .mockResolvedValueOnce([workspace])
+      .mockResolvedValueOnce([privateWorkspace])
       .mockImplementationOnce(() => new Promise((resolve) => {
         resolveNextWorkspaces = resolve;
       }));
@@ -145,29 +157,35 @@ describe("App workspace loading", () => {
     await user.click(screen.getByRole("button", { name: "我的研究项目" }));
     await waitFor(() => expect(screen.getByTestId("research-profile-panel")).toHaveAttribute(
       "data-workspace-id",
-      "local-dev",
+      "account-a-workspace",
     ));
 
     currentUser = null;
+    sessionVersion += 1;
     view.rerender(<App />);
 
     expect(screen.getByTestId("research-profile-panel")).toHaveAttribute("data-workspace-id", "");
     expect(screen.queryByRole("option", { name: "Local development" })).not.toBeInTheDocument();
 
-    resolveNextWorkspaces?.([workspace]);
+    resolveNextWorkspaces?.([privateWorkspace]);
     await waitFor(() => expect(api.listWorkspaces).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("research-profile-panel")).toHaveAttribute("data-workspace-id", "");
+    expect(screen.queryByRole("option", { name: "Account A research" })).not.toBeInTheDocument();
   });
 
   it("hides the previous workspace from visit preparation while loading", async () => {
     let currentUser: { id: string } | null = { id: "previous-user" };
-    let resolveNextWorkspaces: ((items: typeof workspace[]) => void) | undefined;
+    let sessionVersion = 0;
+    let resolveNextWorkspaces: ((items: typeof privateWorkspace[]) => void) | undefined;
     authStore.useAuthStore.mockImplementation(() => ({
       user: currentUser,
       ready: true,
+      logoutInProgress: false,
+      sessionVersion,
       restore: vi.fn(),
     }));
     api.listWorkspaces
-      .mockResolvedValueOnce([workspace])
+      .mockResolvedValueOnce([privateWorkspace])
       .mockImplementationOnce(() => new Promise((resolve) => {
         resolveNextWorkspaces = resolve;
       }));
@@ -177,15 +195,58 @@ describe("App workspace loading", () => {
     await user.click(screen.getByRole("button", { name: "就诊准备" }));
     await waitFor(() => expect(screen.getByTestId("visit-prep-panel")).toHaveAttribute(
       "data-workspace-id",
-      "local-dev",
+      "account-a-workspace",
     ));
 
     currentUser = null;
+    sessionVersion += 1;
     view.rerender(<App />);
 
     expect(screen.getByTestId("visit-prep-panel")).toHaveAttribute("data-workspace-id", "");
-    resolveNextWorkspaces?.([workspace]);
+    resolveNextWorkspaces?.([privateWorkspace]);
     await waitFor(() => expect(api.listWorkspaces).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("visit-prep-panel")).toHaveAttribute("data-workspace-id", "");
+    expect(screen.queryByRole("option", { name: "Account A research" })).not.toBeInTheDocument();
+  });
+
+  it("stops private workspace loading during logout and resumes anonymous local mode afterward", async () => {
+    let currentUser: { id: string } | null = { id: "previous-user" };
+    let logoutInProgress = false;
+    let sessionVersion = 0;
+    authStore.useAuthStore.mockImplementation(() => ({
+      user: currentUser,
+      ready: true,
+      logoutInProgress,
+      sessionVersion,
+      restore: vi.fn(),
+    }));
+    api.listWorkspaces
+      .mockResolvedValueOnce([privateWorkspace])
+      .mockResolvedValueOnce([workspace]);
+    const user = userEvent.setup();
+    const view = render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "我的研究项目" }));
+    await waitFor(() => expect(screen.getByTestId("research-profile-panel")).toHaveAttribute(
+      "data-workspace-id",
+      "account-a-workspace",
+    ));
+
+    currentUser = null;
+    logoutInProgress = true;
+    sessionVersion += 1;
+    view.rerender(<App />);
+
+    expect(screen.getByTestId("research-profile-panel")).toHaveAttribute("data-workspace-id", "");
+    expect(api.listWorkspaces).toHaveBeenCalledTimes(1);
+
+    logoutInProgress = false;
+    view.rerender(<App />);
+    await waitFor(() => expect(api.listWorkspaces).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId("research-profile-panel")).toHaveAttribute(
+      "data-workspace-id",
+      "local-dev",
+    ));
   });
 
   it("labels the private document search entry consistently", async () => {

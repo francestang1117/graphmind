@@ -1,7 +1,9 @@
-import axios from "axios";
+import axios, { type AxiosRequestConfig, type InternalAxiosRequestConfig } from "axios";
 import type { FileInfo } from "../stores/appStore";
 import type { AuthProviders, TokenPair, User } from "../types";
 import {
+  getSessionVersion,
+  isLogoutInProgress,
   clearTokens,
   getAccessToken,
   saveAccessToken,
@@ -15,6 +17,13 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 export const AUTH_REQUIRED_EVENT = "graphmind:auth-required";
+
+type AuthRequestConfig = InternalAxiosRequestConfig & {
+  _allowDuringLogout?: boolean;
+  _retried?: boolean;
+  _sessionVersion?: number;
+  _skipAuthRefresh?: boolean;
+};
 
 const http = axios.create({
   baseURL: `${API_BASE}/api/v1`,
@@ -60,12 +69,26 @@ http.interceptors.response.use(annotateMedicalInsightResponse, async (error) => 
 });
 
 http.interceptors.request.use((config) => {
+  const request = config as AuthRequestConfig;
+  request._sessionVersion ??= getSessionVersion();
+  if (isLogoutInProgress() && !request._allowDuringLogout) {
+    if (typeof request.headers.delete === "function") request.headers.delete("Authorization");
+    else delete request.headers.Authorization;
+    return request;
+  }
   const token = getAccessToken();
   if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
+  return request;
 });
 
-let refreshRequest: Promise<string> | null = null;
+class AuthSessionChangedError extends Error {
+  constructor() {
+    super("The authentication session changed while this request was in flight.");
+    this.name = "AuthSessionChangedError";
+  }
+}
+
+let refreshRequest: { version: number; promise: Promise<string> } | null = null;
 
 function notifyAuthRequired(url?: string) {
   // A guest check on startup is normal; a private workspace request is not.
@@ -74,8 +97,16 @@ function notifyAuthRequired(url?: string) {
 }
 
 http.interceptors.response.use(undefined, async (error) => {
-  const request = error.config as (typeof error.config & { _retried?: boolean }) | undefined;
+  const request = error.config as AuthRequestConfig | undefined;
   if (error.response?.status !== 401 || !request) {
+    return Promise.reject(error);
+  }
+  const requestVersion = request._sessionVersion ?? getSessionVersion();
+  if (
+    request._skipAuthRefresh
+    || isLogoutInProgress()
+    || requestVersion !== getSessionVersion()
+  ) {
     return Promise.reject(error);
   }
   if (request._retried) {
@@ -84,25 +115,42 @@ http.interceptors.response.use(undefined, async (error) => {
   }
 
   request._retried = true;
-  refreshRequest ??= axios
-    .post<{ access_token: string }>(
-      `${API_BASE}/api/v1/auth/refresh`,
-      {},
-      { withCredentials: true },
-    )
-    .then(({ data }) => {
-      saveAccessToken(data.access_token);
-      return data.access_token;
-    })
-    .finally(() => {
-      refreshRequest = null;
-    });
+  const refreshVersion = getSessionVersion();
+  if (!refreshRequest || refreshRequest.version !== refreshVersion) {
+    const promise = axios
+      .post<{ access_token: string }>(
+        `${API_BASE}/api/v1/auth/refresh`,
+        {},
+        { withCredentials: true },
+      )
+      .then(({ data }) => {
+        if (refreshVersion !== getSessionVersion() || isLogoutInProgress()) {
+          throw new AuthSessionChangedError();
+        }
+        saveAccessToken(data.access_token);
+        return data.access_token;
+      })
+      .finally(() => {
+        if (refreshRequest?.version === refreshVersion) refreshRequest = null;
+      });
+    refreshRequest = { version: refreshVersion, promise };
+  }
 
   try {
-    const token = await refreshRequest;
+    const token = await refreshRequest.promise;
+    if (requestVersion !== getSessionVersion() || isLogoutInProgress()) {
+      throw new AuthSessionChangedError();
+    }
     request.headers.Authorization = `Bearer ${token}`;
     return http(request);
   } catch (refreshError) {
+    if (
+      refreshError instanceof AuthSessionChangedError
+      || requestVersion !== getSessionVersion()
+      || isLogoutInProgress()
+    ) {
+      return Promise.reject(refreshError);
+    }
     clearTokens();
     notifyAuthRequired(request.url);
     return Promise.reject(refreshError);
@@ -1070,7 +1118,10 @@ export const getCurrentUser = (): Promise<User> =>
 export const listWorkspaces = (): Promise<WorkspaceInfo[]> =>
   http.get<WorkspaceInfo[]>("/workspaces/").then((r) => r.data);
 
-export const logoutAccount = () => http.post("/auth/logout", {});
+export const logoutAccount = () => http.post("/auth/logout", {}, {
+  _allowDuringLogout: true,
+  _skipAuthRefresh: true,
+} as AxiosRequestConfig);
 
 export const getAuthProviders = (): Promise<AuthProviders> =>
   http.get("/auth/providers").then((r) => r.data);

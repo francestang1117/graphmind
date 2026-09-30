@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -117,11 +117,26 @@ describe("DiseaseGuidePage", () => {
 
     const sourceButton = screen.getAllByRole("button", { name: /查看来源 · MedlinePlus Genetics/ })[0];
     await user.click(sourceButton);
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveFocus();
     expect(screen.getByRole("heading", { name: "Fabry disease" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /打开原始来源/ })).toHaveAttribute("href", source.url);
+    const closeButton = screen.getByRole("button", { name: "关闭来源" });
+    const sourceLink = screen.getByRole("link", { name: /打开原始来源/ });
+    expect(sourceLink).toHaveAttribute("href", source.url);
 
-    await user.click(screen.getByRole("button", { name: "关闭来源" }));
+    await user.tab();
+    expect(closeButton).toHaveFocus();
+    await user.tab();
+    expect(sourceLink).toHaveFocus();
+    await user.tab();
+    expect(closeButton).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(sourceLink).toHaveFocus();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(sourceButton).toHaveFocus();
+
     await user.click(screen.getByRole("button", { name: /查看本指南参考资料/ }));
     expect(screen.getByRole("heading", { name: "本指南参考资料" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Fabry disease/ })).toHaveAttribute("href", source.url);
