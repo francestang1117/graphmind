@@ -20,14 +20,14 @@ def isolate_auth_storage(monkeypatch):
     monkeypatch.setattr(auth, "_redis_client", no_redis)
 
 
-def _client() -> TestClient:
+def _client(*, raise_server_exceptions: bool = True) -> TestClient:
     auth._users.clear()
     auth._refresh_tokens.clear()
     auth._oauth_users.clear()
     auth._oauth_values.clear()
     app = FastAPI()
     app.include_router(auth.router, prefix="/auth")
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
 
 def test_register_login_refresh_logout_flow():
@@ -74,6 +74,81 @@ def test_register_login_refresh_logout_flow():
     assert "Max-Age=0" in logout.headers["set-cookie"]
     refresh_again = client.post("/auth/refresh", headers=cookie_header)
     assert refresh_again.status_code == 401
+
+
+def test_logout_revokes_refresh_token_when_access_token_is_expired(monkeypatch):
+    client = _client()
+    register = client.post(
+        "/auth/register",
+        json={"email": "expired@example.com", "password": "strong-pass"},
+    )
+    assert register.status_code == 201
+    tokens = register.json()
+    refresh_token = tokens["refresh_token"]
+    cookie_header = {
+        "Cookie": f"{auth.settings.REFRESH_COOKIE_NAME}={refresh_token}"
+    }
+
+    monkeypatch.setattr(auth.settings, "ACCESS_TOKEN_EXPIRE_MINUTES", -1)
+    expired_access_token = auth._create_access_token(auth._users["expired@example.com"].id)
+
+    logout = client.post(
+        "/auth/logout",
+        headers={
+            "Authorization": f"Bearer {expired_access_token}",
+            **cookie_header,
+        },
+    )
+
+    assert logout.status_code == 200
+    assert "Max-Age=0" in logout.headers["set-cookie"]
+    assert refresh_token not in auth._refresh_tokens
+    assert client.post("/auth/refresh", headers=cookie_header).status_code == 401
+
+
+def test_logout_is_idempotent_without_access_token_and_with_refresh_cookie():
+    client = _client()
+    register = client.post(
+        "/auth/register",
+        json={"email": "cookie-only@example.com", "password": "strong-pass"},
+    )
+    assert register.status_code == 201
+    refresh_token = register.json()["refresh_token"]
+    cookie_header = {
+        "Cookie": f"{auth.settings.REFRESH_COOKIE_NAME}={refresh_token}"
+    }
+
+    logout = client.post("/auth/logout", headers=cookie_header)
+    repeated_logout = client.post("/auth/logout")
+
+    assert logout.status_code == 200
+    assert repeated_logout.status_code == 200
+    assert "Max-Age=0" in logout.headers["set-cookie"]
+    assert "Max-Age=0" in repeated_logout.headers["set-cookie"]
+    assert client.post("/auth/refresh", headers=cookie_header).status_code == 401
+
+
+def test_logout_still_clears_cookie_when_refresh_revocation_fails(monkeypatch):
+    client = _client(raise_server_exceptions=False)
+
+    async def fail_to_revoke(_token):
+        raise RuntimeError("storage unavailable")
+
+    monkeypatch.setattr(
+        auth,
+        "_revoke_refresh_token",
+        fail_to_revoke,
+    )
+
+    response = client.post(
+        "/auth/logout",
+        headers={
+            "Cookie": f"{auth.settings.REFRESH_COOKIE_NAME}=refresh-token",
+        },
+    )
+
+    assert response.status_code == 503
+    assert "Max-Age=0" in response.headers["set-cookie"]
 
 
 def test_duplicate_email_is_rejected():
