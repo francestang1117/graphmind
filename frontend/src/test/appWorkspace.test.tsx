@@ -125,4 +125,77 @@ describe("App workspace loading", () => {
     expect(screen.queryByRole("option", { name: "Local development" })).not.toBeInTheDocument();
     expect(screen.getByTestId("research-profile-panel")).toHaveAttribute("data-workspace-id", "");
   });
+
+  it("hides the previous workspace while the next account is still loading", async () => {
+    let currentUser: { id: string } | null = { id: "previous-user" };
+    let resolveNextWorkspaces: ((items: typeof workspace[]) => void) | undefined;
+    authStore.useAuthStore.mockImplementation(() => ({
+      user: currentUser,
+      ready: true,
+      restore: vi.fn(),
+    }));
+    api.listWorkspaces
+      .mockResolvedValueOnce([workspace])
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveNextWorkspaces = resolve;
+      }));
+    const user = userEvent.setup();
+    const view = render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "我的研究项目" }));
+    await waitFor(() => expect(screen.getByTestId("research-profile-panel")).toHaveAttribute(
+      "data-workspace-id",
+      "local-dev",
+    ));
+
+    currentUser = null;
+    view.rerender(<App />);
+
+    expect(screen.getByTestId("research-profile-panel")).toHaveAttribute("data-workspace-id", "");
+    expect(screen.queryByRole("option", { name: "Local development" })).not.toBeInTheDocument();
+
+    resolveNextWorkspaces?.([workspace]);
+    await waitFor(() => expect(api.listWorkspaces).toHaveBeenCalledTimes(2));
+  });
+
+  it("hides the previous workspace from visit preparation while loading", async () => {
+    let currentUser: { id: string } | null = { id: "previous-user" };
+    let resolveNextWorkspaces: ((items: typeof workspace[]) => void) | undefined;
+    authStore.useAuthStore.mockImplementation(() => ({
+      user: currentUser,
+      ready: true,
+      restore: vi.fn(),
+    }));
+    api.listWorkspaces
+      .mockResolvedValueOnce([workspace])
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveNextWorkspaces = resolve;
+      }));
+    const user = userEvent.setup();
+    const view = render(<App />);
+
+    await user.click(screen.getByRole("button", { name: "就诊准备" }));
+    await waitFor(() => expect(screen.getByTestId("visit-prep-panel")).toHaveAttribute(
+      "data-workspace-id",
+      "local-dev",
+    ));
+
+    currentUser = null;
+    view.rerender(<App />);
+
+    expect(screen.getByTestId("visit-prep-panel")).toHaveAttribute("data-workspace-id", "");
+    resolveNextWorkspaces?.([workspace]);
+    await waitFor(() => expect(api.listWorkspaces).toHaveBeenCalledTimes(2));
+  });
+
+  it("labels the private document search entry consistently", async () => {
+    configureAuth(null);
+    const user = userEvent.setup();
+
+    render(<App />);
+    await user.click(screen.getByRole("button", { name: "搜索我的资料" }));
+
+    expect(screen.getByRole("heading", { name: "搜索我的资料" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "PubMed 检索" })).not.toBeInTheDocument();
+  });
 });

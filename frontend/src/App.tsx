@@ -35,7 +35,7 @@ const primaryTabs: NavTab[] = [
 
 const researchTabs: NavTab[] = [
   { id: "disease-profiles", label: "我的研究项目", title: "我的研究项目", icon: FolderSearch },
-  { id: "search", label: "PubMed 检索", title: "Semantic Search", icon: Search },
+  { id: "search", label: "搜索我的资料", title: "搜索我的资料", icon: Search },
   { id: "graph", label: "知识图谱", title: "Knowledge Graph", icon: Network },
   { id: "chat", label: "AI Chat", title: "AI Chat", icon: MessageSquare },
   { id: "visit-prep", label: "就诊准备", title: "Visit Preparation", icon: ClipboardList },
@@ -45,7 +45,7 @@ const tabTitles: Record<Tab, string> = {
   explore: "了解疾病",
   upload: "我的资料",
   graph: "Knowledge Graph",
-  search: "Semantic Search",
+  search: "搜索我的资料",
   chat: "AI Chat",
   "disease-profiles": "Disease Research Profiles",
   "visit-prep": "Visit Preparation",
@@ -198,15 +198,15 @@ function App() {
             {activeTab === "chat" && <ChatPanel />}
             {activeTab === "disease-profiles" && (
               <DiseaseProfilePanel
-                key={activeWorkspaceId ?? "none"}
-                workspaceId={activeWorkspaceId}
+                key={`${workspaceScope}:${visibleWorkspaceId ?? "none"}`}
+                workspaceId={visibleWorkspaceId}
                 onOpenVisitPrep={() => setActiveTab("visit-prep")}
               />
             )}
             {activeTab === "visit-prep" && (
               <VisitPreparationPanel
-                key={activeWorkspaceId ?? "none"}
-                workspaceId={activeWorkspaceId}
+                key={`${workspaceScope}:${visibleWorkspaceId ?? "none"}`}
+                workspaceId={visibleWorkspaceId}
               />
             )}
           </div>
