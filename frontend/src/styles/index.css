@@ -707,7 +707,8 @@ button {
 .kw-content {
   min-height: 0;
   flex: 1;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .kw-workspace {
