@@ -20,6 +20,8 @@ const source = {
   published_at: null,
   checked_at: "2026-09-30",
   source_type: "institutional" as const,
+  language: "en",
+  usage_note: "用于说明疾病基本概念。",
 };
 
 const referenceSource = {
@@ -30,6 +32,8 @@ const referenceSource = {
   published_at: null,
   checked_at: "2026-09-30",
   source_type: "reference" as const,
+  language: "en",
+  usage_note: "用于补充疾病机制和遗传信息。",
 };
 
 const guide = {
@@ -63,6 +67,12 @@ const guide = {
         region: "",
         source_ids: [source.id, referenceSource.id],
       }],
+      terms: [{
+        id: "gla-gene",
+        label: "GLA 基因",
+        definition: { text: "影响细胞处理某些脂质能力的基因。", source_ids: [source.id] },
+        context: { text: "它位于 X 染色体上。", source_ids: [referenceSource.id] },
+      }],
     },
     {
       id: "treatments",
@@ -94,6 +104,12 @@ const guide = {
         applicability: "",
         region: "国际登记",
         source_ids: [referenceSource.id],
+        research_context: {
+          evidence_kind: "registry" as const,
+          goal: { text: "了解研究想解决的问题。", source_ids: [referenceSource.id] },
+          current: { text: "目前只有登记信息可核对。", source_ids: [referenceSource.id] },
+          unknown: { text: "结果仍需后续研究确认。", source_ids: [referenceSource.id] },
+        },
       }],
     },
   ],
@@ -137,7 +153,19 @@ describe("DiseaseGuidePage", () => {
     await user.click(result);
 
     expect(await screen.findByRole("heading", { name: "法布雷病" })).toBeInTheDocument();
-    expect(screen.getByText("一句话认识")).toBeInTheDocument();
+    expect(screen.getByText("先认识这个病")).toBeInTheDocument();
+    const startButton = screen.getByRole("button", { name: "从基础开始了解" });
+    await user.click(startButton);
+    expect(document.getElementById("guide-topic-what_is")).toHaveAttribute("open");
+    expect(document.getElementById("guide-topic-what_is")?.querySelector("summary")).toHaveFocus();
+    await user.click(screen.getByText("GLA 基因是什么意思？"));
+    expect(screen.getByText("影响细胞处理某些脂质能力的基因。")).toBeInTheDocument();
+    expect(screen.getByText("它位于 X 染色体上。")).toBeInTheDocument();
+
+    const nextTopicButton = screen.getByRole("button", { name: "接着了解：目前有哪些治疗方向？" });
+    await user.click(nextTopicButton);
+    expect(document.getElementById("guide-topic-treatments")).toHaveAttribute("open");
+    expect(document.getElementById("guide-topic-treatments")?.querySelector("summary")).toHaveFocus();
     expect(screen.getAllByRole("button", { name: "打开主题：这个病是什么，为什么会发生？" })[0]).toBeInTheDocument();
     expect(screen.getByText("某些脂质可能在细胞内积累。")).toBeInTheDocument();
 
@@ -153,6 +181,10 @@ describe("DiseaseGuidePage", () => {
     await user.click(researchNav);
     expect(screen.getByText("临床研究登记")).toBeInTheDocument();
     expect(screen.getByText("国际登记")).toBeInTheDocument();
+    expect(screen.getByText("想解决什么问题")).toBeInTheDocument();
+    expect(screen.getByText("了解研究想解决的问题。")).toBeInTheDocument();
+    expect(screen.getByText("目前只有登记信息可核对。")).toBeInTheDocument();
+    expect(screen.getByText("还有哪些不确定")).toBeInTheDocument();
 
     const sourceButton = screen.getAllByRole("button", { name: /查看依据 1：MedlinePlus Genetics/ })[0];
     await user.click(sourceButton);
@@ -160,6 +192,8 @@ describe("DiseaseGuidePage", () => {
     expect(dialog).toBeInTheDocument();
     expect(dialog).toHaveFocus();
     expect(screen.getByRole("heading", { name: "Fabry disease" })).toBeInTheDocument();
+    expect(screen.getByText("资料语言：英文")).toBeInTheDocument();
+    expect(screen.getByText("本指南使用它来：用于说明疾病基本概念。")).toBeInTheDocument();
     const closeButton = screen.getByRole("button", { name: "关闭来源" });
     const sourceLink = screen.getByRole("link", { name: /打开原始来源/ });
     expect(sourceLink).toHaveAttribute("href", source.url);
@@ -176,7 +210,11 @@ describe("DiseaseGuidePage", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(sourceButton).toHaveFocus();
 
-    await user.click(screen.getByRole("button", { name: /查看本指南参考资料/ }));
+    await user.click(screen.getByRole("button", { name: "回到主题目录" }));
+    expect(screen.getAllByRole("button", { name: "打开主题：这个病是什么，为什么会发生？" })[0]).toHaveFocus();
+
+    const sourceActions = screen.getAllByRole("button", { name: /查看本指南参考资料/ });
+    await user.click(sourceActions[sourceActions.length - 1]);
     expect(screen.getByRole("heading", { name: "本指南参考资料" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Fabry disease/ })).toHaveAttribute("href", source.url);
     await user.click(screen.getByRole("button", { name: /上传自己的资料/ }));
@@ -247,6 +285,7 @@ describe("DiseaseGuidePage", () => {
     await user.click((await screen.findAllByRole("button", { name: /糖尿病 Diabetes Mellitus/ }))[0]);
 
     expect(await screen.findByText(/公共指南正在准备中/)).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "返回疾病搜索" })).toHaveLength(2);
     expect(screen.getByRole("button", { name: "查看我的资料" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "查看我的资料" }));
     expect(onOpenMySources).toHaveBeenCalledTimes(1);
