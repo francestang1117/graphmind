@@ -303,13 +303,26 @@ async def _get_refresh_user_id(token: str) -> Optional[str]:
 
 async def _revoke_refresh_token(token: str) -> None:
     client = await _redis_client()
-    if client:
+    if not client:
+        _refresh_tokens.pop(token, None)
+        return
+
+    delete_error: Exception | None = None
+    try:
+        await client.delete(f"refresh:{token}")
+    except Exception as exc:
+        delete_error = exc
+    finally:
+        _refresh_tokens.pop(token, None)
         try:
-            await client.delete(f"refresh:{token}")
             await client.aclose()
-        except Exception:
-            pass
-    _refresh_tokens.pop(token, None)
+        except Exception as exc:
+            # A successful delete remains successful even if cleanup fails.
+            log.warning("Redis refresh token client close failed: %s", exc)
+
+    if delete_error is not None:
+        log.warning("Redis refresh token revocation failed: %s", delete_error)
+        raise delete_error
 
 
 async def _store_oauth_value(key: str, value: str, ttl: int) -> None:

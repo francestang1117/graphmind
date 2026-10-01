@@ -120,7 +120,7 @@ http.interceptors.response.use(undefined, async (error) => {
     const promise = axios
       .post<{ access_token: string }>(
         `${API_BASE}/api/v1/auth/refresh`,
-        {},
+        undefined,
         { withCredentials: true },
       )
       .then(({ data }) => {
@@ -1118,7 +1118,7 @@ export const getCurrentUser = (): Promise<User> =>
 export const listWorkspaces = (): Promise<WorkspaceInfo[]> =>
   http.get<WorkspaceInfo[]>("/workspaces/").then((r) => r.data);
 
-export const logoutAccount = () => http.post("/auth/logout", {}, {
+export const logoutAccount = () => http.post("/auth/logout", undefined, {
   _allowDuringLogout: true,
   _skipAuthRefresh: true,
 } as AxiosRequestConfig);

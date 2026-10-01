@@ -11,18 +11,19 @@ const axiosHarness = vi.hoisted(() => {
         }),
       },
     },
+    post: vi.fn(),
   };
   const axiosDefault = {
     create: vi.fn(() => client),
     isAxiosError: vi.fn(() => true),
     post: vi.fn(),
   };
-  return { axiosDefault, responseRejectors };
+  return { axiosDefault, client, responseRejectors };
 });
 
 vi.mock("axios", () => ({ default: axiosHarness.axiosDefault }));
 
-import "../services/api";
+import { logoutAccount } from "../services/api";
 import {
   beginLogout,
   clearTokens,
@@ -58,11 +59,31 @@ describe("API authentication session boundaries", () => {
       config: { url: "/workspaces/", headers: {} },
     });
     await Promise.resolve();
+    expect(axiosHarness.axiosDefault.post).toHaveBeenCalledWith(
+      expect.stringContaining("/auth/refresh"),
+      undefined,
+      { withCredentials: true },
+    );
 
     beginLogout();
     refresh.resolve({ data: { access_token: "late-account-a-token" } });
 
     await expect(request).rejects.toThrow("authentication session changed");
     expect(getAccessToken()).toBe("account-a-token");
+  });
+
+  it("uses the refresh cookie without serializing an empty logout body", async () => {
+    axiosHarness.client.post.mockResolvedValue({ data: { message: "Logged out" } });
+
+    await logoutAccount();
+
+    expect(axiosHarness.client.post).toHaveBeenCalledWith(
+      "/auth/logout",
+      undefined,
+      expect.objectContaining({
+        _allowDuringLogout: true,
+        _skipAuthRefresh: true,
+      }),
+    );
   });
 });
