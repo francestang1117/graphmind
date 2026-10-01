@@ -33,10 +33,22 @@ def test_fabry_guide_has_sources_and_review_dates_for_every_claim() -> None:
     assert len(guide.topics) == 5
     assert guide.overview.source_ids
     assert all(source.checked_at for source in guide.sources)
+    assert all(source.language and source.usage_note for source in guide.sources)
     for topic in guide.topics:
         assert topic.summary.source_ids
+        for term in topic.terms:
+            assert term.definition.source_ids
+            if term.context:
+                assert set(term.context.source_ids) <= source_ids
         for point in topic.key_points:
             assert set(point.source_ids) <= source_ids
+            if point.research_context:
+                for claim in (
+                    point.research_context.goal,
+                    point.research_context.current,
+                    point.research_context.unknown,
+                ):
+                    assert set(claim.source_ids) <= set(point.source_ids)
             if topic.id in {"treatments", "research_progress"}:
                 assert point.evidence_stage
             if topic.id == "treatments":
@@ -68,6 +80,17 @@ def test_fabry_guide_retains_x_linked_inheritance_context() -> None:
     assert set(inheritance.source_ids) <= source_ids
 
 
+def test_fabry_guide_explains_required_terms_and_research_context() -> None:
+    guide = load_guides()[('mesh:D000795', 'zh-CN')]
+    what_is = next(topic for topic in guide.topics if topic.id == "what_is")
+    research = next(topic for topic in guide.topics if topic.id == "research_progress")
+
+    assert {term.id for term in what_is.terms} >= {"gla-gene", "alpha-galactosidase-a", "gb3"}
+    assert all(term.definition.source_ids for term in what_is.terms)
+    assert all(point.research_context for point in research.key_points)
+    assert {point.research_context.evidence_kind for point in research.key_points} == {"registry"}
+
+
 def test_fabry_chaperone_entry_uses_current_japan_scope_and_label() -> None:
     guide = load_guides()[("mesh:D000795", "zh-CN")]
     treatment = next(topic for topic in guide.topics if topic.id == "treatments")
@@ -88,6 +111,41 @@ def test_guide_rejects_a_claim_that_references_an_unknown_source() -> None:
     payload["overview"]["source_ids"] = ["source-that-does-not-exist"]
 
     with pytest.raises(ValidationError, match="unknown sources"):
+        DiseaseGuide.model_validate(payload)
+
+
+def test_old_guide_payload_without_optional_reading_fields_remains_compatible() -> None:
+    payload = load_guides()[('mesh:D000795', 'zh-CN')].model_dump(mode="json")
+    for source in payload["sources"]:
+        source.pop("language", None)
+        source.pop("usage_note", None)
+    for topic in payload["topics"]:
+        topic.pop("terms", None)
+        for point in topic["key_points"]:
+            point.pop("research_context", None)
+
+    restored = DiseaseGuide.model_validate(payload)
+
+    assert restored.sources[0].language == ""
+    assert restored.topics[0].terms == []
+    assert restored.topics[-1].key_points[0].research_context is None
+
+
+def test_guide_rejects_duplicate_term_ids() -> None:
+    payload = load_guides()[('mesh:D000795', 'zh-CN')].model_dump(mode="json")
+    terms = payload["topics"][0]["terms"]
+    terms[1]["id"] = terms[0]["id"]
+
+    with pytest.raises(ValidationError, match="term ids must be unique"):
+        DiseaseGuide.model_validate(payload)
+
+
+def test_guide_requires_research_context_sources_on_the_parent_point() -> None:
+    payload = load_guides()[('mesh:D000795', 'zh-CN')].model_dump(mode="json")
+    point = payload["topics"][-1]["key_points"][0]
+    point["research_context"]["goal"]["source_ids"] = ["trial-prx102"]
+
+    with pytest.raises(ValidationError, match="research context sources"):
         DiseaseGuide.model_validate(payload)
 
 
