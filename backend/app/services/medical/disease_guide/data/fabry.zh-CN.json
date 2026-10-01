@@ -42,6 +42,16 @@
           "applicability": "需要结合遗传检测、酶活性和临床评估理解。",
           "region": "",
           "source_ids": ["genereviews-fabry"]
+        },
+        {
+          "id": "what-is-inheritance",
+          "text": "法布雷病相关的 GLA 基因位于 X 染色体上，因此它的遗传方式与 X 染色体有关。女性也可能出现症状或器官问题，并不只是没有症状的“携带者”。",
+          "qualifier": "不同家人的表现可能不同，家族中的遗传风险需要结合具体情况评估。",
+          "evidence_status": "established",
+          "evidence_stage": "已有遗传机制资料",
+          "applicability": "用于理解疾病的遗传特点和家族相关性。",
+          "region": "",
+          "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
         }
       ]
     },

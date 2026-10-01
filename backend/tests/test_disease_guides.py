@@ -57,6 +57,17 @@ def test_fabry_guide_uses_plain_language_topic_questions() -> None:
     ]
 
 
+def test_fabry_guide_retains_x_linked_inheritance_context() -> None:
+    guide = load_guides()[("mesh:D000795", "zh-CN")]
+    source_ids = {source.id for source in guide.sources}
+    what_is = next(topic for topic in guide.topics if topic.id == "what_is")
+    inheritance = next(point for point in what_is.key_points if point.id == "what-is-inheritance")
+
+    assert "X 染色体" in inheritance.text
+    assert "女性" in inheritance.text
+    assert set(inheritance.source_ids) <= source_ids
+
+
 def test_fabry_chaperone_entry_uses_current_japan_scope_and_label() -> None:
     guide = load_guides()[("mesh:D000795", "zh-CN")]
     treatment = next(topic for topic in guide.topics if topic.id == "treatments")

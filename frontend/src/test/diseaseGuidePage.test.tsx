@@ -201,6 +201,33 @@ describe("DiseaseGuidePage", () => {
     expect(screen.getAllByRole("button", { name: /查看依据 2：NCBI Bookshelf/ }).length).toBeGreaterThan(1);
   });
 
+  it("reopens the introductory topic for a fresh guide and preserves manual collapse", async () => {
+    const user = userEvent.setup();
+    api.getDiseaseGuide.mockResolvedValue(guide);
+
+    render(<DiseaseGuidePage onOpenMySources={vi.fn()} />, { wrapper });
+    await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));
+    await screen.findByRole("heading", { name: "法布雷病" });
+
+    const getIntroTopic = () => document.getElementById("guide-topic-what_is") as HTMLDetailsElement | null;
+    expect(getIntroTopic()?.open).toBe(true);
+
+    const introSummary = getIntroTopic()?.querySelector("summary");
+    expect(introSummary).not.toBeNull();
+    await user.click(introSummary as HTMLElement);
+    expect(getIntroTopic()?.open).toBe(false);
+
+    await user.click(screen.getAllByRole("button", { name: /查看依据 1：MedlinePlus Genetics/ })[0]);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(getIntroTopic()?.open).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "返回疾病搜索" }));
+    await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));
+    await screen.findByRole("heading", { name: "法布雷病" });
+    expect(getIntroTopic()?.open).toBe(true);
+  });
+
   it("shows a clear preparing state when a concept has no public guide", async () => {
     const user = userEvent.setup();
     api.searchDiseaseGuides.mockResolvedValue({

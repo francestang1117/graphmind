@@ -47,7 +47,6 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
   const sourceDrawerRef = useRef<HTMLElement | null>(null);
   const sourceTriggerRef = useRef<HTMLButtonElement | null>(null);
   const sourceWasOpenRef = useRef(false);
-  const initialTopicOpenedRef = useRef(false);
   const searchQuery = useDiseaseGuideSearch(query);
   const guideQuery = useDiseaseGuide(
     selectedConcept?.guide_status === "available" ? selectedConcept.concept_id : null,
@@ -69,9 +68,8 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
   }, []);
 
   const setInitialTopicOpen = useCallback((element: HTMLDetailsElement | null) => {
-    if (element && !initialTopicOpenedRef.current) {
+    if (element) {
       element.open = true;
-      initialTopicOpenedRef.current = true;
     }
   }, []);
 
