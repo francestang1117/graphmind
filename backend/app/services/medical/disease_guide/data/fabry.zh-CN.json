@@ -10,23 +10,23 @@
   "preferred_name_en": "Fabry disease",
   "preferred_name_zh": "法布雷病",
   "overview": {
-    "text": "法布雷病是一种遗传性溶酶体贮积病。由于 GLA 基因变异，α-半乳糖苷酶 A 活性可能不足，使某些脂质及其衍生物在细胞内逐渐积累。不同人的表现和严重程度差异很大，不能仅凭症状判断个人是否患病。",
+    "text": "法布雷病是一种遗传性疾病。身体处理某些脂质的方式发生变化后，这些物质可能在细胞内逐渐积累。不同人的表现和严重程度差异很大，不能仅凭症状判断个人是否患病。",
     "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
   },
   "topics": [
     {
       "id": "what_is",
       "title": "认识疾病",
-      "question": "它是什么，为什么会发生？",
+      "question": "这个病是什么，为什么会发生？",
       "summary": {
-        "text": "法布雷病与 GLA 基因和一种参与分解脂质的酶有关。它通常以 X 连锁方式遗传，但女性也可能出现从轻到重的表现。",
+        "text": "法布雷病通常与 GLA 基因的变异有关。这个基因影响一种帮助细胞分解某些脂质的酶；基因变异和酶活性不同，表现也可能不同。",
         "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
       },
       "key_points": [
         {
           "id": "what-is-storage",
-          "text": "α-半乳糖苷酶 A 活性不足时，Gb3 等脂质及其衍生物可能在多种细胞内积累。",
-          "qualifier": "这是疾病机制的概览，不等于对某个人的诊断。",
+          "text": "一种叫 α-半乳糖苷酶 A 的酶活性不足时，Gb3 等脂质可能在多种细胞内逐渐积累。这里的“脂质”可以理解为细胞中的一类脂肪样物质。",
+          "qualifier": "不同人的酶活性和积累程度不同，不能据此判断个人病情。",
           "evidence_status": "established",
           "evidence_stage": "已有疾病机制资料",
           "applicability": "适用于法布雷病的一般机制说明。",
@@ -35,7 +35,7 @@
         },
         {
           "id": "what-is-phenotypes",
-          "text": "不同基因变异和酶活性会对应不同表现，通常会谈到经典型和迟发型等表型。",
+          "text": "同样有法布雷病，症状出现的年龄、严重程度和受影响的部位也可能不同。常见分类包括经典型和迟发型。",
           "qualifier": "同一家族成员的表现也可能不同；不能用表型名称推断个人病情。",
           "evidence_status": "established",
           "evidence_stage": "已有临床描述",
@@ -47,8 +47,8 @@
     },
     {
       "id": "possible_impacts",
-      "title": "可能的影响",
-      "question": "身体哪些方面可能受影响？",
+      "title": "身体影响",
+      "question": "它可能影响身体哪些地方？",
       "summary": {
         "text": "表现可能涉及疼痛、皮肤、出汗、胃肠道、听力和眼部等方面。部分人还会出现肾脏、心脏或脑血管相关问题，但每个人的组合和进展不同。",
         "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
@@ -79,7 +79,7 @@
     {
       "id": "frequency",
       "title": "有多常见",
-      "question": "这些数字适用于什么人群？",
+      "question": "这个病有多常见？",
       "summary": {
         "text": "法布雷病属于罕见病，但不同地区、筛查对象和诊断标准会得到不同估计。看到患病率数字时，要同时查看它针对的人群和分母。",
         "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
@@ -109,7 +109,7 @@
     },
     {
       "id": "treatments",
-      "title": "现有治疗方向",
+      "title": "治疗方向",
       "question": "目前有哪些治疗方向？",
       "summary": {
         "text": "目前的管理通常包括针对疾病机制的治疗和针对受累器官的支持性照护。是否适合某种治疗，要结合确诊情况、基因变异、器官表现、年龄和当地批准条件由专业团队判断。",
@@ -151,7 +151,7 @@
     {
       "id": "research_progress",
       "title": "研究进展",
-      "question": "研究中的新方法走到哪一步了？",
+      "question": "新方法研究到哪一步了？",
       "summary": {
         "text": "研究正在探索新的酶替代方案、基因治疗和其他减少底物或改善递送的方法。临床试验登记页面的招募状态会变化；登记或正在研究不等于疗效已经证实，也不等于已经获批。",
         "source_ids": ["clinicaltrials-fabry", "trial-prx102", "trial-exg110"]

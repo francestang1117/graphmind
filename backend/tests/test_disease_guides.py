@@ -43,6 +43,20 @@ def test_fabry_guide_has_sources_and_review_dates_for_every_claim() -> None:
                 assert point.region == "JP"
 
 
+def test_fabry_guide_uses_plain_language_topic_questions() -> None:
+    guide = load_guides()[("mesh:D000795", "zh-CN")]
+
+    assert guide.overview.text.startswith("法布雷病是一种遗传性疾病")
+    assert "GLA" not in guide.overview.text
+    assert [(topic.id, topic.title, topic.question) for topic in guide.topics] == [
+        ("what_is", "认识疾病", "这个病是什么，为什么会发生？"),
+        ("possible_impacts", "身体影响", "它可能影响身体哪些地方？"),
+        ("frequency", "有多常见", "这个病有多常见？"),
+        ("treatments", "治疗方向", "目前有哪些治疗方向？"),
+        ("research_progress", "研究进展", "新方法研究到哪一步了？"),
+    ]
+
+
 def test_fabry_chaperone_entry_uses_current_japan_scope_and_label() -> None:
     guide = load_guides()[("mesh:D000795", "zh-CN")]
     treatment = next(topic for topic in guide.topics if topic.id == "treatments")
