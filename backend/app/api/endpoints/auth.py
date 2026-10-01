@@ -18,7 +18,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from app.core.config import settings
@@ -236,6 +236,16 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
     )
 
 
+def _delete_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(
+        settings.REFRESH_COOKIE_NAME,
+        path=f"{settings.API_V1_PREFIX}/auth",
+        secure=settings.REFRESH_COOKIE_SECURE,
+        httponly=True,
+        samesite=settings.REFRESH_COOKIE_SAMESITE,  # type: ignore[arg-type]
+    )
+
+
 def _refresh_from(request: Request, body: RefreshRequest | None) -> str | None:
     if body:
         return body.refresh_token
@@ -293,13 +303,26 @@ async def _get_refresh_user_id(token: str) -> Optional[str]:
 
 async def _revoke_refresh_token(token: str) -> None:
     client = await _redis_client()
-    if client:
+    if not client:
+        _refresh_tokens.pop(token, None)
+        return
+
+    delete_error: Exception | None = None
+    try:
+        await client.delete(f"refresh:{token}")
+    except Exception as exc:
+        delete_error = exc
+    finally:
+        _refresh_tokens.pop(token, None)
         try:
-            await client.delete(f"refresh:{token}")
             await client.aclose()
-        except Exception:
-            pass
-    _refresh_tokens.pop(token, None)
+        except Exception as exc:
+            # A successful delete remains successful even if cleanup fails.
+            log.warning("Redis refresh token client close failed: %s", exc)
+
+    if delete_error is not None:
+        log.warning("Redis refresh token revocation failed: %s", delete_error)
+        raise delete_error
 
 
 async def _store_oauth_value(key: str, value: str, ttl: int) -> None:
@@ -663,19 +686,26 @@ async def logout(
     request: Request,
     response: Response,
     body: RefreshRequest | None = None,
-    _: UserRecord = Depends(current_user),
 ) -> dict[str, str]:
-    """Invalidate one refresh token."""
+    """Invalidate one refresh token without requiring a live access token.
+
+    Logout must still work after the short-lived access token expires. A
+    missing, expired, or already-revoked refresh token is treated as an
+    idempotent logout, while the browser cookie is always cleared.
+    """
     token = _refresh_from(request, body)
-    if token:
-        await _revoke_refresh_token(token)
-    response.delete_cookie(
-        settings.REFRESH_COOKIE_NAME,
-        path=f"{settings.API_V1_PREFIX}/auth",
-        secure=settings.REFRESH_COOKIE_SECURE,
-        httponly=True,
-        samesite=settings.REFRESH_COOKIE_SAMESITE,  # type: ignore[arg-type]
-    )
+    try:
+        if token:
+            await _revoke_refresh_token(token)
+    except Exception:
+        log.exception("Refresh token revocation failed during logout")
+        failure = JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"detail": "Logout temporarily unavailable"},
+        )
+        _delete_refresh_cookie(failure)
+        return failure
+    _delete_refresh_cookie(response)
     return {"message": "Logged out"}
 
 

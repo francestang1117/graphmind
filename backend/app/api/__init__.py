@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from app.api.endpoints import (
     auth,
     chat,
+    disease_guides,
     disease_profiles,
     documents,
     graph,
@@ -32,3 +33,4 @@ router.include_router(literature_matches.router, tags=["literature-matches"])
 router.include_router(medical_insights.router, tags=["medical-insights"])
 router.include_router(visit_preparation.router, tags=["visit-preparation"])
 router.include_router(disease_profiles.router, tags=["disease-profiles"])
+router.include_router(disease_guides.router, tags=["disease-guides"])

@@ -76,6 +76,161 @@ def test_register_login_refresh_logout_flow():
     assert refresh_again.status_code == 401
 
 
+def test_logout_revokes_refresh_token_when_access_token_is_expired(monkeypatch):
+    client = _client()
+    register = client.post(
+        "/auth/register",
+        json={"email": "expired@example.com", "password": "strong-pass"},
+    )
+    assert register.status_code == 201
+    tokens = register.json()
+    refresh_token = tokens["refresh_token"]
+    cookie_header = {
+        "Cookie": f"{auth.settings.REFRESH_COOKIE_NAME}={refresh_token}"
+    }
+
+    monkeypatch.setattr(auth.settings, "ACCESS_TOKEN_EXPIRE_MINUTES", -1)
+    expired_access_token = auth._create_access_token(auth._users["expired@example.com"].id)
+
+    logout = client.post(
+        "/auth/logout",
+        headers={
+            "Authorization": f"Bearer {expired_access_token}",
+            **cookie_header,
+        },
+    )
+
+    assert logout.status_code == 200
+    assert "Max-Age=0" in logout.headers["set-cookie"]
+    assert refresh_token not in auth._refresh_tokens
+    assert client.post("/auth/refresh", headers=cookie_header).status_code == 401
+
+
+def test_logout_is_idempotent_without_access_token_and_with_refresh_cookie():
+    client = _client()
+    register = client.post(
+        "/auth/register",
+        json={"email": "cookie-only@example.com", "password": "strong-pass"},
+    )
+    assert register.status_code == 201
+    refresh_token = register.json()["refresh_token"]
+    cookie_header = {
+        "Cookie": f"{auth.settings.REFRESH_COOKIE_NAME}={refresh_token}"
+    }
+
+    logout = client.post("/auth/logout", headers=cookie_header)
+    repeated_logout = client.post("/auth/logout")
+
+    assert logout.status_code == 200
+    assert repeated_logout.status_code == 200
+    assert "Max-Age=0" in logout.headers["set-cookie"]
+    assert "Max-Age=0" in repeated_logout.headers["set-cookie"]
+    assert client.post("/auth/refresh", headers=cookie_header).status_code == 401
+
+
+def test_logout_still_clears_cookie_when_refresh_revocation_fails(monkeypatch):
+    class FailingRedis:
+        delete_called = False
+        close_called = False
+
+        async def delete(self, key):
+            self.delete_called = True
+            assert key.startswith("refresh:")
+            raise RuntimeError("storage unavailable")
+
+        async def aclose(self):
+            self.close_called = True
+
+    redis = FailingRedis()
+
+    async def redis_client():
+        return redis
+
+    monkeypatch.setattr(auth, "_redis_client", redis_client)
+    client = _client()
+
+    response = client.post(
+        "/auth/logout",
+        headers={
+            "Cookie": f"{auth.settings.REFRESH_COOKIE_NAME}=refresh-token",
+        },
+    )
+
+    assert response.status_code == 503
+    assert "Max-Age=0" in response.headers["set-cookie"]
+    assert redis.delete_called is True
+    assert redis.close_called is True
+
+
+def test_logout_succeeds_when_redis_delete_succeeds_but_close_fails(monkeypatch):
+    class ClosingRedis:
+        delete_called = False
+        close_called = False
+
+        async def delete(self, key):
+            self.delete_called = True
+            assert key.startswith("refresh:")
+            return 0
+
+        async def aclose(self):
+            self.close_called = True
+            raise RuntimeError("close failed")
+
+    redis = ClosingRedis()
+
+    async def redis_client():
+        return redis
+
+    monkeypatch.setattr(auth, "_redis_client", redis_client)
+    client = _client()
+
+    response = client.post(
+        "/auth/logout",
+        headers={
+            "Cookie": f"{auth.settings.REFRESH_COOKIE_NAME}=missing-token",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "Max-Age=0" in response.headers["set-cookie"]
+    assert redis.delete_called is True
+    assert redis.close_called is True
+
+
+def test_logout_revokes_redis_refresh_token(monkeypatch):
+    class Redis:
+        revoked = set()
+
+        async def delete(self, key):
+            self.revoked.add(key)
+            return 1
+
+        async def get(self, key):
+            return None if key in self.revoked else "user-id"
+
+        async def aclose(self):
+            return None
+
+    redis = Redis()
+
+    async def redis_client():
+        return redis
+
+    monkeypatch.setattr(auth, "_redis_client", redis_client)
+    client = _client()
+    refresh_token = "redis-token"
+    cookie_header = {
+        "Cookie": f"{auth.settings.REFRESH_COOKIE_NAME}={refresh_token}"
+    }
+
+    logout = client.post("/auth/logout", headers=cookie_header)
+    refresh_again = client.post("/auth/refresh", headers=cookie_header)
+
+    assert logout.status_code == 200
+    assert refresh_again.status_code == 401
+    assert f"refresh:{refresh_token}" in redis.revoked
+
+
 def test_duplicate_email_is_rejected():
     client = _client()
     body = {"email": "user@example.com", "password": "strong-pass"}
