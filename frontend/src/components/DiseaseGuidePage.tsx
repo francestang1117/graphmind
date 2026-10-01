@@ -514,6 +514,19 @@ function GuidePoint({
   onOpenSource: (sourceId: string, trigger: HTMLButtonElement) => void;
 }) {
   const researchContext = point.research_context;
+  const contextSourceIds = new Set(
+    researchContext
+      ? [
+          researchContext.goal,
+          researchContext.current,
+          researchContext.unknown,
+        ].flatMap((claim) => claim.source_ids)
+      : [],
+  );
+  const footerSourceIds = researchContext
+    ? point.source_ids.filter((id) => !contextSourceIds.has(id))
+    : point.source_ids;
+
   return (
     <article className="disease-guide-point">
       {(point.evidence_status !== "established" || Boolean(point.region)) && (
@@ -540,8 +553,8 @@ function GuidePoint({
         <p>{point.text}</p>
       )}
       {point.qualifier && <small>{point.qualifier}</small>}
-      {!researchContext && (
-        <SourceLinks sourceIds={point.source_ids} sources={sources} onOpen={onOpenSource} />
+      {footerSourceIds.length > 0 && (
+        <SourceLinks sourceIds={footerSourceIds} sources={sources} onOpen={onOpenSource} />
       )}
     </article>
   );

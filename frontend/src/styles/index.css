@@ -6002,9 +6002,9 @@ button {
 .disease-guide-topic-count { color: var(--soft); font-size: 12px; }
 .disease-guide-topic { border-top: 1px solid var(--line); scroll-margin-top: 24px; }
 .disease-guide-topic:last-child { border-bottom: 1px solid var(--line); }
-.disease-guide-topic summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 70px; padding: 13px 0; cursor: pointer; list-style: none; }
-.disease-guide-topic summary::-webkit-details-marker { display: none; }
-.disease-guide-topic summary strong { color: var(--text); font-size: 19px; line-height: 1.5; }
+.disease-guide-topic > summary { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 70px; padding: 13px 0; cursor: pointer; list-style: none; }
+.disease-guide-topic > summary::-webkit-details-marker { display: none; }
+.disease-guide-topic > summary strong { color: var(--text); font-size: 19px; line-height: 1.5; }
 .disease-guide-summary-marker { color: var(--blue); font-size: 22px; font-weight: 300; }
 .disease-guide-summary-marker .when-open { display: none; }
 .disease-guide-topic[open] .when-closed { display: none; }
@@ -6024,7 +6024,7 @@ button {
 .disease-guide-terms > h4 { margin: 19px 0 5px; color: var(--soft); font-size: 12px; font-weight: 700; }
 .disease-guide-term { border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .disease-guide-term:last-child { border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
-.disease-guide-term summary {
+.disease-guide-term > summary {
   min-height: 44px;
   padding: 10px 0;
   color: var(--muted);
@@ -6034,10 +6034,10 @@ button {
   line-height: 1.45;
   list-style: none;
 }
-.disease-guide-term summary::-webkit-details-marker { display: none; }
-.disease-guide-term summary::before { content: "＋"; display: inline-block; width: 22px; color: var(--blue); font-size: 18px; font-weight: 400; }
-.disease-guide-term[open] summary::before { content: "−"; }
-.disease-guide-term summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+.disease-guide-term > summary::-webkit-details-marker { display: none; }
+.disease-guide-term > summary::before { content: "＋"; display: inline-block; width: 22px; color: var(--blue); font-size: 18px; font-weight: 400; }
+.disease-guide-term[open] > summary::before { content: "−"; }
+.disease-guide-term > summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 .disease-guide-term-body { padding: 0 0 16px 22px; }
 .disease-guide-term-body p { max-width: 68ch; margin: 0 0 8px; color: var(--muted); font-size: 14px; line-height: 1.65; }
 .disease-guide-research-body { max-width: 760px; }
@@ -6128,7 +6128,7 @@ button {
   .disease-guide-overview p,
   .disease-guide-topic-summary,
   .disease-guide-point p { font-size: 16px; }
-  .disease-guide-topic summary strong { font-size: 18px; }
+  .disease-guide-topic > summary strong { font-size: 18px; }
   .disease-guide-primary-action,
   .disease-guide-secondary-action { width: 100%; }
   .disease-guide-next-actions { width: 100%; }

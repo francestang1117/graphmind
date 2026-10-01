@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { PropsWithChildren } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -305,5 +305,79 @@ describe("DiseaseGuidePage", () => {
     expect(await screen.findByText("治疗信息按日本资料核查")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "地区" })).not.toBeInTheDocument();
     expect(api.getDiseaseGuide).toHaveBeenCalledWith("mesh:D000795", "zh-CN", "JP");
+  });
+
+  it("keeps additional parent sources accessible in research cards", async () => {
+    const user = userEvent.setup();
+    const guideWithExtraSource = structuredClone(guide);
+
+    const researchPoint = guideWithExtraSource.topics
+      .find((topic) => topic.id === "research_progress")
+      ?.key_points[0];
+
+    if (!researchPoint) {
+      throw new Error("Research point fixture is missing");
+    }
+
+    researchPoint.source_ids = [referenceSource.id, source.id];
+
+    api.searchDiseaseGuides.mockResolvedValue({ items: [] });
+    api.getDiseaseGuide.mockResolvedValue(guideWithExtraSource);
+
+    render(
+      <DiseaseGuidePage onOpenMySources={vi.fn()} />,
+      { wrapper },
+    );
+
+    await user.click(
+      screen.getByRole("button", {
+        name: /法布雷病 Fabry disease/,
+      }),
+    );
+
+    await screen.findByRole("heading", { name: "法布雷病" });
+
+    await user.click(
+      screen.getAllByRole("button", {
+        name: "打开主题：新方法研究到哪一步了？",
+      })[0],
+    );
+
+    const article = screen
+      .getByText("登记不等于疗效已经证实。")
+      .closest("article");
+
+    if (!article) {
+      throw new Error("Research card is missing");
+    }
+
+    const card = within(article);
+    const extraSourceButton = card.getByRole("button", {
+      name: /查看依据 1：MedlinePlus Genetics/,
+    });
+
+    expect(extraSourceButton).toBeVisible();
+    expect(
+      card.getAllByRole("button", {
+        name: /查看依据 2：NCBI Bookshelf/,
+      }).length,
+    ).toBeGreaterThan(0);
+
+    await user.click(extraSourceButton);
+
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("link", {
+        name: /打开原始来源/,
+      }),
+    ).toHaveAttribute("href", source.url);
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    expect(extraSourceButton).toHaveFocus();
   });
 });
