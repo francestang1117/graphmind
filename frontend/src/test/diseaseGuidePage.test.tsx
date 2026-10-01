@@ -22,6 +22,16 @@ const source = {
   source_type: "institutional" as const,
 };
 
+const referenceSource = {
+  id: "genereviews-fabry",
+  title: "Fabry Disease - GeneReviews",
+  organization: "NCBI Bookshelf",
+  url: "https://www.ncbi.nlm.nih.gov/books/NBK1292/",
+  published_at: null,
+  checked_at: "2026-09-30",
+  source_type: "reference" as const,
+};
+
 const guide = {
   schema_version: "disease-guide-v1" as const,
   concept_id: "mesh:D000795",
@@ -35,14 +45,14 @@ const guide = {
   preferred_name_zh: "法布雷病",
   overview: {
     text: "法布雷病是一种遗传性溶酶体贮积病。",
-    source_ids: [source.id],
+    source_ids: [source.id, referenceSource.id],
   },
   topics: [
     {
       id: "what_is",
       title: "认识疾病",
-      question: "它是什么，为什么会发生？",
-      summary: { text: "它与 GLA 基因有关。", source_ids: [source.id] },
+      question: "这个病是什么，为什么会发生？",
+      summary: { text: "它与 GLA 基因有关。", source_ids: [source.id, referenceSource.id] },
       key_points: [{
         id: "point-1",
         text: "某些脂质可能在细胞内积累。",
@@ -51,14 +61,14 @@ const guide = {
         evidence_stage: "已有疾病机制资料",
         applicability: "",
         region: "",
-        source_ids: [source.id],
+        source_ids: [source.id, referenceSource.id],
       }],
     },
     {
       id: "treatments",
-      title: "现有治疗方向",
+      title: "治疗方向",
       question: "目前有哪些治疗方向？",
-      summary: { text: "治疗需要专业团队评估。", source_ids: [source.id] },
+      summary: { text: "治疗需要专业团队评估。", source_ids: [source.id, referenceSource.id] },
       key_points: [{
         id: "point-2",
         text: "酶替代治疗是一个临床方向。",
@@ -67,11 +77,27 @@ const guide = {
         evidence_stage: "已用于临床",
         applicability: "",
         region: "JP",
-        source_ids: [source.id],
+        source_ids: [source.id, referenceSource.id],
+      }],
+    },
+    {
+      id: "research_progress",
+      title: "研究进展",
+      question: "新方法研究到哪一步了？",
+      summary: { text: "研究登记状态会变化。", source_ids: [referenceSource.id] },
+      key_points: [{
+        id: "point-3",
+        text: "有些新方法仍在研究中。",
+        qualifier: "登记不等于疗效已经证实。",
+        evidence_status: "clinical_research" as const,
+        evidence_stage: "临床研究登记",
+        applicability: "",
+        region: "国际登记",
+        source_ids: [referenceSource.id],
       }],
     },
   ],
-  sources: [source],
+  sources: [source, referenceSource],
 };
 
 function wrapper({ children }: PropsWithChildren) {
@@ -112,10 +138,23 @@ describe("DiseaseGuidePage", () => {
 
     expect(await screen.findByRole("heading", { name: "法布雷病" })).toBeInTheDocument();
     expect(screen.getByText("一句话认识")).toBeInTheDocument();
-    expect(screen.getByText("认识疾病")).toBeInTheDocument();
-    expect(screen.getAllByText("已有认识")[0]).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "打开主题：这个病是什么，为什么会发生？" })[0]).toBeInTheDocument();
+    expect(screen.getByText("某些脂质可能在细胞内积累。")).toBeInTheDocument();
 
-    const sourceButton = screen.getAllByRole("button", { name: /查看来源 · MedlinePlus Genetics/ })[0];
+    const treatmentNav = screen.getAllByRole("button", { name: "打开主题：目前有哪些治疗方向？" })[0];
+    await user.click(treatmentNav);
+    const treatmentTopic = document.getElementById("guide-topic-treatments");
+    expect(treatmentTopic).toHaveAttribute("open");
+    expect(treatmentTopic?.querySelector("summary")).toHaveFocus();
+    expect(screen.getByText("已用于临床")).toBeInTheDocument();
+    expect(screen.getByText("JP")).toBeInTheDocument();
+
+    const researchNav = screen.getAllByRole("button", { name: "打开主题：新方法研究到哪一步了？" })[0];
+    await user.click(researchNav);
+    expect(screen.getByText("临床研究登记")).toBeInTheDocument();
+    expect(screen.getByText("国际登记")).toBeInTheDocument();
+
+    const sourceButton = screen.getAllByRole("button", { name: /查看依据 1：MedlinePlus Genetics/ })[0];
     await user.click(sourceButton);
     const dialog = screen.getByRole("dialog");
     expect(dialog).toBeInTheDocument();
@@ -142,6 +181,24 @@ describe("DiseaseGuidePage", () => {
     expect(screen.getByRole("link", { name: /Fabry disease/ })).toHaveAttribute("href", source.url);
     await user.click(screen.getByRole("button", { name: /上传自己的资料/ }));
     expect(onOpenMySources).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps source numbering stable and reports search failures", async () => {
+    const user = userEvent.setup();
+    api.searchDiseaseGuides.mockRejectedValue(new Error("network"));
+
+    render(<DiseaseGuidePage onOpenMySources={vi.fn()} />, { wrapper });
+    await user.type(screen.getByPlaceholderText("搜索疾病名称，例如：法布雷病"), "法布雷");
+    expect(await screen.findByText("疾病搜索暂时不可用，请稍后再试。")).toBeInTheDocument();
+
+    cleanup();
+    api.searchDiseaseGuides.mockResolvedValue({ items: [] });
+    api.getDiseaseGuide.mockResolvedValue(guide);
+    render(<DiseaseGuidePage onOpenMySources={vi.fn()} />, { wrapper });
+    await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));
+    await screen.findByRole("heading", { name: "法布雷病" });
+    expect(screen.getAllByRole("button", { name: /查看依据 1：MedlinePlus Genetics/ }).length).toBeGreaterThan(1);
+    expect(screen.getAllByRole("button", { name: /查看依据 2：NCBI Bookshelf/ }).length).toBeGreaterThan(1);
   });
 
   it("shows a clear preparing state when a concept has no public guide", async () => {
