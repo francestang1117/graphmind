@@ -158,9 +158,23 @@ describe("DiseaseGuidePage", () => {
     await user.click(startButton);
     expect(document.getElementById("guide-topic-what_is")).toHaveAttribute("open");
     expect(document.getElementById("guide-topic-what_is")?.querySelector("summary")).toHaveFocus();
-    await user.click(screen.getByText("GLA 基因是什么意思？"));
-    expect(screen.getByText("影响细胞处理某些脂质能力的基因。")).toBeInTheDocument();
+    const termSummary = screen.getByText("GLA 基因是什么意思？");
+    const termDetails = termSummary.closest("details");
+    const termDefinition = screen.getByText("影响细胞处理某些脂质能力的基因。");
+
+    expect(termDetails).not.toHaveAttribute("open");
+    expect(termDefinition).not.toBeVisible();
+
+    await user.click(termSummary);
+
+    expect(termDetails).toHaveAttribute("open");
+    expect(termDefinition).toBeVisible();
     expect(screen.getByText("它位于 X 染色体上。")).toBeInTheDocument();
+
+    await user.click(termSummary);
+
+    expect(termDetails).not.toHaveAttribute("open");
+    expect(termDefinition).not.toBeVisible();
 
     const nextTopicButton = screen.getByRole("button", { name: "接着了解：目前有哪些治疗方向？" });
     await user.click(nextTopicButton);
