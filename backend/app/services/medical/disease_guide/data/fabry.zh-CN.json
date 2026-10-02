@@ -26,6 +26,11 @@
         {
           "id": "what-is-storage",
           "text": "当 α-半乳糖苷酶 A 活性不足时，Gb3 等脂质可能在细胞内逐渐堆积。",
+          "question": "为什么会发生脂质堆积？",
+          "explanation": {
+            "text": "GLA 基因提供制造 α-半乳糖苷酶 A 的信息；当相关酶活性不足时，身体分解某些脂质的能力会下降，积累可能逐渐影响细胞和器官。",
+            "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+          },
           "qualifier": "不同人的酶活性和积累程度不同，不能据此判断个人病情。",
           "evidence_status": "established",
           "evidence_stage": "已有疾病机制资料",
@@ -36,6 +41,11 @@
         {
           "id": "what-is-phenotypes",
           "text": "同样有法布雷病，症状出现的年龄、严重程度和受影响的部位也可能不同。常见分类包括经典型和迟发型。",
+          "question": "为什么同一个病，不同人的表现会差很多？",
+          "explanation": {
+            "text": "基因变异、剩余酶活性、年龄和受影响的器官不同，都可能让表现不同。资料常把表现概括为经典型和迟发型，但这些名称不能替代个人评估。",
+            "source_ids": ["genereviews-fabry"]
+          },
           "qualifier": "同一家族成员的表现也可能不同；不能用表型名称推断个人病情。",
           "evidence_status": "established",
           "evidence_stage": "已有临床描述",
@@ -46,6 +56,11 @@
         {
           "id": "what-is-inheritance",
           "text": "法布雷病相关的 GLA 基因位于 X 染色体上，因此它的遗传方式与 X 染色体有关。女性也可能出现症状或器官问题，并不只是没有症状的“携带者”。",
+          "question": "这种病会怎样在家人之间遗传？",
+          "explanation": {
+            "text": "相关 GLA 基因位于 X 染色体上，因此家族中的遗传风险需要结合家系和具体变异评估。女性也可能出现从轻到重的症状或器官问题。",
+            "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+          },
           "qualifier": "不同家人的表现可能不同，家族中的遗传风险需要结合具体情况评估。",
           "evidence_status": "established",
           "evidence_stage": "已有遗传机制资料",
@@ -101,6 +116,11 @@
         {
           "id": "impacts-symptoms",
           "text": "可能出现手脚疼痛发作、皮肤血管角化瘤、出汗减少、胃肠道不适、角膜改变或耳鸣听力变化。",
+          "question": "可能先出现哪些表现？",
+          "explanation": {
+            "text": "早期表现可能包括疼痛发作、出汗减少、皮肤改变、胃肠道不适或听力相关变化。它们并不是法布雷病独有的症状，需要结合检查判断。",
+            "source_ids": ["medlineplus-genetics"]
+          },
           "qualifier": "这些表现也可能由其他原因引起；是否需要检查应由医疗专业人员判断。",
           "evidence_status": "established",
           "evidence_stage": "已有临床描述",
@@ -111,6 +131,11 @@
         {
           "id": "impacts-organs",
           "text": "疾病进展可能累及肾脏、心脏和脑血管系统，因此长期管理通常需要关注多个器官。",
+          "question": "为什么需要关注多个器官？",
+          "explanation": {
+            "text": "脂质积累可能影响肾脏、心脏和脑血管系统，所以长期管理往往需要不同专科一起评估。",
+            "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+          },
           "qualifier": "这不是对个人预后的判断，也不意味着每位患者都会出现这些并发症。",
           "evidence_status": "established",
           "evidence_stage": "已有临床描述",
@@ -132,6 +157,11 @@
         {
           "id": "frequency-estimate",
           "text": "MedlinePlus Genetics 给出的估计范围约为每 1,000 至 9,000 人中 1 人，但这不是所有地区和人群都适用的固定比例。",
+          "question": "资料中的“每 1,000 至 9,000 人 1 人”是什么意思？",
+          "explanation": {
+            "text": "这是公共遗传学资料给出的估计范围，不是对每个地区、每种筛查方式都适用的统一数字。筛查人群和研究方法不同，得到的比例也可能不同。",
+            "source_ids": ["medlineplus-genetics"]
+          },
           "qualifier": "估计值会受研究设计、筛查对象、地区和表型定义影响；不能用它计算个人患病概率。",
           "evidence_status": "established",
           "evidence_stage": "公共疾病资料中的估计",
@@ -142,6 +172,11 @@
         {
           "id": "frequency-recognition",
           "text": "迟发型表现和症状较轻的病例可能更难在早期被识别，研究中的筛查结果不一定代表普通人群。",
+          "question": "为什么有些病例可能较晚才被发现？",
+          "explanation": {
+            "text": "症状较轻或较晚出现时，早期不一定会把不同表现联系到同一种遗传病；研究筛查发现的病例，也不一定代表普通人群的比例。",
+            "source_ids": ["genereviews-fabry"]
+          },
           "qualifier": "这是对研究人群和发现偏差的提醒，不是对某个人漏诊情况的判断。",
           "evidence_status": "established",
           "evidence_stage": "临床综述中的风险提示",
@@ -185,6 +220,11 @@
         {
           "id": "treatment-ert",
           "text": "酶替代治疗通过补充相关酶，帮助身体处理某些脂质，减少它们在细胞内堆积。",
+          "question": "酶替代治疗想解决什么问题？",
+          "explanation": {
+            "text": "它通过补充相关酶，帮助身体处理某些脂质；治疗是否适合、怎样给药和怎样评估效果，需要由专业团队结合个人情况决定。",
+            "source_ids": ["genereviews-fabry", "pmda-fabrazyme"]
+          },
           "qualifier": "适用性、给药方案和获益评估需要由熟悉遗传代谢病的团队决定；本条只核对日本公开资料。",
           "evidence_status": "established",
           "evidence_stage": "已用于临床",
@@ -193,9 +233,14 @@
           "source_ids": ["genereviews-fabry", "pmda-fabrazyme"]
         },
       {
-        "id": "treatment-chaperone",
-        "text": "在日本，米加拉司他是一种针对特定、对药物有反应的 GLA 基因变异的治疗选择。现行说明书涵盖成人和 12 岁以上儿童，但是否符合条件还需要核对基因变异及其他因素。",
-        "qualifier": "儿童使用需要特别考虑体重；12 岁以上 16 岁以下且体重低于 45 kg 的儿童未纳入相关临床试验。日本以外的批准状态未知。",
+          "id": "treatment-chaperone",
+          "text": "在日本，米加拉司他是一种针对特定、对药物有反应的 GLA 基因变异的治疗选择。现行说明书涵盖成人和 12 岁以上儿童，但是否符合条件还需要核对基因变异及其他因素。",
+          "question": "米加拉司他适合所有法布雷病患者吗？",
+          "explanation": {
+            "text": "不是。日本说明书要求核对 GLA 变异是否对药物有反应，同时还要考虑年龄、体重和其他条件；因此不能把它理解成普遍适用的药物。",
+            "source_ids": ["genereviews-fabry", "pmda-galafold"]
+          },
+          "qualifier": "儿童使用需要特别考虑体重；12 岁以上 16 岁以下且体重低于 45 kg 的儿童未纳入相关临床试验。日本以外的批准状态未知。",
           "evidence_status": "established",
           "evidence_stage": "已用于临床；适用条件受标签限制",
           "applicability": "地区批准、年龄和变异适用性都应以当地最新说明书为准。",
@@ -205,6 +250,11 @@
         {
           "id": "treatment-supportive",
           "text": "针对肾脏、心脏、疼痛和听力等问题的照护，也可能是长期管理的一部分。",
+          "question": "除了针对疾病本身，还需要哪些照护？",
+          "explanation": {
+            "text": "根据受累器官和症状，长期管理可能还包括处理肾脏、心脏、疼痛和听力问题；这些是配合个人情况制定的支持性照护。",
+            "source_ids": ["genereviews-fabry"]
+          },
           "qualifier": "具体照护会随个人器官受累和症状而变化。",
           "evidence_status": "established",
           "evidence_stage": "临床管理",

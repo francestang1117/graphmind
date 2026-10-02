@@ -659,6 +659,8 @@ export interface DiseaseGuideTerm {
 export interface DiseaseGuidePoint {
   id: string;
   text: string;
+  question?: string;
+  explanation?: DiseaseGuideText | null;
   qualifier: string;
   evidence_status: DiseaseGuideEvidenceStatus;
   evidence_stage: string;

@@ -42,6 +42,10 @@ def test_fabry_guide_has_sources_and_review_dates_for_every_claim() -> None:
                 assert set(term.context.source_ids) <= source_ids
         for point in topic.key_points:
             assert set(point.source_ids) <= source_ids
+            if topic.id != "research_progress":
+                assert point.question
+                assert point.explanation
+                assert set(point.explanation.source_ids) <= set(point.source_ids)
             if point.research_context:
                 for claim in (
                     point.research_context.goal,
@@ -122,6 +126,8 @@ def test_old_guide_payload_without_optional_reading_fields_remains_compatible() 
     for topic in payload["topics"]:
         topic.pop("terms", None)
         for point in topic["key_points"]:
+            point.pop("question", None)
+            point.pop("explanation", None)
             point.pop("research_context", None)
 
     restored = DiseaseGuide.model_validate(payload)
@@ -129,6 +135,26 @@ def test_old_guide_payload_without_optional_reading_fields_remains_compatible() 
     assert restored.sources[0].language == ""
     assert restored.topics[0].terms == []
     assert restored.topics[-1].key_points[0].research_context is None
+
+
+def test_guide_rejects_explanation_sources_not_on_the_parent_point() -> None:
+    payload = load_guides()[('mesh:D000795', 'zh-CN')].model_dump(mode="json")
+    point = payload["topics"][0]["key_points"][0]
+    point["source_ids"] = ["medlineplus-genetics"]
+    point["explanation"]["source_ids"] = ["genereviews-fabry"]
+
+    with pytest.raises(ValidationError, match="explanation sources"):
+        DiseaseGuide.model_validate(payload)
+
+
+def test_guide_rejects_explanation_references_to_unknown_sources() -> None:
+    payload = load_guides()[('mesh:D000795', 'zh-CN')].model_dump(mode="json")
+    point = payload["topics"][0]["key_points"][0]
+    point["source_ids"] = ["missing-source"]
+    point["explanation"]["source_ids"] = ["missing-source"]
+
+    with pytest.raises(ValidationError, match="unknown sources"):
+        DiseaseGuide.model_validate(payload)
 
 
 def test_guide_rejects_duplicate_term_ids() -> None:
