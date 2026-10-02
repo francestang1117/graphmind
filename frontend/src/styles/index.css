@@ -5957,8 +5957,7 @@ button {
 .disease-guide-overview h3,
 .disease-guide-section-heading h3 { margin: 6px 0 10px; color: var(--text); font-size: 22px; }
 .disease-guide-overview p,
-.disease-guide-topic-summary,
-.disease-guide-point p {
+.disease-guide-topic-summary {
   max-width: 78ch;
   margin: 0;
   color: var(--text);
@@ -5967,6 +5966,25 @@ button {
   line-height: 1.75;
   overflow-wrap: anywhere;
 }
+.disease-guide-point-question {
+  max-width: 70ch;
+  margin: 0 0 7px;
+  color: var(--soft);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.disease-guide-point-content { max-width: 70ch; }
+.disease-guide-point-answer,
+.disease-guide-point-explanation {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.disease-guide-point-answer { color: var(--text); }
+.disease-guide-point-explanation { margin-top: 8px; color: var(--muted); }
 .disease-guide-source-links { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 12px; }
 
 .disease-guide-topic-nav {
@@ -6127,7 +6145,9 @@ button {
   .disease-guide-search-box input { font-size: 16px; }
   .disease-guide-overview p,
   .disease-guide-topic-summary,
-  .disease-guide-point p { font-size: 16px; }
+  .disease-guide-point-answer,
+  .disease-guide-point-explanation { font-size: 16px; }
+  .disease-guide-point-question { font-size: 15px; }
   .disease-guide-topic > summary strong { font-size: 18px; }
   .disease-guide-primary-action,
   .disease-guide-secondary-action { width: 100%; }

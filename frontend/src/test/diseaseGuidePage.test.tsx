@@ -60,6 +60,11 @@ const guide = {
       key_points: [{
         id: "point-1",
         text: "某些脂质可能在细胞内积累。",
+        question: "为什么会发生脂质堆积？",
+        explanation: {
+          text: "身体处理某些脂质的能力下降后，相关物质可能逐渐在细胞内积累。",
+          source_ids: [source.id, referenceSource.id],
+        },
         qualifier: "这是疾病机制概览。",
         evidence_status: "established" as const,
         evidence_stage: "已有疾病机制资料",
@@ -158,6 +163,8 @@ describe("DiseaseGuidePage", () => {
     await user.click(startButton);
     expect(document.getElementById("guide-topic-what_is")).toHaveAttribute("open");
     expect(document.getElementById("guide-topic-what_is")?.querySelector("summary")).toHaveFocus();
+    expect(screen.getByText("为什么会发生脂质堆积？")).toBeVisible();
+    expect(screen.getByText("身体处理某些脂质的能力下降后，相关物质可能逐渐在细胞内积累。")).toBeVisible();
     const termSummary = screen.getByText("GLA 基因是什么意思？");
     const termDetails = termSummary.closest("details");
     const termDefinition = screen.getByText("影响细胞处理某些脂质能力的基因。");
@@ -233,6 +240,28 @@ describe("DiseaseGuidePage", () => {
     expect(screen.getByRole("link", { name: /Fabry disease/ })).toHaveAttribute("href", source.url);
     await user.click(screen.getByRole("button", { name: /上传自己的资料/ }));
     expect(onOpenMySources).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps legacy guide points readable without optional knowledge fields", async () => {
+    const user = userEvent.setup();
+    const legacyGuide = structuredClone(guide);
+    for (const topic of legacyGuide.topics) {
+      for (const point of topic.key_points) {
+        delete point.question;
+        delete point.explanation;
+      }
+    }
+
+    api.searchDiseaseGuides.mockResolvedValue({ items: [] });
+    api.getDiseaseGuide.mockResolvedValue(legacyGuide);
+
+    render(<DiseaseGuidePage onOpenMySources={vi.fn()} />, { wrapper });
+    await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));
+    await screen.findByRole("heading", { name: "法布雷病" });
+    await user.click(screen.getByRole("button", { name: "从基础开始了解" }));
+
+    expect(screen.getByText("某些脂质可能在细胞内积累。")).toBeVisible();
+    expect(screen.queryByText("为什么会发生脂质堆积？")).not.toBeInTheDocument();
   });
 
   it("keeps source numbering stable and reports search failures", async () => {

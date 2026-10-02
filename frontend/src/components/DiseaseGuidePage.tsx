@@ -543,6 +543,9 @@ function GuidePoint({
           )}
         </div>
       )}
+      {point.question && (
+        <h4 className="disease-guide-point-question">{point.question}</h4>
+      )}
       {researchContext ? (
         <div className="disease-guide-research-body">
           <ResearchClaim title="想解决什么问题" claim={researchContext.goal} sources={sources} onOpen={onOpenSource} />
@@ -550,7 +553,12 @@ function GuidePoint({
           <ResearchClaim title="还有哪些不确定" claim={researchContext.unknown} sources={sources} onOpen={onOpenSource} />
         </div>
       ) : (
-        <p>{point.text}</p>
+        <div className="disease-guide-point-content">
+          <p className="disease-guide-point-answer">{point.text}</p>
+          {point.explanation && (
+            <p className="disease-guide-point-explanation">{point.explanation.text}</p>
+          )}
+        </div>
       )}
       {point.qualifier && <small>{point.qualifier}</small>}
       {footerSourceIds.length > 0 && (
