@@ -55,11 +55,11 @@
         },
         {
           "id": "what-is-inheritance",
-          "text": "法布雷病相关的 GLA 基因位于 X 染色体上，因此它的遗传方式与 X 染色体有关。女性也可能出现症状或器官问题，并不只是没有症状的“携带者”。",
+          "text": "法布雷病与 X 染色体上的 GLA 基因有关。母亲若携带一个致病变异，每次妊娠把它传给孩子的概率通常为 50%；患病父亲会把相关变异传给所有女儿，不会通过父亲这一路传给儿子。",
           "question": "这种病会怎样在家人之间遗传？",
           "explanation": {
-            "text": "相关 GLA 基因位于 X 染色体上，因此家族中的遗传风险需要结合家系和具体变异评估。女性也可能出现从轻到重的症状或器官问题。",
-            "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+            "text": "儿子和女儿都可能从母亲那里继承相关变异；继承变异不代表不同家人的症状或严重程度相同，女性也可能出现从轻到重的症状或器官问题。具体家族风险需要结合遗传检测和家系信息评估。",
+            "source_ids": ["genereviews-fabry"]
           },
           "qualifier": "不同家人的表现可能不同，家族中的遗传风险需要结合具体情况评估。",
           "evidence_status": "established",
@@ -221,10 +221,6 @@
           "id": "treatment-ert",
           "text": "酶替代治疗通过补充相关酶，帮助身体处理某些脂质，减少它们在细胞内堆积。",
           "question": "酶替代治疗想解决什么问题？",
-          "explanation": {
-            "text": "它通过补充相关酶，帮助身体处理某些脂质；治疗是否适合、怎样给药和怎样评估效果，需要由专业团队结合个人情况决定。",
-            "source_ids": ["genereviews-fabry", "pmda-fabrazyme"]
-          },
           "qualifier": "适用性、给药方案和获益评估需要由熟悉遗传代谢病的团队决定；本条只核对日本公开资料。",
           "evidence_status": "established",
           "evidence_stage": "已用于临床",
@@ -251,10 +247,6 @@
           "id": "treatment-supportive",
           "text": "针对肾脏、心脏、疼痛和听力等问题的照护，也可能是长期管理的一部分。",
           "question": "除了针对疾病本身，还需要哪些照护？",
-          "explanation": {
-            "text": "根据受累器官和症状，长期管理可能还包括处理肾脏、心脏、疼痛和听力问题；这些是配合个人情况制定的支持性照护。",
-            "source_ids": ["genereviews-fabry"]
-          },
           "qualifier": "具体照护会随个人器官受累和症状而变化。",
           "evidence_status": "established",
           "evidence_stage": "临床管理",

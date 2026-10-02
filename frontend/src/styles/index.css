@@ -5968,11 +5968,11 @@ button {
 }
 .disease-guide-point-question {
   max-width: 70ch;
-  margin: 0 0 7px;
-  color: var(--soft);
-  font-size: 16px;
-  font-weight: 650;
-  line-height: 1.5;
+  margin: 0 0 10px;
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.55;
   overflow-wrap: anywhere;
 }
 .disease-guide-point-content { max-width: 70ch; }
@@ -6147,7 +6147,7 @@ button {
   .disease-guide-topic-summary,
   .disease-guide-point-answer,
   .disease-guide-point-explanation { font-size: 16px; }
-  .disease-guide-point-question { font-size: 15px; }
+  .disease-guide-point-question { font-size: 17px; }
   .disease-guide-topic > summary strong { font-size: 18px; }
   .disease-guide-primary-action,
   .disease-guide-secondary-action { width: 100%; }

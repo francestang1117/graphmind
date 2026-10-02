@@ -44,8 +44,8 @@ def test_fabry_guide_has_sources_and_review_dates_for_every_claim() -> None:
             assert set(point.source_ids) <= source_ids
             if topic.id != "research_progress":
                 assert point.question
-                assert point.explanation
-                assert set(point.explanation.source_ids) <= set(point.source_ids)
+                if point.explanation:
+                    assert set(point.explanation.source_ids) <= set(point.source_ids)
             if point.research_context:
                 for claim in (
                     point.research_context.goal,
@@ -80,7 +80,15 @@ def test_fabry_guide_retains_x_linked_inheritance_context() -> None:
     inheritance = next(point for point in what_is.key_points if point.id == "what-is-inheritance")
 
     assert "X 染色体" in inheritance.text
-    assert "女性" in inheritance.text
+    assert "母亲" in inheritance.text
+    assert "50%" in inheritance.text
+    assert "父亲" in inheritance.text
+    assert "所有女儿" in inheritance.text
+    assert "儿子" in inheritance.text
+    assert inheritance.explanation
+    assert "女性" in inheritance.explanation.text
+    assert "继承变异不代表" in inheritance.explanation.text
+    assert inheritance.explanation.source_ids == ["genereviews-fabry"]
     assert set(inheritance.source_ids) <= source_ids
 
 
