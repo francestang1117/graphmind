@@ -108,8 +108,13 @@ def test_fabry_guide_explains_required_terms_and_research_context() -> None:
     ]
 
     gene_therapy = next(point for point in research.key_points if point.id == "research-gene-therapy")
+    assert gene_therapy.research_context.goal.text == (
+        "研究一次静脉给予 EXG110 的安全性和耐受性，并观察肾脏、心脏、疼痛和胃肠道等指标的变化。"
+    )
+    assert "提高相关酶活性" not in gene_therapy.research_context.goal.text
     assert "I/II 期" in gene_therapy.research_context.current.text
     assert "成人" in gene_therapy.research_context.current.text
+    assert "截至 2026-10-01 核查" in gene_therapy.research_context.current.text
     assert "尚未招募" in gene_therapy.research_context.current.text
     assert "尚未核对到完整结果" in gene_therapy.research_context.current.text
 
