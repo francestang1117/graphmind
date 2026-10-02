@@ -45,6 +45,7 @@ class DiseaseGuideText(BaseModel):
 class DiseaseGuideResearchContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    title: str = Field(default="", max_length=160)
     evidence_kind: Literal["registry", "published_results", "review"]
     goal: DiseaseGuideText
     current: DiseaseGuideText

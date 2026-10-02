@@ -301,6 +301,7 @@
           "region": "国际登记",
           "source_ids": ["clinicaltrials-fabry"],
           "research_context": {
+            "title": "研究登记入口",
             "evidence_kind": "registry",
             "goal": {
               "text": "了解法布雷病有哪些观察性和干预性研究。",
@@ -326,6 +327,7 @@
           "region": "国际登记",
           "source_ids": ["trial-prx102"],
           "research_context": {
+            "title": "PRX-102 儿童与青少年研究",
             "evidence_kind": "registry",
             "goal": {
               "text": "了解 PRX-102 在儿童和青少年法布雷病患者中的安全性和作用。",
@@ -351,17 +353,18 @@
           "region": "国际登记",
           "source_ids": ["trial-exg110"],
           "research_context": {
+            "title": "EXG110 基因治疗研究",
             "evidence_kind": "registry",
             "goal": {
-              "text": "了解基因治疗等较早期方向是否能补充法布雷病相关功能。",
+              "text": "研究一次静脉给药的 EXG110 基因治疗能否提高相关酶活性，并改善肾脏、心脏、疼痛和胃肠道等指标。",
               "source_ids": ["trial-exg110"]
             },
             "current": {
-              "text": "目前可核对的是研究登记、研究对象和计划中的观察指标，而不是已经证实的治疗效果。",
+              "text": "ClinicalTrials.gov 将 EXG110 登记为 I/II 期、多中心、开放性的一次静脉给药研究，面向 18 岁及以上法布雷病成人；登记状态在本次核查时为“尚未招募”。本指南核对的是研究设计和登记状态，尚未核对到完整结果。",
               "source_ids": ["trial-exg110"]
             },
             "unknown": {
-              "text": "安全性、作用持续时间和长期获益仍需要后续研究确认。",
+              "text": "单次给药后的安全性、作用是否持续，以及肾脏、心脏、疼痛和胃肠道指标是否改善，仍需要研究结果和后续随访确认。",
               "source_ids": ["trial-exg110"]
             }
           }

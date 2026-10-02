@@ -110,6 +110,7 @@ const guide = {
         region: "国际登记",
         source_ids: [referenceSource.id],
         research_context: {
+          title: "研究登记入口",
           evidence_kind: "registry" as const,
           goal: { text: "了解研究想解决的问题。", source_ids: [referenceSource.id] },
           current: { text: "目前只有登记信息可核对。", source_ids: [referenceSource.id] },
@@ -202,6 +203,7 @@ describe("DiseaseGuidePage", () => {
     await user.click(researchNav);
     expect(screen.getByText("临床研究登记")).toBeInTheDocument();
     expect(screen.getByText("国际登记")).toBeInTheDocument();
+    expect(screen.getByText("研究登记入口")).toBeInTheDocument();
     expect(screen.getByText("想解决什么问题")).toBeInTheDocument();
     expect(screen.getByText("了解研究想解决的问题。")).toBeInTheDocument();
     expect(screen.getByText("目前只有登记信息可核对。")).toBeInTheDocument();

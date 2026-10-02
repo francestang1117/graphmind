@@ -101,6 +101,17 @@ def test_fabry_guide_explains_required_terms_and_research_context() -> None:
     assert all(term.definition.source_ids for term in what_is.terms)
     assert all(point.research_context for point in research.key_points)
     assert {point.research_context.evidence_kind for point in research.key_points} == {"registry"}
+    assert [point.research_context.title for point in research.key_points] == [
+        "研究登记入口",
+        "PRX-102 儿童与青少年研究",
+        "EXG110 基因治疗研究",
+    ]
+
+    gene_therapy = next(point for point in research.key_points if point.id == "research-gene-therapy")
+    assert "I/II 期" in gene_therapy.research_context.current.text
+    assert "成人" in gene_therapy.research_context.current.text
+    assert "尚未招募" in gene_therapy.research_context.current.text
+    assert "尚未核对到完整结果" in gene_therapy.research_context.current.text
 
 
 def test_fabry_chaperone_entry_uses_current_japan_scope_and_label() -> None:
@@ -143,6 +154,16 @@ def test_old_guide_payload_without_optional_reading_fields_remains_compatible() 
     assert restored.sources[0].language == ""
     assert restored.topics[0].terms == []
     assert restored.topics[-1].key_points[0].research_context is None
+
+
+def test_old_research_context_without_title_remains_compatible() -> None:
+    payload = load_guides()[('mesh:D000795', 'zh-CN')].model_dump(mode="json")
+    for point in payload["topics"][-1]["key_points"]:
+        point["research_context"].pop("title", None)
+
+    restored = DiseaseGuide.model_validate(payload)
+
+    assert restored.topics[-1].key_points[0].research_context.title == ""
 
 
 def test_guide_rejects_explanation_sources_not_on_the_parent_point() -> None:

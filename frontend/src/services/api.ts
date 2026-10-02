@@ -643,6 +643,7 @@ export interface DiseaseGuideText {
 }
 
 export interface DiseaseGuideResearchContext {
+  title?: string;
   evidence_kind: "registry" | "published_results" | "review";
   goal: DiseaseGuideText;
   current: DiseaseGuideText;

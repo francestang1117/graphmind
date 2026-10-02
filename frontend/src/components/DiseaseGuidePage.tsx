@@ -548,6 +548,9 @@ function GuidePoint({
       )}
       {researchContext ? (
         <div className="disease-guide-research-body">
+          {researchContext.title && (
+            <h4 className="disease-guide-research-title">{researchContext.title}</h4>
+          )}
           <ResearchClaim title="想解决什么问题" claim={researchContext.goal} sources={sources} onOpen={onOpenSource} />
           <ResearchClaim title="目前进展" claim={researchContext.current} sources={sources} onOpen={onOpenSource} />
           <ResearchClaim title="还有哪些不确定" claim={researchContext.unknown} sources={sources} onOpen={onOpenSource} />
