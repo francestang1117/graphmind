@@ -247,8 +247,8 @@ describe("DiseaseGuidePage", () => {
     const legacyGuide = structuredClone(guide);
     for (const topic of legacyGuide.topics) {
       for (const point of topic.key_points) {
-        delete point.question;
-        delete point.explanation;
+        Reflect.deleteProperty(point, "question");
+        Reflect.deleteProperty(point, "explanation");
       }
     }
 
