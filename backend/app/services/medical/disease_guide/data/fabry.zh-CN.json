@@ -5,28 +5,28 @@
   "region": "JP",
   "region_status": "verified",
   "region_note": "治疗和监管信息按日本公开资料核对；其他地区请核对当地监管机构。",
-  "reviewed_at": "2026-09-30",
+  "reviewed_at": "2026-10-01",
   "title": "法布雷病",
   "preferred_name_en": "Fabry disease",
   "preferred_name_zh": "法布雷病",
   "overview": {
-    "text": "法布雷病是一种遗传性溶酶体贮积病。由于 GLA 基因变异，α-半乳糖苷酶 A 活性可能不足，使某些脂质及其衍生物在细胞内逐渐积累。不同人的表现和严重程度差异很大，不能仅凭症状判断个人是否患病。",
+    "text": "法布雷病是一种遗传性疾病。身体处理某些脂质的方式发生变化后，这些物质可能在细胞内逐渐积累。不同人的表现和严重程度差异很大，不能仅凭症状判断个人是否患病。",
     "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
   },
   "topics": [
     {
       "id": "what_is",
       "title": "认识疾病",
-      "question": "它是什么，为什么会发生？",
+      "question": "这个病是什么，为什么会发生？",
       "summary": {
-        "text": "法布雷病与 GLA 基因和一种参与分解脂质的酶有关。它通常以 X 连锁方式遗传，但女性也可能出现从轻到重的表现。",
+        "text": "法布雷病通常与 GLA 基因的变异有关，这会让身体处理某些脂质的能力下降。不同的基因变异和酶活性，可能带来不同的表现。",
         "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
       },
       "key_points": [
         {
           "id": "what-is-storage",
-          "text": "α-半乳糖苷酶 A 活性不足时，Gb3 等脂质及其衍生物可能在多种细胞内积累。",
-          "qualifier": "这是疾病机制的概览，不等于对某个人的诊断。",
+          "text": "当 α-半乳糖苷酶 A 活性不足时，Gb3 等脂质可能在细胞内逐渐堆积。",
+          "qualifier": "不同人的酶活性和积累程度不同，不能据此判断个人病情。",
           "evidence_status": "established",
           "evidence_stage": "已有疾病机制资料",
           "applicability": "适用于法布雷病的一般机制说明。",
@@ -35,20 +35,64 @@
         },
         {
           "id": "what-is-phenotypes",
-          "text": "不同基因变异和酶活性会对应不同表现，通常会谈到经典型和迟发型等表型。",
+          "text": "同样有法布雷病，症状出现的年龄、严重程度和受影响的部位也可能不同。常见分类包括经典型和迟发型。",
           "qualifier": "同一家族成员的表现也可能不同；不能用表型名称推断个人病情。",
           "evidence_status": "established",
           "evidence_stage": "已有临床描述",
           "applicability": "需要结合遗传检测、酶活性和临床评估理解。",
           "region": "",
           "source_ids": ["genereviews-fabry"]
+        },
+        {
+          "id": "what-is-inheritance",
+          "text": "法布雷病相关的 GLA 基因位于 X 染色体上，因此它的遗传方式与 X 染色体有关。女性也可能出现症状或器官问题，并不只是没有症状的“携带者”。",
+          "qualifier": "不同家人的表现可能不同，家族中的遗传风险需要结合具体情况评估。",
+          "evidence_status": "established",
+          "evidence_stage": "已有遗传机制资料",
+          "applicability": "用于理解疾病的遗传特点和家族相关性。",
+          "region": "",
+          "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+        }
+      ],
+      "terms": [
+        {
+          "id": "gla-gene",
+          "label": "GLA 基因",
+          "definition": {
+            "text": "一种影响细胞处理某些脂质能力的基因。",
+            "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+          },
+          "context": {
+            "text": "它位于 X 染色体上，因此法布雷病的遗传方式与 X 染色体有关。",
+            "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+          }
+        },
+        {
+          "id": "alpha-galactosidase-a",
+          "label": "α-半乳糖苷酶 A",
+          "definition": {
+            "text": "一种帮助细胞分解某些脂质的酶。",
+            "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+          },
+          "context": {
+            "text": "这类酶的活性不足时，相关脂质可能在细胞内堆积。",
+            "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+          }
+        },
+        {
+          "id": "gb3",
+          "label": "Gb3",
+          "definition": {
+            "text": "一种在法布雷病中可能逐渐积累的脂质，也常写作 globotriaosylceramide。",
+            "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+          }
         }
       ]
     },
     {
       "id": "possible_impacts",
-      "title": "可能的影响",
-      "question": "身体哪些方面可能受影响？",
+      "title": "身体影响",
+      "question": "它可能影响身体哪些地方？",
       "summary": {
         "text": "表现可能涉及疼痛、皮肤、出汗、胃肠道、听力和眼部等方面。部分人还会出现肾脏、心脏或脑血管相关问题，但每个人的组合和进展不同。",
         "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
@@ -79,9 +123,9 @@
     {
       "id": "frequency",
       "title": "有多常见",
-      "question": "这些数字适用于什么人群？",
+      "question": "这个病有多常见？",
       "summary": {
-        "text": "法布雷病属于罕见病，但不同地区、筛查对象和诊断标准会得到不同估计。看到患病率数字时，要同时查看它针对的人群和分母。",
+        "text": "法布雷病很少见，但不同地区、筛查人群和诊断方法会得到不同估计。阅读数字时，要同时看调查了哪些人、总共有多少人。",
         "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
       },
       "key_points": [
@@ -105,20 +149,42 @@
           "region": "",
           "source_ids": ["genereviews-fabry"]
         }
+      ],
+      "terms": [
+        {
+          "id": "screening",
+          "label": "筛查",
+          "definition": {
+            "text": "在有明确症状前，按特定条件检查一组人，以寻找可能需要进一步评估的人。",
+            "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+          },
+          "context": {
+            "text": "筛查结果取决于被检查的人群和使用的方法，不能直接代表所有人。",
+            "source_ids": ["genereviews-fabry"]
+          }
+        },
+        {
+          "id": "study-denominator",
+          "label": "研究分母",
+          "definition": {
+            "text": "一个比例或患病率数字所对应的总人数。",
+            "source_ids": ["medlineplus-genetics", "genereviews-fabry"]
+          }
+        }
       ]
     },
     {
       "id": "treatments",
-      "title": "现有治疗方向",
+      "title": "治疗方向",
       "question": "目前有哪些治疗方向？",
       "summary": {
-        "text": "目前的管理通常包括针对疾病机制的治疗和针对受累器官的支持性照护。是否适合某种治疗，要结合确诊情况、基因变异、器官表现、年龄和当地批准条件由专业团队判断。",
+        "text": "治疗方向通常包括补充或稳定相关酶，以及针对肾脏、心脏和疼痛等问题的长期照护。是否适合某种治疗，要结合确诊情况、基因变异、器官表现、年龄和当地批准条件由专业团队判断。",
         "source_ids": ["genereviews-fabry", "pmda-fabrazyme", "pmda-galafold"]
       },
       "key_points": [
         {
           "id": "treatment-ert",
-          "text": "酶替代治疗是法布雷病的临床治疗方向之一，通过补充相关酶来帮助减少底物积累。",
+          "text": "酶替代治疗通过补充相关酶，帮助身体处理某些脂质，减少它们在细胞内堆积。",
           "qualifier": "适用性、给药方案和获益评估需要由熟悉遗传代谢病的团队决定；本条只核对日本公开资料。",
           "evidence_status": "established",
           "evidence_stage": "已用于临床",
@@ -138,20 +204,46 @@
         },
         {
           "id": "treatment-supportive",
-          "text": "肾脏、心脏、疼痛、听力等方面的支持性照护也可能是长期管理的一部分。",
-          "qualifier": "支持性照护会随个人器官受累和症状而变化。",
+          "text": "针对肾脏、心脏、疼痛和听力等问题的照护，也可能是长期管理的一部分。",
+          "qualifier": "具体照护会随个人器官受累和症状而变化。",
           "evidence_status": "established",
           "evidence_stage": "临床管理",
           "applicability": "具体方案需要与医疗专业人员讨论。",
           "region": "JP",
           "source_ids": ["genereviews-fabry"]
         }
+      ],
+      "terms": [
+        {
+          "id": "enzyme-replacement-therapy",
+          "label": "酶替代治疗",
+          "definition": {
+            "text": "通过补充相关酶，帮助身体处理某些脂质的一种治疗方向。",
+            "source_ids": ["genereviews-fabry", "pmda-fabrazyme"]
+          },
+          "context": {
+            "text": "是否适合以及何时开始，需要结合个人情况和当地资料判断。",
+            "source_ids": ["genereviews-fabry", "pmda-fabrazyme"]
+          }
+        },
+        {
+          "id": "pharmacological-chaperone",
+          "label": "分子伴侣治疗",
+          "definition": {
+            "text": "帮助某些仍有部分功能的酶保持稳定、发挥作用的治疗方向。",
+            "source_ids": ["genereviews-fabry", "pmda-galafold"]
+          },
+          "context": {
+            "text": "米加拉司他只适用于对药物有反应的特定 GLA 变异，并受当地说明书限制。",
+            "source_ids": ["genereviews-fabry", "pmda-galafold"]
+          }
+        }
       ]
     },
     {
       "id": "research_progress",
       "title": "研究进展",
-      "question": "研究中的新方法走到哪一步了？",
+      "question": "新方法研究到哪一步了？",
       "summary": {
         "text": "研究正在探索新的酶替代方案、基因治疗和其他减少底物或改善递送的方法。临床试验登记页面的招募状态会变化；登记或正在研究不等于疗效已经证实，也不等于已经获批。",
         "source_ids": ["clinicaltrials-fabry", "trial-prx102", "trial-exg110"]
@@ -165,7 +257,22 @@
           "evidence_stage": "临床研究登记",
           "applicability": "不能根据研究登记判断个人是否适合参加试验。",
           "region": "国际登记",
-          "source_ids": ["clinicaltrials-fabry"]
+          "source_ids": ["clinicaltrials-fabry"],
+          "research_context": {
+            "evidence_kind": "registry",
+            "goal": {
+              "text": "了解法布雷病有哪些观察性和干预性研究。",
+              "source_ids": ["clinicaltrials-fabry"]
+            },
+            "current": {
+              "text": "登记页面列出不同研究的对象、研究结果指标和招募状态。",
+              "source_ids": ["clinicaltrials-fabry"]
+            },
+            "unknown": {
+              "text": "登记状态和结果会变化，单凭登记不能说明疗效。",
+              "source_ids": ["clinicaltrials-fabry"]
+            }
+          }
         },
         {
           "id": "research-prx102",
@@ -175,7 +282,22 @@
           "evidence_stage": "具体试验登记；状态会变化",
           "applicability": "研究参加资格需要由试验团队根据登记条件判断。",
           "region": "国际登记",
-          "source_ids": ["trial-prx102"]
+          "source_ids": ["trial-prx102"],
+          "research_context": {
+            "evidence_kind": "registry",
+            "goal": {
+              "text": "了解 PRX-102 在儿童和青少年法布雷病患者中的安全性和作用。",
+              "source_ids": ["trial-prx102"]
+            },
+            "current": {
+              "text": "登记资料显示这项研究面向 2 岁至未满 18 岁的儿童和青少年，当前可核对的是研究设计、入组条件和登记状态。",
+              "source_ids": ["trial-prx102"]
+            },
+            "unknown": {
+              "text": "登记页面不能替代完整的研究结果；招募状态、结果和适用范围应以登记更新及后续发表为准。",
+              "source_ids": ["trial-prx102"]
+            }
+          }
         },
         {
           "id": "research-gene-therapy",
@@ -185,7 +307,22 @@
           "evidence_stage": "早期临床探索",
           "applicability": "不要把研究方向当作现有治疗或个人治疗建议。",
           "region": "国际登记",
-          "source_ids": ["trial-exg110"]
+          "source_ids": ["trial-exg110"],
+          "research_context": {
+            "evidence_kind": "registry",
+            "goal": {
+              "text": "了解基因治疗等较早期方向是否能补充法布雷病相关功能。",
+              "source_ids": ["trial-exg110"]
+            },
+            "current": {
+              "text": "目前可核对的是研究登记、研究对象和计划中的观察指标，而不是已经证实的治疗效果。",
+              "source_ids": ["trial-exg110"]
+            },
+            "unknown": {
+              "text": "安全性、作用持续时间和长期获益仍需要后续研究确认。",
+              "source_ids": ["trial-exg110"]
+            }
+          }
         }
       ]
     }
@@ -197,8 +334,10 @@
       "organization": "MedlinePlus Genetics",
       "url": "https://medlineplus.gov/genetics/condition/fabry-disease/",
       "published_at": null,
-      "checked_at": "2026-09-30",
-      "source_type": "institutional"
+      "checked_at": "2026-10-01",
+      "source_type": "institutional",
+      "language": "en",
+      "usage_note": "用于说明疾病基本概念、遗传方式和常见表现。"
     },
     {
       "id": "genereviews-fabry",
@@ -206,8 +345,10 @@
       "organization": "NCBI Bookshelf",
       "url": "https://www.ncbi.nlm.nih.gov/books/NBK1292/",
       "published_at": null,
-      "checked_at": "2026-09-30",
-      "source_type": "reference"
+      "checked_at": "2026-10-01",
+      "source_type": "reference",
+      "language": "en",
+      "usage_note": "用于补充疾病机制、表现、管理和遗传相关信息。"
     },
     {
       "id": "pmda-fabrazyme",
@@ -215,8 +356,10 @@
       "organization": "Japan PMDA",
       "url": "https://www.pmda.go.jp/PmdaSearch/rdDetail/iyaku/3959409D1029_2?user=1",
       "published_at": null,
-      "checked_at": "2026-09-30",
-      "source_type": "regulatory"
+      "checked_at": "2026-10-01",
+      "source_type": "regulatory",
+      "language": "ja",
+      "usage_note": "用于核对日本现行酶替代治疗的药品资料和适用范围。"
     },
     {
       "id": "pmda-galafold",
@@ -224,8 +367,10 @@
       "organization": "Japan PMDA",
       "url": "https://www.pmda.go.jp/PmdaSearch/rdDetail/iyaku/3999045M1028_1?user=1",
       "published_at": null,
-      "checked_at": "2026-09-30",
-      "source_type": "regulatory"
+      "checked_at": "2026-10-01",
+      "source_type": "regulatory",
+      "language": "ja",
+      "usage_note": "用于核对日本米加拉司他的适用条件和标签限制。"
     },
     {
       "id": "clinicaltrials-fabry",
@@ -233,8 +378,10 @@
       "organization": "ClinicalTrials.gov",
       "url": "https://clinicaltrials.gov/search?cond=Fabry%20Disease",
       "published_at": null,
-      "checked_at": "2026-09-30",
-      "source_type": "clinical_registry"
+      "checked_at": "2026-10-01",
+      "source_type": "clinical_registry",
+      "language": "en",
+      "usage_note": "用于查看法布雷病研究登记、招募状态和研究设计。"
     },
     {
       "id": "trial-prx102",
@@ -242,8 +389,10 @@
       "organization": "ClinicalTrials.gov",
       "url": "https://clinicaltrials.gov/study/NCT06328608",
       "published_at": null,
-      "checked_at": "2026-09-30",
-      "source_type": "clinical_registry"
+      "checked_at": "2026-10-01",
+      "source_type": "clinical_registry",
+      "language": "en",
+      "usage_note": "用于核对 FLY 研究登记、研究对象和当前状态。"
     },
     {
       "id": "trial-exg110",
@@ -251,8 +400,10 @@
       "organization": "ClinicalTrials.gov",
       "url": "https://clinicaltrials.gov/study/NCT06819514",
       "published_at": null,
-      "checked_at": "2026-09-30",
-      "source_type": "clinical_registry"
+      "checked_at": "2026-10-01",
+      "source_type": "clinical_registry",
+      "language": "en",
+      "usage_note": "用于核对 EXG110 研究登记及其早期探索范围。"
     }
   ]
 }

@@ -633,11 +633,27 @@ export interface DiseaseGuideSource {
   published_at: string | null;
   checked_at: string;
   source_type: "institutional" | "regulatory" | "clinical_registry" | "reference";
+  language?: string;
+  usage_note?: string;
 }
 
 export interface DiseaseGuideText {
   text: string;
   source_ids: string[];
+}
+
+export interface DiseaseGuideResearchContext {
+  evidence_kind: "registry" | "published_results" | "review";
+  goal: DiseaseGuideText;
+  current: DiseaseGuideText;
+  unknown: DiseaseGuideText;
+}
+
+export interface DiseaseGuideTerm {
+  id: string;
+  label: string;
+  definition: DiseaseGuideText;
+  context?: DiseaseGuideText | null;
 }
 
 export interface DiseaseGuidePoint {
@@ -649,6 +665,7 @@ export interface DiseaseGuidePoint {
   applicability: string;
   region: string;
   source_ids: string[];
+  research_context?: DiseaseGuideResearchContext | null;
 }
 
 export interface DiseaseGuideTopic {
@@ -657,6 +674,7 @@ export interface DiseaseGuideTopic {
   question: string;
   summary: DiseaseGuideText;
   key_points: DiseaseGuidePoint[];
+  terms?: DiseaseGuideTerm[];
 }
 
 export interface DiseaseGuide {

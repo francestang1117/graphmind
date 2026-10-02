@@ -201,7 +201,10 @@ function App() {
         </header>
 
         <section className="kw-content">
-          <div className="kw-workspace" key={user?.id ?? "local-dev"}>
+          <div
+            className={`kw-workspace ${activeTab === "explore" ? "kw-workspace-guide" : ""}`}
+            key={user?.id ?? "local-dev"}
+          >
             {activeTab === "explore" && (
               <DiseaseGuidePage
                 onOpenMySources={() => setActiveTab("upload")}

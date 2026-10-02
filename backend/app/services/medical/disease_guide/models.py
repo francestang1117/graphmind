@@ -25,6 +25,8 @@ class DiseaseGuideSource(BaseModel):
     published_at: date | None = None
     checked_at: date
     source_type: Literal["institutional", "regulatory", "clinical_registry", "reference"]
+    language: str = Field(default="", max_length=16)
+    usage_note: str = Field(default="", max_length=600)
 
 
 class DiseaseGuideText(BaseModel):
@@ -40,6 +42,15 @@ class DiseaseGuideText(BaseModel):
         return self
 
 
+class DiseaseGuideResearchContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_kind: Literal["registry", "published_results", "review"]
+    goal: DiseaseGuideText
+    current: DiseaseGuideText
+    unknown: DiseaseGuideText
+
+
 class DiseaseGuidePoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -51,6 +62,7 @@ class DiseaseGuidePoint(BaseModel):
     applicability: str = Field(default="", max_length=800)
     region: str = Field(default="", max_length=40)
     source_ids: list[str] = Field(min_length=1, max_length=8)
+    research_context: DiseaseGuideResearchContext | None = None
 
     @model_validator(mode="after")
     def validate_source_ids(self) -> "DiseaseGuidePoint":
@@ -58,7 +70,32 @@ class DiseaseGuidePoint(BaseModel):
             raise ValueError("source_ids must not contain duplicates")
         if self.evidence_status != "established" and not self.evidence_stage:
             raise ValueError("research points must declare evidence_stage")
+        if self.research_context:
+            context_source_ids = {
+                source_id
+                for claim in (
+                    self.research_context.goal,
+                    self.research_context.current,
+                    self.research_context.unknown,
+                )
+                for source_id in claim.source_ids
+            }
+            missing = sorted(context_source_ids - set(self.source_ids))
+            if missing:
+                raise ValueError(
+                    "research context sources must be included in point source_ids: "
+                    + ", ".join(missing)
+                )
         return self
+
+
+class DiseaseGuideTerm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, max_length=80)
+    label: str = Field(min_length=1, max_length=80)
+    definition: DiseaseGuideText
+    context: DiseaseGuideText | None = None
 
 
 class DiseaseGuideTopic(BaseModel):
@@ -69,6 +106,7 @@ class DiseaseGuideTopic(BaseModel):
     question: str = Field(min_length=1, max_length=240)
     summary: DiseaseGuideText
     key_points: list[DiseaseGuidePoint] = Field(min_length=1, max_length=8)
+    terms: list[DiseaseGuideTerm] = Field(default_factory=list, max_length=8)
 
     @model_validator(mode="after")
     def validate_topic_scope(self) -> "DiseaseGuideTopic":
@@ -80,6 +118,8 @@ class DiseaseGuideTopic(BaseModel):
                     raise ValueError("treatment points must declare an evidence stage")
         if len({point.id for point in self.key_points}) != len(self.key_points):
             raise ValueError("topic point ids must be unique")
+        if len({term.id for term in self.terms}) != len(self.terms):
+            raise ValueError("topic term ids must be unique")
         return self
 
 
@@ -109,8 +149,22 @@ class DiseaseGuide(BaseModel):
         references = list(self.overview.source_ids)
         for topic in self.topics:
             references.extend(topic.summary.source_ids)
+            for term in topic.terms:
+                references.extend(term.definition.source_ids)
+                if term.context:
+                    references.extend(term.context.source_ids)
             for point in topic.key_points:
                 references.extend(point.source_ids)
+                if point.research_context:
+                    references.extend(
+                        source_id
+                        for claim in (
+                            point.research_context.goal,
+                            point.research_context.current,
+                            point.research_context.unknown,
+                        )
+                        for source_id in claim.source_ids
+                    )
         missing = sorted(set(references) - source_ids)
         if missing:
             raise ValueError(f"guide references unknown sources: {', '.join(missing)}")

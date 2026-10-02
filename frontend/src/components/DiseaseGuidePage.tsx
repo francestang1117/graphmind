@@ -1,7 +1,13 @@
 import { ArrowLeft, BookOpen, ExternalLink, Search, ShieldCheck, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import MedicalTerm from "./MedicalTerm";
 import { useDiseaseGuide, useDiseaseGuideSearch } from "../hooks/useDiseaseGuide";
-import type { DiseaseGuidePoint, DiseaseGuideSearchItem, DiseaseGuideSource } from "../services/api";
+import type {
+  DiseaseGuidePoint,
+  DiseaseGuideSearchItem,
+  DiseaseGuideSource,
+  DiseaseGuideTerm,
+} from "../services/api";
 
 interface DiseaseGuidePageProps {
   onOpenMySources: () => void;
@@ -13,6 +19,18 @@ const evidenceLabels: Record<DiseaseGuidePoint["evidence_status"], string> = {
   established: "已有认识",
   clinical_research: "临床研究",
   early_exploration: "早期探索",
+};
+
+const researchEvidenceLabels: Record<NonNullable<DiseaseGuidePoint["research_context"]>["evidence_kind"], string> = {
+  registry: "研究登记信息",
+  published_results: "已公布研究结果",
+  review: "综述资料",
+};
+
+const sourceLanguageLabels: Record<string, string> = {
+  "zh-CN": "中文",
+  en: "英文",
+  ja: "日文",
 };
 
 const sourceGroupDefinitions: Array<{
@@ -29,6 +47,23 @@ function scrollToGuideSources() {
   if (target && typeof target.scrollIntoView === "function") {
     target.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+}
+
+function scrollToGuideDirectory() {
+  const target = document.getElementById("disease-guide-topic-directory");
+  if (!target) return;
+
+  target.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  target.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
+}
+
+function openGuideTopic(topicId: string) {
+  const target = document.getElementById(`guide-topic-${topicId}`);
+  if (!(target instanceof HTMLDetailsElement)) return;
+
+  target.open = true;
+  target.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
+  target.scrollIntoView?.({ block: "start" });
 }
 
 function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
@@ -48,6 +83,9 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
     if (!guideQuery.data || !openSourceId) return null;
     return guideQuery.data.sources.find((source) => source.id === openSourceId) ?? null;
   }, [guideQuery.data, openSourceId]);
+  const firstTopic = guideQuery.data?.topics.find((topic) => topic.id === "what_is")
+    ?? guideQuery.data?.topics[0]
+    ?? null;
 
   const openSource = useCallback((sourceId: string, trigger: HTMLButtonElement) => {
     sourceTriggerRef.current = trigger;
@@ -56,6 +94,12 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
 
   const closeSource = useCallback(() => {
     setOpenSourceId(null);
+  }, []);
+
+  const setInitialTopicOpen = useCallback((element: HTMLDetailsElement | null) => {
+    if (element) {
+      element.open = true;
+    }
   }, []);
 
   useEffect(() => {
@@ -194,13 +238,16 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
     return (
       <div className="disease-guide-page">
         <button type="button" className="disease-guide-back" onClick={() => setSelectedConcept(null)}>
-          <ArrowLeft size={16} /> 返回搜索
+          <ArrowLeft size={16} /> 返回疾病搜索
         </button>
         <section className="disease-guide-empty-state">
           <BookOpen size={30} />
           <h2>{selectedConcept.preferred_name_zh || selectedConcept.preferred_name_en}</h2>
-          <p>我们已识别这个疾病概念，但公共指南正在准备中。现在可以先使用研究工具查看自己的资料。</p>
-          <button type="button" className="disease-guide-primary-action" onClick={onOpenMySources}>
+          <p>已识别这个疾病概念，但公共指南正在准备中，目前还没有经过核查的通俗指南。</p>
+          <button type="button" className="disease-guide-primary-action" onClick={() => setSelectedConcept(null)}>
+            <ArrowLeft size={16} /> 返回疾病搜索
+          </button>
+          <button type="button" className="disease-guide-text-action" onClick={onOpenMySources}>
             <Upload size={16} /> 查看我的资料
           </button>
         </section>
@@ -235,14 +282,43 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
 
           <section className="disease-guide-overview" aria-labelledby="disease-guide-overview-title">
             <span className="disease-guide-section-kicker">先看这里</span>
-            <h3 id="disease-guide-overview-title">一句话认识</h3>
+            <h3 id="disease-guide-overview-title">先认识这个病</h3>
             <p>{guideQuery.data.overview.text}</p>
             <SourceLinks
               sourceIds={guideQuery.data.overview.source_ids}
               sources={guideQuery.data.sources}
               onOpen={openSource}
             />
+            {firstTopic && (
+              <button
+                type="button"
+                className="disease-guide-primary-action disease-guide-start-action"
+                onClick={() => openGuideTopic(firstTopic.id)}
+              >
+                从基础开始了解
+              </button>
+            )}
           </section>
+
+          <nav
+            id="disease-guide-topic-directory"
+            className="disease-guide-topic-nav"
+            aria-label="疾病知识主题"
+          >
+            <p>你想先了解什么？</p>
+            <div>
+              {guideQuery.data.topics.map((topic) => (
+                <button
+                  key={topic.id}
+                  type="button"
+                  aria-label={`打开主题：${topic.question}`}
+                  onClick={() => openGuideTopic(topic.id)}
+                >
+                  {topic.title}
+                </button>
+              ))}
+            </div>
+          </nav>
 
           <section className="disease-guide-topics" aria-labelledby="disease-guide-topics-title">
             <div className="disease-guide-section-heading">
@@ -252,52 +328,88 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
               </div>
               <span className="disease-guide-topic-count">{guideQuery.data.topics.length} 个主题</span>
             </div>
-            {guideQuery.data.topics.map((topic) => (
-              <details className="disease-guide-topic" key={topic.id} open={topic.id === "what_is"}>
-                <summary>
-                  <span>
-                    <strong>{topic.title}</strong>
-                    <small>{topic.question}</small>
-                  </span>
-                  <span className="disease-guide-summary-marker" aria-hidden="true">＋</span>
-                </summary>
-                <div className="disease-guide-topic-body">
-                  <p className="disease-guide-topic-summary">{topic.summary.text}</p>
-                  <SourceLinks
-                    sourceIds={topic.summary.source_ids}
-                    sources={guideQuery.data.sources}
-                    onOpen={openSource}
-                  />
-                  <div className="disease-guide-points">
-                    {topic.key_points.map((point) => (
-                      <GuidePoint
-                        key={point.id}
-                        point={point}
-                        sources={guideQuery.data.sources}
-                        onOpenSource={openSource}
-                      />
-                    ))}
+            {guideQuery.data.topics.map((topic, index) => {
+              const nextTopic = guideQuery.data.topics[index + 1];
+              return (
+                <details
+                  id={`guide-topic-${topic.id}`}
+                  className="disease-guide-topic"
+                  key={topic.id}
+                  ref={topic.id === "what_is" ? setInitialTopicOpen : undefined}
+                >
+                  <summary>
+                    <strong>{topic.question}</strong>
+                    <span className="disease-guide-summary-marker" aria-hidden="true">
+                      <span className="when-closed">＋</span>
+                      <span className="when-open">−</span>
+                    </span>
+                  </summary>
+                  <div className="disease-guide-topic-body">
+                    <p className="disease-guide-topic-summary">{topic.summary.text}</p>
+                    <SourceLinks
+                      sourceIds={topic.summary.source_ids}
+                      sources={guideQuery.data.sources}
+                      onOpen={openSource}
+                    />
+                    <div className="disease-guide-points">
+                      {topic.key_points.map((point) => (
+                        <GuidePoint
+                          key={point.id}
+                          point={point}
+                          sources={guideQuery.data.sources}
+                          onOpenSource={openSource}
+                        />
+                      ))}
+                    </div>
+                    {topic.terms && topic.terms.length > 0 && (
+                      <div className="disease-guide-terms" aria-label="术语解释">
+                        <h4>术语解释</h4>
+                        {topic.terms.map((term) => (
+                          <MedicalTerm key={term.id} term={term}>
+                            <SourceLinks
+                              sourceIds={termSourceIds(term)}
+                              sources={guideQuery.data.sources}
+                              onOpen={openSource}
+                            />
+                          </MedicalTerm>
+                        ))}
+                      </div>
+                    )}
+                    <div className="disease-guide-topic-footer">
+                      {nextTopic ? (
+                        <button type="button" onClick={() => openGuideTopic(nextTopic.id)}>
+                          接着了解：{nextTopic.question}
+                        </button>
+                      ) : (
+                        <button type="button" onClick={scrollToGuideSources}>
+                          查看本指南参考资料
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </details>
-            ))}
+                </details>
+              );
+            })}
           </section>
 
           <section className="disease-guide-next-step">
             <div>
               <span className="disease-guide-section-kicker">下一步</span>
-              <h3>想核对这份指南的依据？</h3>
-              <p>先查看本指南使用的机构资料、药品资料和研究登记；需要整理自己的论文时，再进入我的资料。</p>
+              <h3>继续了解这个病</h3>
+              <p>选择一个主题继续阅读；需要核对来源时，再查看本指南使用的公开资料。</p>
             </div>
-            <div className="disease-guide-next-actions">
+            <div className="disease-guide-next-actions" aria-label="继续阅读">
+              <button type="button" className="disease-guide-topic-action" onClick={scrollToGuideDirectory}>
+                回到主题目录
+              </button>
               <button
                 type="button"
-                className="disease-guide-primary-action"
+                className="disease-guide-secondary-action"
                 onClick={scrollToGuideSources}
               >
                 <BookOpen size={16} /> 查看本指南参考资料
               </button>
-              <button type="button" className="disease-guide-secondary-action" onClick={onOpenMySources}>
+              <button type="button" className="disease-guide-text-action" onClick={onOpenMySources}>
                 <Upload size={16} /> 上传自己的资料
               </button>
             </div>
@@ -326,14 +438,23 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
                   <div className="disease-guide-source-group" key={group.label}>
                     <h4>{group.label}</h4>
                     <div className="disease-guide-source-list">
-                      {sources.map((source) => (
+                      {sources.map((source) => {
+                        const sourceNumber = guideQuery.data.sources.findIndex((item) => item.id === source.id) + 1;
+                        return (
                         <article className="disease-guide-source-item" key={source.id}>
                           <a href={source.url} target="_blank" rel="noreferrer">
+                            <span className="disease-guide-source-number">[{sourceNumber}]</span>
                             {source.title} <ExternalLink size={13} aria-hidden="true" />
                           </a>
-                          <span>{source.organization} · 核查至 {source.checked_at}</span>
+                          <span>
+                            {source.organization}
+                            {source.language && ` · ${sourceLanguageLabels[source.language] ?? source.language}`}
+                            {` · 核查至 ${source.checked_at}`}
+                          </span>
+                          {source.usage_note && <small>{source.usage_note}</small>}
                         </article>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 );
@@ -362,7 +483,15 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
                   </button>
                 </div>
                 <p className="disease-guide-source-organization">{selectedSource.organization}</p>
+                {selectedSource.language && (
+                  <p className="disease-guide-source-checked">
+                    资料语言：{sourceLanguageLabels[selectedSource.language] ?? selectedSource.language}
+                  </p>
+                )}
                 <p className="disease-guide-source-checked">核查日期：{selectedSource.checked_at}</p>
+                {selectedSource.usage_note && (
+                  <p className="disease-guide-source-usage">本指南使用它来：{selectedSource.usage_note}</p>
+                )}
                 <a className="disease-guide-source-link" href={selectedSource.url} target="_blank" rel="noreferrer">
                   打开原始来源 <ExternalLink size={14} />
                 </a>
@@ -384,20 +513,78 @@ function GuidePoint({
   sources: DiseaseGuideSource[];
   onOpenSource: (sourceId: string, trigger: HTMLButtonElement) => void;
 }) {
+  const researchContext = point.research_context;
+  const contextSourceIds = new Set(
+    researchContext
+      ? [
+          researchContext.goal,
+          researchContext.current,
+          researchContext.unknown,
+        ].flatMap((claim) => claim.source_ids)
+      : [],
+  );
+  const footerSourceIds = researchContext
+    ? point.source_ids.filter((id) => !contextSourceIds.has(id))
+    : point.source_ids;
+
   return (
     <article className="disease-guide-point">
-      <div className="disease-guide-point-heading">
-        <span className={`disease-guide-evidence-status ${point.evidence_status}`}>
-          {evidenceLabels[point.evidence_status]}
-        </span>
-        {point.evidence_stage && <span className="disease-guide-stage">{point.evidence_stage}</span>}
-        {point.region && <span className="disease-guide-stage">{point.region}</span>}
-      </div>
-      <p>{point.text}</p>
+      {(point.evidence_status !== "established" || Boolean(point.region)) && (
+        <div className="disease-guide-point-heading">
+          <span className={`disease-guide-evidence-status ${point.evidence_status}`}>
+            {evidenceLabels[point.evidence_status]}
+          </span>
+          {point.evidence_stage && <span className="disease-guide-stage">{point.evidence_stage}</span>}
+          {point.region && <span className="disease-guide-stage">{point.region}</span>}
+          {researchContext && (
+            <span className="disease-guide-stage">
+              {researchEvidenceLabels[researchContext.evidence_kind]}
+            </span>
+          )}
+        </div>
+      )}
+      {researchContext ? (
+        <div className="disease-guide-research-body">
+          <ResearchClaim title="想解决什么问题" claim={researchContext.goal} sources={sources} onOpen={onOpenSource} />
+          <ResearchClaim title="目前进展" claim={researchContext.current} sources={sources} onOpen={onOpenSource} />
+          <ResearchClaim title="还有哪些不确定" claim={researchContext.unknown} sources={sources} onOpen={onOpenSource} />
+        </div>
+      ) : (
+        <p>{point.text}</p>
+      )}
       {point.qualifier && <small>{point.qualifier}</small>}
-      <SourceLinks sourceIds={point.source_ids} sources={sources} onOpen={onOpenSource} />
+      {footerSourceIds.length > 0 && (
+        <SourceLinks sourceIds={footerSourceIds} sources={sources} onOpen={onOpenSource} />
+      )}
     </article>
   );
+}
+
+function ResearchClaim({
+  title,
+  claim,
+  sources,
+  onOpen,
+}: {
+  title: string;
+  claim: { text: string; source_ids: string[] };
+  sources: DiseaseGuideSource[];
+  onOpen: (sourceId: string, trigger: HTMLButtonElement) => void;
+}) {
+  return (
+    <div className="disease-guide-context-row">
+      <h4>{title}</h4>
+      <p>{claim.text}</p>
+      <SourceLinks sourceIds={claim.source_ids} sources={sources} onOpen={onOpen} />
+    </div>
+  );
+}
+
+function termSourceIds(term: DiseaseGuideTerm) {
+  return [...new Set([
+    ...term.definition.source_ids,
+    ...(term.context?.source_ids ?? []),
+  ])];
 }
 
 function SourceLinks({
@@ -412,15 +599,25 @@ function SourceLinks({
   const sourceById = new Map(sources.map((source) => [source.id, source]));
   return (
     <div className="disease-guide-source-links" aria-label="引用来源">
+      <span>依据</span>
       {sourceIds.map((sourceId) => (
-        <button
-          type="button"
-          key={sourceId}
-          aria-label={`查看来源 · ${sourceById.get(sourceId)?.organization ?? sourceId} · ${sourceById.get(sourceId)?.title ?? sourceId}`}
-          onClick={(event) => onOpen(sourceId, event.currentTarget)}
-        >
-          查看来源 · {sourceById.get(sourceId)?.organization ?? sourceId}
-        </button>
+        (() => {
+          const index = sources.findIndex((source) => source.id === sourceId);
+          const source = sourceById.get(sourceId);
+          if (!source || index < 0) return null;
+
+          return (
+            <button
+              type="button"
+              key={sourceId}
+              title={source.title}
+              aria-label={`查看依据 ${index + 1}：${source.organization} · ${source.title}`}
+              onClick={(event) => onOpen(sourceId, event.currentTarget)}
+            >
+              [{index + 1}]
+            </button>
+          );
+        })()
       ))}
     </div>
   );
