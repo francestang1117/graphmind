@@ -1,6 +1,7 @@
 import { ArrowLeft, BookOpen, ExternalLink, Search, ShieldCheck, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MedicalTerm from "./MedicalTerm";
+import DiseaseTopicMap from "./disease-guide/DiseaseTopicMap";
 import { useDiseaseGuide, useDiseaseGuideSearch } from "../hooks/useDiseaseGuide";
 import type {
   DiseaseGuidePoint,
@@ -69,6 +70,7 @@ function openGuideTopic(topicId: string) {
 function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
   const [query, setQuery] = useState("");
   const [selectedConcept, setSelectedConcept] = useState<DiseaseGuideSearchItem | null>(null);
+  const [activeTopicId, setActiveTopicId] = useState<string | null>(null);
   const [openSourceId, setOpenSourceId] = useState<string | null>(null);
   const sourceDrawerRef = useRef<HTMLElement | null>(null);
   const sourceTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -86,6 +88,7 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
   const firstTopic = guideQuery.data?.topics.find((topic) => topic.id === "what_is")
     ?? guideQuery.data?.topics[0]
     ?? null;
+  const firstTopicId = firstTopic?.id ?? null;
 
   const openSource = useCallback((sourceId: string, trigger: HTMLButtonElement) => {
     sourceTriggerRef.current = trigger;
@@ -99,7 +102,13 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
   const setInitialTopicOpen = useCallback((element: HTMLDetailsElement | null) => {
     if (element) {
       element.open = true;
+      setActiveTopicId(firstTopicId);
     }
+  }, [firstTopicId]);
+
+  const selectGuideTopic = useCallback((topicId: string) => {
+    setActiveTopicId(topicId);
+    openGuideTopic(topicId);
   }, []);
 
   useEffect(() => {
@@ -162,12 +171,14 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
       guide_status: "available",
       guide_languages: ["zh-CN"],
     });
+    setActiveTopicId(null);
     sourceTriggerRef.current = null;
     setOpenSourceId(null);
   };
 
   const selectConcept = (concept: DiseaseGuideSearchItem) => {
     setSelectedConcept(concept);
+    setActiveTopicId(null);
     sourceTriggerRef.current = null;
     setOpenSourceId(null);
   };
@@ -293,32 +304,19 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
               <button
                 type="button"
                 className="disease-guide-primary-action disease-guide-start-action"
-                onClick={() => openGuideTopic(firstTopic.id)}
+                onClick={() => selectGuideTopic(firstTopic.id)}
               >
                 从基础开始了解
               </button>
             )}
           </section>
 
-          <nav
-            id="disease-guide-topic-directory"
-            className="disease-guide-topic-nav"
-            aria-label="疾病知识主题"
-          >
-            <p>你想先了解什么？</p>
-            <div>
-              {guideQuery.data.topics.map((topic) => (
-                <button
-                  key={topic.id}
-                  type="button"
-                  aria-label={`打开主题：${topic.question}`}
-                  onClick={() => openGuideTopic(topic.id)}
-                >
-                  {topic.title}
-                </button>
-              ))}
-            </div>
-          </nav>
+          <DiseaseTopicMap
+            diseaseName={guideQuery.data.title}
+            topics={guideQuery.data.topics}
+            activeTopicId={activeTopicId}
+            onSelectTopic={selectGuideTopic}
+          />
 
           <section className="disease-guide-topics" aria-labelledby="disease-guide-topics-title">
             <div className="disease-guide-section-heading">
@@ -335,7 +333,15 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
                   id={`guide-topic-${topic.id}`}
                   className="disease-guide-topic"
                   key={topic.id}
-                  ref={topic.id === "what_is" ? setInitialTopicOpen : undefined}
+                  ref={topic.id === firstTopicId ? setInitialTopicOpen : undefined}
+                  onToggle={(event) => {
+                    const isOpen = event.currentTarget.open;
+                    setActiveTopicId((current) => (
+                      isOpen
+                        ? topic.id
+                        : current === topic.id ? null : current
+                    ));
+                  }}
                 >
                   <summary>
                     <strong>{topic.question}</strong>
@@ -377,7 +383,7 @@ function DiseaseGuidePage({ onOpenMySources }: DiseaseGuidePageProps) {
                     )}
                     <div className="disease-guide-topic-footer">
                       {nextTopic ? (
-                        <button type="button" onClick={() => openGuideTopic(nextTopic.id)}>
+                          <button type="button" onClick={() => selectGuideTopic(nextTopic.id)}>
                           接着了解：{nextTopic.question}
                         </button>
                       ) : (
