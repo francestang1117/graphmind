@@ -5766,7 +5766,8 @@ button {
 
 .disease-guide-page-reading {
   width: min(100%, 900px);
-  font-family: Inter, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  font-size: 16px;
 }
 
 .kw-workspace-guide .disease-guide-page-reading > .disease-guide-header,
@@ -5781,7 +5782,8 @@ button {
 
 .kw-workspace-guide .disease-guide-page-reading h2,
 .kw-workspace-guide .disease-guide-page-reading h3 {
-  font-family: ui-serif, "Noto Serif CJK SC", "Songti SC", serif;
+  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+  font-weight: 600;
 }
 
 .kw-workspace-guide .disease-guide-search-box {
