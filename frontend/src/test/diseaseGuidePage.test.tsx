@@ -60,6 +60,11 @@ const guide = {
       key_points: [{
         id: "point-1",
         text: "某些脂质可能在细胞内积累。",
+        question: "为什么会发生脂质堆积？",
+        explanation: {
+          text: "身体处理某些脂质的能力下降后，相关物质可能逐渐在细胞内积累。",
+          source_ids: [source.id, referenceSource.id],
+        },
         qualifier: "这是疾病机制概览。",
         evidence_status: "established" as const,
         evidence_stage: "已有疾病机制资料",
@@ -105,12 +110,27 @@ const guide = {
         region: "国际登记",
         source_ids: [referenceSource.id],
         research_context: {
+          title: "研究登记入口",
           evidence_kind: "registry" as const,
           goal: { text: "了解研究想解决的问题。", source_ids: [referenceSource.id] },
           current: { text: "目前只有登记信息可核对。", source_ids: [referenceSource.id] },
           unknown: { text: "结果仍需后续研究确认。", source_ids: [referenceSource.id] },
         },
       }],
+    },
+    {
+      id: "possible_impacts",
+      title: "身体影响",
+      question: "它可能影响身体哪些地方？",
+      summary: { text: "不同人的表现可能不同。", source_ids: [referenceSource.id] },
+      key_points: [],
+    },
+    {
+      id: "frequency",
+      title: "有多常见",
+      question: "这个病有多常见？",
+      summary: { text: "不同研究会有不同估计。", source_ids: [referenceSource.id] },
+      key_points: [],
     },
   ],
   sources: [source, referenceSource],
@@ -158,6 +178,28 @@ describe("DiseaseGuidePage", () => {
     await user.click(startButton);
     expect(document.getElementById("guide-topic-what_is")).toHaveAttribute("open");
     expect(document.getElementById("guide-topic-what_is")?.querySelector("summary")).toHaveFocus();
+    expect(screen.getByText("为什么会发生脂质堆积？")).toBeVisible();
+    expect(screen.getByText("身体处理某些脂质的能力下降后，相关物质可能逐渐在细胞内积累。")).toBeVisible();
+    const topicMap = screen.getByRole("navigation", { name: "法布雷病知识主题" });
+    const topicNodes = within(topicMap).getAllByRole("button");
+    expect(topicNodes).toHaveLength(5);
+    const mapTreatmentNode = within(topicMap).getByRole("button", {
+      name: "治疗方向：目前有哪些治疗方向？",
+    });
+    mapTreatmentNode.focus();
+    expect(mapTreatmentNode).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(document.getElementById("guide-topic-treatments")).toHaveAttribute("open");
+    expect(mapTreatmentNode).toHaveAttribute("aria-current", "location");
+
+    const treatmentSummary = document
+      .getElementById("guide-topic-treatments")
+      ?.querySelector("summary") as HTMLElement;
+    await user.click(treatmentSummary);
+    expect(mapTreatmentNode).not.toHaveAttribute("aria-current");
+    await user.click(treatmentSummary);
+    expect(mapTreatmentNode).toHaveAttribute("aria-current", "location");
+
     const termSummary = screen.getByText("GLA 基因是什么意思？");
     const termDetails = termSummary.closest("details");
     const termDefinition = screen.getByText("影响细胞处理某些脂质能力的基因。");
@@ -176,14 +218,24 @@ describe("DiseaseGuidePage", () => {
     expect(termDetails).not.toHaveAttribute("open");
     expect(termDefinition).not.toBeVisible();
 
+    expect(screen.getByRole("navigation", { name: "法布雷病知识主题" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "治疗方向：目前有哪些治疗方向？" })).toHaveAttribute(
+      "aria-controls",
+      "guide-topic-treatments",
+    );
+
     const nextTopicButton = screen.getByRole("button", { name: "接着了解：目前有哪些治疗方向？" });
     await user.click(nextTopicButton);
     expect(document.getElementById("guide-topic-treatments")).toHaveAttribute("open");
     expect(document.getElementById("guide-topic-treatments")?.querySelector("summary")).toHaveFocus();
-    expect(screen.getAllByRole("button", { name: "打开主题：这个病是什么，为什么会发生？" })[0]).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "治疗方向：目前有哪些治疗方向？" })).toHaveAttribute(
+      "aria-current",
+      "location",
+    );
+    expect(screen.getByRole("button", { name: "认识疾病：这个病是什么，为什么会发生？" })).toBeInTheDocument();
     expect(screen.getByText("某些脂质可能在细胞内积累。")).toBeInTheDocument();
 
-    const treatmentNav = screen.getAllByRole("button", { name: "打开主题：目前有哪些治疗方向？" })[0];
+    const treatmentNav = screen.getByRole("button", { name: "治疗方向：目前有哪些治疗方向？" });
     await user.click(treatmentNav);
     const treatmentTopic = document.getElementById("guide-topic-treatments");
     expect(treatmentTopic).toHaveAttribute("open");
@@ -191,14 +243,19 @@ describe("DiseaseGuidePage", () => {
     expect(screen.getByText("已用于临床")).toBeInTheDocument();
     expect(screen.getByText("JP")).toBeInTheDocument();
 
-    const researchNav = screen.getAllByRole("button", { name: "打开主题：新方法研究到哪一步了？" })[0];
+    const researchNav = screen.getByRole("button", { name: "研究进展：新方法研究到哪一步了？" });
     await user.click(researchNav);
     expect(screen.getByText("临床研究登记")).toBeInTheDocument();
     expect(screen.getByText("国际登记")).toBeInTheDocument();
+    expect(screen.getByText("研究登记入口")).toBeInTheDocument();
     expect(screen.getByText("想解决什么问题")).toBeInTheDocument();
     expect(screen.getByText("了解研究想解决的问题。")).toBeInTheDocument();
     expect(screen.getByText("目前只有登记信息可核对。")).toBeInTheDocument();
     expect(screen.getByText("还有哪些不确定")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "研究进展：新方法研究到哪一步了？" })).toHaveAttribute(
+      "aria-current",
+      "location",
+    );
 
     const sourceButton = screen.getAllByRole("button", { name: /查看依据 1：MedlinePlus Genetics/ })[0];
     await user.click(sourceButton);
@@ -225,7 +282,7 @@ describe("DiseaseGuidePage", () => {
     expect(sourceButton).toHaveFocus();
 
     await user.click(screen.getByRole("button", { name: "回到主题目录" }));
-    expect(screen.getAllByRole("button", { name: "打开主题：这个病是什么，为什么会发生？" })[0]).toHaveFocus();
+    expect(screen.getByRole("button", { name: "认识疾病：这个病是什么，为什么会发生？" })).toHaveFocus();
 
     const sourceActions = screen.getAllByRole("button", { name: /查看本指南参考资料/ });
     await user.click(sourceActions[sourceActions.length - 1]);
@@ -233,6 +290,28 @@ describe("DiseaseGuidePage", () => {
     expect(screen.getByRole("link", { name: /Fabry disease/ })).toHaveAttribute("href", source.url);
     await user.click(screen.getByRole("button", { name: /上传自己的资料/ }));
     expect(onOpenMySources).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps legacy guide points readable without optional knowledge fields", async () => {
+    const user = userEvent.setup();
+    const legacyGuide = structuredClone(guide);
+    for (const topic of legacyGuide.topics) {
+      for (const point of topic.key_points) {
+        Reflect.deleteProperty(point, "question");
+        Reflect.deleteProperty(point, "explanation");
+      }
+    }
+
+    api.searchDiseaseGuides.mockResolvedValue({ items: [] });
+    api.getDiseaseGuide.mockResolvedValue(legacyGuide);
+
+    render(<DiseaseGuidePage onOpenMySources={vi.fn()} />, { wrapper });
+    await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));
+    await screen.findByRole("heading", { name: "法布雷病" });
+    await user.click(screen.getByRole("button", { name: "从基础开始了解" }));
+
+    expect(screen.getByText("某些脂质可能在细胞内积累。")).toBeVisible();
+    expect(screen.queryByText("为什么会发生脂质堆积？")).not.toBeInTheDocument();
   });
 
   it("keeps source numbering stable and reports search failures", async () => {
@@ -352,9 +431,7 @@ describe("DiseaseGuidePage", () => {
     await screen.findByRole("heading", { name: "法布雷病" });
 
     await user.click(
-      screen.getAllByRole("button", {
-        name: "打开主题：新方法研究到哪一步了？",
-      })[0],
+      screen.getByRole("button", { name: "研究进展：新方法研究到哪一步了？" }),
     );
 
     const article = screen

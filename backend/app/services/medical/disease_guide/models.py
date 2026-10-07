@@ -45,6 +45,7 @@ class DiseaseGuideText(BaseModel):
 class DiseaseGuideResearchContext(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    title: str = Field(default="", max_length=160)
     evidence_kind: Literal["registry", "published_results", "review"]
     goal: DiseaseGuideText
     current: DiseaseGuideText
@@ -56,6 +57,8 @@ class DiseaseGuidePoint(BaseModel):
 
     id: str = Field(min_length=1, max_length=100)
     text: str = Field(min_length=1, max_length=1200)
+    question: str = Field(default="", max_length=240)
+    explanation: DiseaseGuideText | None = None
     qualifier: str = Field(default="", max_length=800)
     evidence_status: GuideEvidenceStatus
     evidence_stage: str = Field(default="", max_length=240)
@@ -70,6 +73,13 @@ class DiseaseGuidePoint(BaseModel):
             raise ValueError("source_ids must not contain duplicates")
         if self.evidence_status != "established" and not self.evidence_stage:
             raise ValueError("research points must declare evidence_stage")
+        if self.explanation:
+            missing = sorted(set(self.explanation.source_ids) - set(self.source_ids))
+            if missing:
+                raise ValueError(
+                    "explanation sources must be included in point source_ids: "
+                    + ", ".join(missing)
+                )
         if self.research_context:
             context_source_ids = {
                 source_id
@@ -155,6 +165,8 @@ class DiseaseGuide(BaseModel):
                     references.extend(term.context.source_ids)
             for point in topic.key_points:
                 references.extend(point.source_ids)
+                if point.explanation:
+                    references.extend(point.explanation.source_ids)
                 if point.research_context:
                     references.extend(
                         source_id
