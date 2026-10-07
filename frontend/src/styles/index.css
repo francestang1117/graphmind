@@ -5764,10 +5764,13 @@ button {
   color: var(--text);
 }
 
-.disease-guide-page-reading {
-  width: min(100%, 900px);
+.kw-workspace-guide .disease-guide-page {
   font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
   font-size: 16px;
+}
+
+.disease-guide-page-reading {
+  width: min(100%, 900px);
 }
 
 .kw-workspace-guide .disease-guide-page-reading > .disease-guide-header,
@@ -5780,8 +5783,8 @@ button {
   margin-right: auto;
 }
 
-.kw-workspace-guide .disease-guide-page-reading h2,
-.kw-workspace-guide .disease-guide-page-reading h3 {
+.kw-workspace-guide .disease-guide-page h2,
+.kw-workspace-guide .disease-guide-page h3 {
   font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
   font-weight: 600;
 }
