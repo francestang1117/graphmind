@@ -6325,3 +6325,395 @@ button {
   .disease-topic-map-topics { grid-template-columns: minmax(0, 1fr); }
   .disease-topic-map-center strong { font-size: 18px; }
 }
+
+/* The public guide is a reading room inside the product shell. Research tools
+   keep the compact dark workspace, while exploration gets a warmer rhythm. */
+.kw-shell-guide {
+  height: calc(100vh - 28px);
+  margin: 14px;
+  grid-template-columns: 340px minmax(0, 1fr);
+  overflow: hidden;
+  border-radius: 20px;
+  background: #fbf5e9;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
+}
+
+.kw-shell-guide .kw-sidebar {
+  border-right: 1px solid #d8c6a2;
+  background: #eee1c5;
+  box-shadow: none;
+}
+
+.kw-shell-guide .kw-brand {
+  height: 104px;
+  padding: 0 28px;
+  border-bottom: 0;
+  color: #2d281f;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+  font-size: 27px;
+  font-weight: 700;
+}
+
+.kw-shell-guide .kw-logo {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #b1583a;
+}
+
+.kw-shell-guide .kw-nav {
+  gap: 8px;
+  padding: 0 28px 28px;
+}
+
+.kw-shell-guide .kw-nav-item {
+  height: 56px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 15px;
+  color: #887858;
+  font-size: 18px;
+  font-weight: 600;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.kw-shell-guide .kw-nav-item svg { display: none; }
+
+.kw-shell-guide .kw-nav-item:hover {
+  transform: none;
+  background: rgba(251, 245, 233, 0.55);
+  color: #3c3428;
+}
+
+.kw-shell-guide .kw-nav-item.active {
+  background: #fbf5e9;
+  color: #2d281f;
+  box-shadow: 0 5px 16px rgba(102, 77, 39, 0.05);
+}
+
+.kw-shell-guide .kw-nav-item.active::before {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 4px;
+  border-radius: 15px 0 0 15px;
+  background: #b1583a;
+}
+
+.kw-shell-guide .kw-nav-item.active svg { color: inherit; }
+
+.kw-shell-guide .kw-nav-section {
+  gap: 8px;
+  margin-top: 21px;
+  padding: 22px 0 0;
+  border-top: 1px solid #d8c6a2;
+}
+
+.kw-shell-guide .kw-nav-section-label {
+  padding: 0 20px 6px;
+  color: #a08d69;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.kw-shell-guide .kw-side-footer { display: none; }
+
+.kw-shell-guide .kw-main {
+  height: 100%;
+  background: #fbf5e9;
+}
+
+.kw-shell-guide .kw-topbar { display: none; }
+
+.kw-shell-guide .kw-content {
+  background: #fbf5e9;
+  color: #2d281f;
+}
+
+.kw-shell-guide .kw-workspace-guide {
+  --guide-bg: #fbf5e9;
+  --guide-text: #2d281f;
+  --guide-muted: #6d5d48;
+  --guide-soft: #887858;
+  --guide-accent: #b1583a;
+  --guide-research: #a66e12;
+  --text: var(--guide-text);
+  --muted: var(--guide-muted);
+  --soft: var(--guide-soft);
+  --blue: var(--guide-accent);
+  --amber: var(--guide-research);
+  background: var(--guide-bg);
+  color: var(--guide-text);
+}
+
+.kw-shell-guide .disease-guide-page {
+  width: min(100%, 920px);
+  padding: 76px 68px 96px;
+}
+
+.kw-shell-guide .disease-guide-search-hero {
+  max-width: 850px;
+  margin: 0 auto;
+}
+
+.kw-shell-guide .disease-guide-eyebrow,
+.kw-shell-guide .disease-guide-section-kicker {
+  color: #b1583a;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.kw-shell-guide .disease-guide-search-hero h2,
+.kw-shell-guide .disease-guide-header h2 {
+  margin: 18px 0 24px;
+  color: #2d281f;
+  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+  font-size: clamp(42px, 5vw, 60px);
+  font-weight: 700;
+  line-height: 1.18;
+}
+
+.kw-shell-guide .disease-guide-search-hero > p,
+.kw-shell-guide .disease-guide-header > p {
+  max-width: 42ch;
+  color: #6d5d48;
+  font-size: 21px;
+  line-height: 1.65;
+}
+
+.kw-shell-guide .disease-guide-search-box {
+  min-height: 80px;
+  margin-top: 36px;
+  padding: 0 30px;
+  border: 0;
+  border-radius: 16px;
+  background: #f2e5cc;
+  box-shadow: none;
+  color: #927e5d;
+}
+
+.kw-shell-guide .disease-guide-search-box:focus-within {
+  border: 2px solid #c58a67;
+  box-shadow: 0 0 0 4px rgba(177, 88, 58, 0.12);
+}
+
+.kw-shell-guide .disease-guide-search-box input {
+  color: #4c3d2d;
+  font-size: 21px;
+}
+
+.kw-shell-guide .disease-guide-search-box input::placeholder { color: #927e5d; }
+
+.kw-shell-guide .disease-guide-example {
+  gap: 17px;
+  margin-top: 31px;
+  color: #8b795c;
+  font-size: 18px;
+}
+
+.kw-shell-guide .disease-guide-example button,
+.kw-shell-guide .disease-guide-source-links button,
+.kw-shell-guide .disease-guide-source-item a,
+.kw-shell-guide .disease-guide-source-link {
+  color: #b1583a;
+}
+
+.kw-shell-guide .disease-guide-example button { font-weight: 600; }
+
+.kw-shell-guide .disease-guide-secondary-entry {
+  max-width: 850px;
+  margin-top: 67px;
+  padding-top: 42px;
+  border-top: 1px solid #d8c6a2;
+}
+
+.kw-shell-guide .disease-guide-secondary-entry h3,
+.kw-shell-guide .disease-guide-next-step h3 {
+  color: #2d281f;
+  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+  font-size: 25px;
+  font-weight: 700;
+}
+
+.kw-shell-guide .disease-guide-secondary-entry p,
+.kw-shell-guide .disease-guide-next-step p {
+  color: #6d5d48;
+  font-size: 17px;
+}
+
+.kw-shell-guide .disease-guide-secondary-action,
+.kw-shell-guide .disease-guide-primary-action {
+  min-height: 62px;
+  padding: 0 27px;
+  border: 0;
+  border-radius: 12px;
+  background: #b1583a;
+  color: #fffaf0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.kw-shell-guide .disease-guide-secondary-action:hover,
+.kw-shell-guide .disease-guide-primary-action:hover {
+  border: 0;
+  background: #96462e;
+  color: #fffaf0;
+}
+
+.kw-shell-guide .disease-guide-search-results {
+  border-bottom-color: #d8c6a2;
+}
+
+.kw-shell-guide .disease-guide-search-result {
+  border-bottom-color: #e2d4b9;
+  color: #6d5d48;
+}
+
+.kw-shell-guide .disease-guide-search-result:hover { color: #2d281f; }
+
+.kw-shell-guide .disease-guide-result-status { color: #6f7d43; }
+.kw-shell-guide .disease-guide-result-status.preparing { color: #a66e12; }
+
+.kw-shell-guide .disease-guide-header,
+.kw-shell-guide .disease-guide-overview,
+.kw-shell-guide .disease-guide-sources {
+  border-color: #d8c6a2;
+}
+
+.kw-shell-guide .disease-guide-overview p,
+.kw-shell-guide .disease-guide-topic-summary,
+.kw-shell-guide .disease-guide-point-answer,
+.kw-shell-guide .disease-guide-context-row p {
+  color: #2d281f;
+}
+
+.kw-shell-guide .disease-guide-point-explanation,
+.kw-shell-guide .disease-guide-point small,
+.kw-shell-guide .disease-guide-term-body p,
+.kw-shell-guide .disease-guide-sources-intro,
+.kw-shell-guide .disease-guide-source-item small,
+.kw-shell-guide .disease-guide-source-usage {
+  color: #6d5d48;
+}
+
+.kw-shell-guide .disease-guide-topic,
+.kw-shell-guide .disease-guide-point,
+.kw-shell-guide .disease-guide-term,
+.kw-shell-guide .disease-guide-topic-footer,
+.kw-shell-guide .disease-guide-source-item {
+  border-color: #d8c6a2;
+}
+
+.kw-shell-guide .disease-guide-topic > summary strong,
+.kw-shell-guide .disease-guide-research-title,
+.kw-shell-guide .disease-guide-context-row h4,
+.kw-shell-guide .disease-guide-source-group h4,
+.kw-shell-guide .disease-guide-source-heading h3,
+.kw-shell-guide .disease-guide-source-organization {
+  color: #2d281f;
+}
+
+.kw-shell-guide .disease-guide-evidence-status {
+  display: inline-flex;
+  padding: 7px 15px;
+  border-radius: 999px;
+  background: #e5ead5;
+  color: #687b43;
+  font-size: 15px;
+}
+
+.kw-shell-guide .disease-guide-evidence-status.clinical_research {
+  background: #f3e4c5;
+  color: #a66e12;
+}
+
+.kw-shell-guide .disease-guide-evidence-status.early_exploration {
+  background: #f1dfd5;
+  color: #9e4b32;
+}
+
+.kw-shell-guide .disease-guide-stage,
+.kw-shell-guide .disease-guide-topic-count,
+.kw-shell-guide .disease-guide-source-item span,
+.kw-shell-guide .disease-guide-source-number,
+.kw-shell-guide .disease-guide-source-checked {
+  color: #887858;
+}
+
+.kw-shell-guide .disease-guide-point-question {
+  color: #2d281f;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.kw-shell-guide .disease-guide-point-answer {
+  font-size: 22px;
+  line-height: 1.7;
+}
+
+.kw-shell-guide .disease-guide-point-explanation {
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+.kw-shell-guide .disease-guide-source-links {
+  font-size: 16px;
+}
+
+.kw-shell-guide .disease-guide-source-drawer {
+  background: #fbf5e9;
+}
+
+@media (max-width: 900px) {
+  .kw-shell-guide {
+    height: auto;
+    min-height: 100vh;
+    margin: 0;
+    grid-template-columns: 1fr;
+    border-radius: 0;
+  }
+
+  .kw-shell-guide .kw-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid #d8c6a2;
+  }
+
+  .kw-shell-guide .kw-brand {
+    height: 76px;
+    padding: 0 22px;
+    font-size: 23px;
+  }
+
+  .kw-shell-guide .kw-nav { padding: 8px 14px 16px; }
+  .kw-shell-guide .kw-nav-item { height: 48px; padding: 0 15px; font-size: 16px; }
+  .kw-shell-guide .kw-nav-section { grid-column: 1 / -1; margin-top: 12px; padding-top: 16px; }
+  .kw-shell-guide .kw-nav-section-label { padding-inline: 15px; }
+  .kw-shell-guide .disease-guide-page { padding: 56px 28px 72px; }
+  .kw-shell-guide .disease-guide-search-hero > p,
+  .kw-shell-guide .disease-guide-header > p { font-size: 19px; }
+  .kw-shell-guide .disease-guide-secondary-entry { margin-top: 55px; }
+}
+
+@media (max-width: 520px) {
+  .kw-shell-guide .disease-guide-page { padding: 40px 20px 58px; }
+  .kw-shell-guide .disease-guide-search-hero h2,
+  .kw-shell-guide .disease-guide-header h2 { font-size: 40px; }
+  .kw-shell-guide .disease-guide-search-hero > p,
+  .kw-shell-guide .disease-guide-header > p { font-size: 17px; }
+  .kw-shell-guide .disease-guide-search-box { min-height: 64px; margin-top: 28px; padding: 0 20px; }
+  .kw-shell-guide .disease-guide-search-box input { font-size: 17px; }
+  .kw-shell-guide .disease-guide-example { font-size: 16px; }
+  .kw-shell-guide .disease-guide-secondary-entry { align-items: flex-start; margin-top: 48px; padding-top: 30px; }
+  .kw-shell-guide .disease-guide-secondary-action,
+  .kw-shell-guide .disease-guide-primary-action { width: 100%; }
+  .kw-shell-guide .disease-guide-point-question { font-size: 21px; }
+  .kw-shell-guide .disease-guide-point-answer { font-size: 19px; }
+}

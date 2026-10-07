@@ -140,11 +140,11 @@ function App() {
   }, [authReady, needsWorkspace, logoutInProgress, user?.id, workspaceScope]);
 
   return (
-    <div className="kw-shell">
+    <div className={`kw-shell${activeTab === "explore" ? " kw-shell-guide" : ""}`}>
       <aside className="kw-sidebar">
         <div className="kw-brand">
           <div className="kw-logo">
-            <Zap size={21} />
+            {activeTab === "explore" ? <Network size={21} /> : <Zap size={21} />}
           </div>
           <span>GraphMind</span>
         </div>
