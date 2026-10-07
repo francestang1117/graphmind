@@ -6658,6 +6658,13 @@ button {
   line-height: 1.45;
 }
 
+.kw-shell-guide .disease-guide-topic > summary strong {
+  color: #2d281f;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
 .kw-shell-guide .disease-guide-point-answer {
   font-size: 22px;
   line-height: 1.7;
@@ -6768,6 +6775,10 @@ button {
   .kw-shell-guide .disease-guide-secondary-entry { align-items: flex-start; margin-top: 48px; padding-top: 30px; }
   .kw-shell-guide .disease-guide-secondary-action,
   .kw-shell-guide .disease-guide-primary-action { width: 100%; }
-  .kw-shell-guide .disease-guide-point-question { font-size: 21px; }
+  .kw-shell-guide .disease-guide-topic > summary strong,
+  .kw-shell-guide .disease-guide-point-question {
+    font-size: 21px;
+    line-height: 1.5;
+  }
   .kw-shell-guide .disease-guide-point-answer { font-size: 19px; }
 }
