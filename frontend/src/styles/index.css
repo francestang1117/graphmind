@@ -6331,7 +6331,7 @@ button {
 .kw-shell-guide {
   height: calc(100vh - 28px);
   margin: 14px;
-  grid-template-columns: 340px minmax(0, 1fr);
+  grid-template-columns: minmax(240px, min(320px, 24vw)) minmax(0, 1fr);
   overflow: hidden;
   border-radius: 20px;
   background: #fbf5e9;
@@ -6456,8 +6456,8 @@ button {
 }
 
 .kw-shell-guide .disease-guide-page {
-  width: min(100%, 920px);
-  padding: 76px 68px 96px;
+  width: min(100%, 860px);
+  padding: 64px clamp(32px, 4vw, 60px) 90px;
 }
 
 .kw-shell-guide .disease-guide-search-hero {
@@ -6478,17 +6478,17 @@ button {
 .kw-shell-guide .disease-guide-header h2 {
   margin: 18px 0 24px;
   color: #2d281f;
-  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
-  font-size: clamp(42px, 5vw, 60px);
+  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  font-size: 48px;
   font-weight: 700;
-  line-height: 1.18;
+  line-height: 1.22;
 }
 
 .kw-shell-guide .disease-guide-search-hero > p,
 .kw-shell-guide .disease-guide-header > p {
   max-width: 42ch;
   color: #6d5d48;
-  font-size: 21px;
+  font-size: 19px;
   line-height: 1.65;
 }
 
@@ -6541,7 +6541,7 @@ button {
 .kw-shell-guide .disease-guide-secondary-entry h3,
 .kw-shell-guide .disease-guide-next-step h3 {
   color: #2d281f;
-  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
   font-size: 25px;
   font-weight: 700;
 }
@@ -6760,13 +6760,15 @@ button {
   }
 
   .kw-shell-guide .kw-nav-section-label { padding-inline: 16px; }
-  .kw-shell-guide .disease-guide-page { padding: 48px 36px 72px; }
+  .kw-shell-guide .disease-guide-page { padding: 44px 32px 72px; }
+  .kw-shell-guide .disease-guide-search-hero h2,
+  .kw-shell-guide .disease-guide-header h2 { font-size: 44px; }
 }
 
 @media (max-width: 520px) {
   .kw-shell-guide .disease-guide-page { padding: 40px 20px 58px; }
   .kw-shell-guide .disease-guide-search-hero h2,
-  .kw-shell-guide .disease-guide-header h2 { font-size: 40px; }
+  .kw-shell-guide .disease-guide-header h2 { font-size: 36px; }
   .kw-shell-guide .disease-guide-search-hero > p,
   .kw-shell-guide .disease-guide-header > p { font-size: 17px; }
   .kw-shell-guide .disease-guide-search-box { min-height: 64px; margin-top: 28px; padding: 0 20px; }
