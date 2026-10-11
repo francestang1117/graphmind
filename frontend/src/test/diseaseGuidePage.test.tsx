@@ -167,7 +167,7 @@ describe("DiseaseGuidePage", () => {
       { wrapper },
     );
 
-    expect(screen.getByRole("heading", { name: "你想了解什么疾病？" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /从一个问题，.*慢慢认识一种疾病。/ })).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText("搜索疾病名称，例如：法布雷病"), "法布雷");
     const result = (await screen.findAllByRole("button", { name: /法布雷病 Fabry disease/ }))[0];
     await user.click(result);
@@ -306,7 +306,7 @@ describe("DiseaseGuidePage", () => {
     api.getDiseaseGuide.mockResolvedValue(legacyGuide);
 
     render(<DiseaseGuidePage onOpenMySources={vi.fn()} />, { wrapper });
-    await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));
+    await user.click(screen.getByRole("button", { name: /认识法布雷病/ }));
     await screen.findByRole("heading", { name: "法布雷病" });
     await user.click(screen.getByRole("button", { name: "从基础开始了解" }));
 
@@ -326,7 +326,7 @@ describe("DiseaseGuidePage", () => {
     api.searchDiseaseGuides.mockResolvedValue({ items: [] });
     api.getDiseaseGuide.mockResolvedValue(guide);
     render(<DiseaseGuidePage onOpenMySources={vi.fn()} />, { wrapper });
-    await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));
+    await user.click(screen.getByRole("button", { name: /认识法布雷病/ }));
     await screen.findByRole("heading", { name: "法布雷病" });
     expect(screen.getAllByRole("button", { name: /查看依据 1：MedlinePlus Genetics/ }).length).toBeGreaterThan(1);
     expect(screen.getAllByRole("button", { name: /查看依据 2：NCBI Bookshelf/ }).length).toBeGreaterThan(1);
@@ -337,7 +337,7 @@ describe("DiseaseGuidePage", () => {
     api.getDiseaseGuide.mockResolvedValue(guide);
 
     render(<DiseaseGuidePage onOpenMySources={vi.fn()} />, { wrapper });
-    await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));
+    await user.click(screen.getByRole("button", { name: /认识法布雷病/ }));
     await screen.findByRole("heading", { name: "法布雷病" });
 
     const getIntroTopic = () => document.getElementById("guide-topic-what_is") as HTMLDetailsElement | null;
@@ -354,7 +354,7 @@ describe("DiseaseGuidePage", () => {
     expect(getIntroTopic()?.open).toBe(false);
 
     await user.click(screen.getByRole("button", { name: "返回疾病搜索" }));
-    await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));
+    await user.click(screen.getByRole("button", { name: /认识法布雷病/ }));
     await screen.findByRole("heading", { name: "法布雷病" });
     expect(getIntroTopic()?.open).toBe(true);
   });
@@ -393,7 +393,7 @@ describe("DiseaseGuidePage", () => {
       <DiseaseGuidePage onOpenMySources={vi.fn()} />,
       { wrapper },
     );
-    await user.click(screen.getByRole("button", { name: /法布雷病 Fabry disease/ }));
+    await user.click(screen.getByRole("button", { name: /认识法布雷病/ }));
 
     expect(await screen.findByText("治疗信息按日本资料核查")).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "地区" })).not.toBeInTheDocument();
@@ -424,7 +424,7 @@ describe("DiseaseGuidePage", () => {
 
     await user.click(
       screen.getByRole("button", {
-        name: /法布雷病 Fabry disease/,
+        name: /认识法布雷病/,
       }),
     );
 

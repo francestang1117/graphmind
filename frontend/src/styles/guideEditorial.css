@@ -1,0 +1,631 @@
+/* Public disease exploration: an editorial reading experience with clear evidence trails. */
+.kw-shell-guide {
+  --guide-display-font: "Hannotate SC", "HanziPen SC", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  --guide-body-font: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+  height: 100vh;
+  min-height: 0;
+  margin: 0;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 78px minmax(0, 1fr);
+  border-radius: 0;
+  background: #f8f7f2;
+  box-shadow: none;
+}
+
+.kw-shell-guide .kw-sidebar {
+  position: relative;
+  z-index: 10;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  overflow: visible;
+  padding: 0 max(30px, calc((100vw - 1440px) / 2));
+  border: 0;
+  border-bottom: 1px solid #d8dfd7;
+  background: #fffdfa;
+}
+
+.kw-shell-guide .kw-brand {
+  flex: 0 0 auto;
+  height: 100%;
+  gap: 10px;
+  padding: 0 38px 0 0;
+  color: #263b32;
+  font-family: "Arial Rounded MT Bold", "Avenir Next", sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+.kw-shell-guide .kw-logo {
+  width: 33px;
+  height: 33px;
+  color: #315b4e;
+}
+
+.kw-shell-guide .kw-nav {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 3px;
+  overflow: visible;
+  padding: 0;
+}
+
+.kw-shell-guide .kw-nav-item {
+  height: 44px;
+  padding: 0 17px;
+  border-radius: 999px;
+  color: #465b50;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.kw-shell-guide .kw-nav-item:hover,
+.kw-shell-guide .kw-nav-item.active {
+  background: #e5eee8;
+  color: #244b3e;
+  box-shadow: none;
+}
+
+.kw-shell-guide .kw-nav-item.active::before { display: none; }
+
+.kw-guide-tools {
+  position: relative;
+  color: #465b50;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.kw-guide-tools > summary {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 17px;
+  border-radius: 999px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.kw-guide-tools > summary::-webkit-details-marker { display: none; }
+.kw-guide-tools > summary::after { content: "⌄"; margin-left: 9px; font-size: 18px; line-height: 1; }
+.kw-guide-tools > summary:hover,
+.kw-guide-tools[open] > summary { background: #e5eee8; color: #244b3e; }
+
+.kw-guide-tools-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  width: min(270px, calc(100vw - 32px));
+  display: grid;
+  gap: 2px;
+  padding: 10px;
+  border: 1px solid #d8dfd7;
+  border-radius: 15px;
+  background: #fffdfa;
+  box-shadow: 0 18px 40px rgba(31, 55, 43, 0.13);
+}
+
+.kw-guide-tools-menu .kw-nav-item {
+  width: 100%;
+  justify-content: flex-start;
+  border-radius: 9px;
+}
+
+.kw-shell-guide .kw-guide-account { flex: 0 0 auto; margin-left: 14px; }
+.kw-shell-guide .kw-guide-account .auth-sign-in,
+.kw-shell-guide .kw-guide-account .auth-user-button {
+  min-height: 40px;
+  border: 1px solid #a2b7a9;
+  border-radius: 999px;
+  background: transparent;
+  color: #244b3e;
+}
+
+.kw-shell-guide .kw-main,
+.kw-shell-guide .kw-content,
+.kw-shell-guide .kw-workspace-guide { background: #f8f7f2; }
+
+.kw-shell-guide .kw-workspace-guide {
+  --guide-bg: #f8f7f2;
+  --guide-text: #263b32;
+  --guide-muted: #4c5e53;
+  --guide-soft: #52675b;
+  --guide-accent: #315b4e;
+  --guide-research: #80561c;
+  --text: var(--guide-text);
+  --muted: var(--guide-muted);
+  --soft: var(--guide-soft);
+  --blue: var(--guide-accent);
+  --green: #315b4e;
+  --amber: var(--guide-research);
+  --line: #d7dfd6;
+  --line-strong: #b9c9bc;
+}
+
+.kw-shell-guide .disease-guide-page {
+  width: 100%;
+  max-width: none;
+  padding: 0 0 100px;
+  font-family: var(--guide-body-font);
+}
+
+.kw-shell-guide .disease-guide-search-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 0.86fr);
+  align-items: center;
+  gap: 50px;
+  min-height: 590px;
+  max-width: none;
+  margin: 0;
+  padding: 64px max(52px, calc((100vw - 1280px) / 2));
+  overflow: hidden;
+  background: #f1dcd1;
+}
+
+.kw-shell-guide .disease-guide-hero-copy {
+  position: relative;
+  z-index: 2;
+  max-width: 690px;
+}
+
+.kw-shell-guide .disease-guide-eyebrow,
+.kw-shell-guide .disease-guide-section-kicker {
+  color: #315b4e;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+}
+
+.kw-shell-guide .disease-guide-search-hero h2 {
+  margin: 24px 0 22px;
+  color: #263b32;
+  font-family: var(--guide-display-font);
+  font-size: clamp(42px, 4.5vw, 70px);
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  line-height: 1.3;
+}
+
+.kw-shell-guide .disease-guide-hero-copy > p {
+  max-width: 28em;
+  margin: 0;
+  color: #3e5147;
+  font-size: 19px;
+  line-height: 1.7;
+}
+
+.kw-shell-guide .disease-guide-search-box {
+  min-height: 68px;
+  max-width: 610px;
+  margin-top: 36px;
+  padding: 0 21px;
+  border: 1px solid #8caaa0;
+  border-radius: 12px;
+  background: #fffdfa;
+  color: #315b4e;
+  box-shadow: 0 10px 26px rgba(65, 69, 54, 0.08);
+}
+
+.kw-shell-guide .disease-guide-search-box:focus-within {
+  border: 2px solid #315b4e;
+  box-shadow: 0 0 0 4px rgba(49, 91, 78, 0.15);
+}
+
+.kw-shell-guide .disease-guide-search-box input {
+  color: #263b32;
+  font-size: 18px;
+}
+
+.kw-shell-guide .disease-guide-search-box input::placeholder { color: #66766c; }
+.kw-shell-guide .disease-guide-search-results {
+  max-width: 610px;
+  padding: 5px 16px;
+  border: 1px solid #d7dfd6;
+  border-radius: 12px;
+  background: #fffdfa;
+  box-shadow: 0 13px 24px rgba(44, 61, 49, 0.08);
+}
+.kw-shell-guide .disease-guide-search-result { border-bottom-color: #d7dfd6; }
+.kw-shell-guide .disease-guide-error { color: #912d2f; }
+
+.kw-shell-guide .disease-guide-example {
+  gap: 12px;
+  margin-top: 20px;
+  color: #4c5e53;
+  font-size: 14px;
+}
+
+.kw-shell-guide .disease-guide-example button {
+  padding: 5px 0;
+  color: #244b3e;
+  font-size: 15px;
+  font-weight: 750;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.kw-shell-guide .disease-guide-hero-art {
+  position: relative;
+  width: min(100%, 540px);
+  aspect-ratio: 1;
+  justify-self: center;
+  border-radius: 42% 58% 46% 54%;
+  background: #d6e5da;
+  transform: rotate(-4deg);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .kw-shell-guide .disease-guide-hero-copy > :is(.disease-guide-eyebrow, h2, p, .disease-guide-search-box, .disease-guide-example) {
+    animation: guide-rise 680ms both cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .kw-shell-guide .disease-guide-hero-copy > h2 { animation-delay: 90ms; }
+  .kw-shell-guide .disease-guide-hero-copy > p { animation-delay: 180ms; }
+  .kw-shell-guide .disease-guide-hero-copy > .disease-guide-search-box { animation-delay: 280ms; }
+  .kw-shell-guide .disease-guide-hero-copy > .disease-guide-example { animation-delay: 380ms; }
+  .kw-shell-guide .disease-guide-hero-art {
+    animation: guide-art-enter 850ms both cubic-bezier(0.2, 0.7, 0.2, 1),
+      guide-art-drift 7s 850ms infinite alternate ease-in-out;
+  }
+  .kw-shell-guide .disease-guide-hero-art svg path {
+    stroke-dasharray: 1000;
+    stroke-dashoffset: 1000;
+    animation: guide-line-draw 1100ms 350ms both ease-out;
+  }
+  .kw-shell-guide .disease-guide-hero-art svg circle:not(:first-of-type),
+  .kw-shell-guide .disease-guide-art-core,
+  .kw-shell-guide .disease-guide-art-label {
+    animation: guide-fade-in 500ms both ease-out;
+  }
+  .kw-shell-guide .disease-guide-art-core { animation-delay: 350ms; }
+  .kw-shell-guide .disease-guide-hero-art svg circle:not(:first-of-type) { animation-delay: 800ms; }
+  .kw-shell-guide .disease-guide-art-label.cause { animation-delay: 530ms; }
+  .kw-shell-guide .disease-guide-art-label.impact { animation-delay: 650ms; }
+  .kw-shell-guide .disease-guide-art-label.treatment { animation-delay: 770ms; }
+  .kw-shell-guide .disease-guide-art-label.research { animation-delay: 890ms; }
+  .kw-shell-guide .disease-guide-header,
+  .kw-shell-guide .disease-topic-map {
+    animation: guide-rise 620ms both cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .kw-shell-guide .disease-guide-reveal.is-motion-ready {
+    opacity: 0;
+    transform: translateY(22px);
+    transition: opacity 650ms ease, transform 650ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+  .kw-shell-guide .disease-guide-reveal.is-motion-ready.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .kw-shell-guide .disease-topic-map-node,
+  .kw-shell-guide .disease-guide-primary-action,
+  .kw-shell-guide .disease-guide-secondary-action {
+    transition: transform 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+  }
+  .kw-shell-guide .disease-topic-map-node:hover,
+  .kw-shell-guide .disease-guide-primary-action:hover,
+  .kw-shell-guide .disease-guide-secondary-action:hover { transform: translateY(-3px); }
+  .kw-shell-guide .disease-guide-topic[open] .disease-guide-topic-body {
+    animation: guide-rise 420ms both ease-out;
+  }
+}
+
+@keyframes guide-rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes guide-art-enter {
+  from { opacity: 0; transform: translateY(24px) rotate(-7deg) scale(0.94); }
+  to { opacity: 1; transform: translateY(0) rotate(-4deg) scale(1); }
+}
+@keyframes guide-art-drift {
+  from { transform: translateY(0) rotate(-4deg); }
+  to { transform: translateY(-6px) rotate(-3deg); }
+}
+@keyframes guide-line-draw { to { stroke-dashoffset: 0; } }
+@keyframes guide-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.kw-shell-guide .disease-guide-hero-art::before,
+.kw-shell-guide .disease-guide-hero-art::after {
+  position: absolute;
+  border-radius: 50%;
+  content: "";
+}
+.kw-shell-guide .disease-guide-hero-art::before {
+  inset: 16% 14% 20% 18%;
+  border: 1px solid rgba(49, 91, 78, 0.23);
+}
+.kw-shell-guide .disease-guide-hero-art::after {
+  right: -3%;
+  bottom: -2%;
+  width: 22%;
+  aspect-ratio: 1;
+  background: #e8c971;
+}
+
+.kw-shell-guide .disease-guide-hero-art svg {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: #315b4e;
+  stroke-width: 2;
+}
+.kw-shell-guide .disease-guide-hero-art svg circle:not(:first-of-type) { fill: #315b4e; stroke: none; }
+.kw-shell-guide .disease-guide-hero-art svg circle:first-of-type { fill: #fffdfa; stroke: #315b4e; }
+.kw-shell-guide .disease-guide-art-core,
+.kw-shell-guide .disease-guide-art-label {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  align-content: center;
+  text-align: center;
+  transform: rotate(4deg);
+}
+.kw-shell-guide .disease-guide-art-core {
+  top: 39%;
+  left: 32%;
+  width: 38%;
+  height: 22%;
+  color: #315b4e;
+  font-size: 16px;
+  line-height: 1.45;
+}
+.kw-shell-guide .disease-guide-art-core strong { font-family: var(--guide-display-font); font-size: 26px; }
+.kw-shell-guide .disease-guide-art-label {
+  min-width: 28%;
+  min-height: 48px;
+  padding: 7px 12px;
+  border: 1px solid #315b4e;
+  border-radius: 999px;
+  background: #fffdfa;
+  color: #263b32;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 3px 4px 0 rgba(49, 91, 78, 0.12);
+}
+.kw-shell-guide .disease-guide-art-label.cause { top: 16%; left: 3%; }
+.kw-shell-guide .disease-guide-art-label.impact { top: 14%; right: 0; }
+.kw-shell-guide .disease-guide-art-label.treatment { bottom: 17%; left: 0; }
+.kw-shell-guide .disease-guide-art-label.research { bottom: 16%; right: 0; }
+
+.kw-shell-guide .disease-guide-journey {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  max-width: 1280px;
+  gap: 0;
+  margin: 0 auto;
+  padding: 48px 32px 54px;
+}
+.kw-shell-guide .disease-guide-journey > div {
+  padding: 4px 30px;
+  border-right: 1px solid #cbd8ce;
+}
+.kw-shell-guide .disease-guide-journey > div:first-child { padding-left: 0; }
+.kw-shell-guide .disease-guide-journey > div:last-child { border-right: 0; }
+.kw-shell-guide .disease-guide-journey span {
+  display: block;
+  margin-bottom: 16px;
+  color: #315b4e;
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+.kw-shell-guide .disease-guide-journey strong {
+  color: #263b32;
+  font-family: var(--guide-display-font);
+  font-size: 22px;
+  font-weight: 700;
+}
+.kw-shell-guide .disease-guide-journey p { margin: 8px 0 0; color: #4c5e53; font-size: 15px; line-height: 1.6; }
+
+.kw-shell-guide .disease-guide-secondary-entry {
+  max-width: 1216px;
+  margin: 0 auto;
+  padding: 30px 0 0;
+  border-top: 1px solid #cbd8ce;
+}
+
+.kw-shell-guide .disease-guide-secondary-entry h3,
+.kw-shell-guide .disease-guide-next-step h3 {
+  font-family: var(--guide-display-font);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.kw-shell-guide .disease-guide-secondary-action,
+.kw-shell-guide .disease-guide-primary-action {
+  border-radius: 999px;
+  background: #315b4e;
+  color: #fffdfa;
+}
+.kw-shell-guide .disease-guide-secondary-action:hover,
+.kw-shell-guide .disease-guide-primary-action:hover { background: #244b3e; }
+
+.kw-shell-guide .disease-guide-page-reading {
+  max-width: 1300px;
+  margin: 0 auto;
+  padding: 32px 52px 108px;
+}
+
+.kw-shell-guide .disease-guide-back {
+  margin: 0 0 22px;
+  color: #315b4e;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.kw-shell-guide .disease-guide-header {
+  position: relative;
+  max-width: none;
+  min-height: 310px;
+  padding: 59px 64px 44px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 26px;
+  background: #e3eee6;
+}
+.kw-shell-guide .disease-guide-header::after {
+  position: absolute;
+  right: -40px;
+  bottom: -92px;
+  width: min(36vw, 340px);
+  aspect-ratio: 1;
+  border: 38px solid #c9dcd0;
+  border-radius: 47% 53% 54% 46%;
+  content: "";
+}
+
+.kw-shell-guide .disease-guide-header h2 {
+  margin: 17px 0 14px;
+  color: #263b32;
+  font-family: var(--guide-display-font);
+  font-size: clamp(44px, 5vw, 68px);
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  line-height: 1.3;
+}
+.kw-shell-guide .disease-guide-header > p {
+  position: relative;
+  z-index: 1;
+  max-width: 38em;
+  color: #3e5147;
+  font-size: 18px;
+}
+.kw-shell-guide .disease-guide-meta { position: relative; z-index: 1; color: #4c5e53; font-size: 13px; }
+.kw-shell-guide .disease-guide-meta .verified { color: #315b4e; }
+
+.kw-shell-guide .disease-guide-overview,
+.kw-shell-guide .disease-topic-map,
+.kw-shell-guide .disease-guide-topics,
+.kw-shell-guide .disease-guide-next-step,
+.kw-shell-guide .disease-guide-sources { width: min(100%, 1030px); max-width: 1030px; margin-left: auto; margin-right: auto; }
+
+.kw-shell-guide .disease-guide-overview {
+  margin-top: 72px;
+  padding: 0 0 54px;
+  border-color: #cbd8ce;
+}
+.kw-shell-guide .disease-guide-overview h3,
+.kw-shell-guide .disease-guide-section-heading h3 {
+  font-family: var(--guide-display-font);
+  font-size: clamp(30px, 3vw, 40px);
+  font-weight: 700;
+  line-height: 1.4;
+}
+.kw-shell-guide .disease-guide-overview p { max-width: 38em; font-size: 21px; line-height: 1.8; }
+.kw-shell-guide .disease-guide-source-links { color: #52675b; font-size: 14px; }
+.kw-shell-guide .disease-guide-source-links button { color: #315b4e; text-decoration: underline; text-underline-offset: 3px; }
+.kw-shell-guide .disease-guide-start-action { margin-top: 27px; }
+
+.kw-shell-guide .disease-topic-map { margin-top: 64px; margin-bottom: 70px; }
+.kw-shell-guide .disease-topic-map-center {
+  border-color: #b9c9bc;
+  border-radius: 999px;
+  background: #fffdfa;
+}
+.kw-shell-guide .disease-topic-map-node {
+  min-height: 80px;
+  padding: 11px 14px;
+  border-color: #b9c9bc;
+  color: #263b32;
+  font-size: 16px;
+}
+.kw-shell-guide .disease-topic-map-node:hover,
+.kw-shell-guide .disease-topic-map-node.active { background: #e3eee6; color: #244b3e; }
+.kw-shell-guide .disease-topic-map-index { color: #315b4e; font-size: 13px; }
+
+.kw-shell-guide .disease-guide-topics { margin-top: 0; }
+.kw-shell-guide .disease-guide-section-heading { margin-bottom: 26px; }
+.kw-shell-guide .disease-guide-topic { border-color: #cbd8ce; }
+.kw-shell-guide .disease-guide-topic > summary {
+  min-height: 108px;
+  justify-content: flex-start;
+  gap: 22px;
+  padding: 19px 0;
+}
+.kw-shell-guide .disease-guide-topic-index { color: #315b4e; font-size: 18px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.kw-shell-guide .disease-guide-topic > summary strong { flex: 1; font-size: clamp(21px, 2.5vw, 28px); }
+.kw-shell-guide .disease-guide-summary-marker { color: #315b4e; }
+.kw-shell-guide .disease-guide-topic-body { padding: 0 0 52px 50px; }
+.kw-shell-guide .disease-guide-topic-summary { max-width: 45em; font-size: 19px; line-height: 1.8; }
+.kw-shell-guide .disease-guide-point { max-width: 850px; border-color: #d7dfd6; }
+.kw-shell-guide .disease-guide-point-answer { max-width: 42em; font-size: 19px; }
+.kw-shell-guide .disease-guide-point-explanation { max-width: 52em; font-size: 16px; }
+.kw-shell-guide .disease-guide-evidence-status { padding: 4px 10px; font-size: 12px; }
+.kw-shell-guide .disease-guide-stage { font-size: 12px; }
+.kw-shell-guide .disease-guide-source-drawer { background: #fffdfa; }
+.kw-shell-guide .disease-guide-source-link,
+.kw-shell-guide .disease-guide-source-item a { color: #315b4e; }
+
+.kw-shell-guide :is(button, a, summary, input):focus-visible {
+  outline: 3px solid #315b4e;
+  outline-offset: 3px;
+}
+
+@media (max-width: 980px) {
+  .kw-shell-guide .disease-guide-search-hero { grid-template-columns: minmax(0, 1fr) minmax(260px, 0.72fr); gap: 20px; padding-inline: 36px; }
+  .kw-shell-guide .disease-guide-hero-art { width: min(100%, 390px); }
+  .kw-shell-guide .disease-guide-art-label { min-height: 38px; font-size: 11px; }
+  .kw-shell-guide .disease-guide-art-core { font-size: 12px; }
+  .kw-shell-guide .disease-guide-art-core strong { font-size: 20px; }
+  .kw-shell-guide .disease-guide-page-reading { padding-inline: 32px; }
+  .kw-shell-guide .disease-guide-secondary-entry { margin-inline: 32px; }
+}
+
+@media (max-width: 720px) {
+  .kw-shell-guide { grid-template-rows: 112px minmax(0, 1fr); }
+  .kw-shell-guide .kw-sidebar { flex-wrap: wrap; align-content: start; padding: 0 18px; }
+  .kw-shell-guide .kw-brand { height: 58px; padding-right: 0; font-size: 21px; }
+  .kw-shell-guide .kw-guide-account { margin-left: auto; }
+  .kw-shell-guide .kw-nav { order: 3; flex-basis: 100%; height: 54px; gap: 0; }
+  .kw-shell-guide .kw-nav-item { height: 40px; padding-inline: 11px; font-size: 13px; }
+  .kw-guide-tools > summary { min-height: 40px; padding-inline: 11px; font-size: 13px; }
+  .kw-guide-tools-menu { left: auto; right: 0; }
+  .kw-shell-guide .disease-guide-search-hero { display: block; min-height: 0; padding: 52px 24px 32px; }
+  .kw-shell-guide .disease-guide-search-hero h2 { font-size: clamp(39px, 8vw, 55px); }
+  .kw-shell-guide .disease-guide-hero-copy > p { font-size: 17px; }
+  .kw-shell-guide .disease-guide-hero-art { width: min(100%, 410px); margin: 28px auto 0; }
+  .kw-shell-guide .disease-guide-journey { grid-template-columns: 1fr; padding: 22px 24px 30px; }
+  .kw-shell-guide .disease-guide-journey > div { padding: 17px 0; border-right: 0; border-bottom: 1px solid #cbd8ce; }
+  .kw-shell-guide .disease-guide-journey > div:last-child { border-bottom: 0; }
+  .kw-shell-guide .disease-guide-journey span { margin-bottom: 7px; }
+  .kw-shell-guide .disease-guide-secondary-entry { margin: 0 24px; padding-top: 26px; }
+  .kw-shell-guide .disease-guide-page-reading { padding: 22px 20px 72px; }
+  .kw-shell-guide .disease-guide-header { min-height: 0; padding: 37px 30px 42px; }
+  .kw-shell-guide .disease-guide-header::after { right: -110px; bottom: -125px; width: 270px; opacity: 0.6; }
+  .kw-shell-guide .disease-guide-header h2 { font-size: 45px; }
+  .kw-shell-guide .disease-guide-header > p { font-size: 16px; }
+  .kw-shell-guide .disease-guide-overview { margin-top: 48px; padding-bottom: 45px; }
+  .kw-shell-guide .disease-guide-overview p { font-size: 18px; }
+  .kw-shell-guide .disease-topic-map { margin-top: 46px; margin-bottom: 54px; }
+  .kw-shell-guide .disease-topic-map-node { min-height: 60px; }
+  .kw-shell-guide .disease-guide-topic > summary { min-height: 82px; gap: 12px; }
+  .kw-shell-guide .disease-guide-topic-body { padding: 0 0 40px 0; }
+  .kw-shell-guide .disease-guide-topic > summary strong { font-size: 21px; }
+  .kw-shell-guide .disease-guide-point-answer { font-size: 18px; }
+}
+
+@media (max-width: 400px) {
+  .kw-shell-guide .disease-guide-hero-art { width: 320px; max-width: calc(100vw - 48px); }
+  .kw-shell-guide .disease-guide-art-label { min-width: 29%; padding: 5px 8px; font-size: 10px; }
+  .kw-shell-guide .disease-guide-art-core strong { font-size: 17px; }
+  .kw-shell-guide .disease-guide-search-box { min-height: 60px; padding-inline: 16px; }
+  .kw-shell-guide .disease-guide-search-box input { font-size: 16px; }
+  .kw-shell-guide .disease-guide-example { flex-wrap: wrap; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kw-shell-guide *, .kw-shell-guide *::before, .kw-shell-guide *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

@@ -5784,8 +5784,9 @@ button {
 }
 
 .kw-workspace-guide .disease-guide-page h2,
-.kw-workspace-guide .disease-guide-page h3 {
-  font-family: "Songti SC", "STSong", "Noto Serif CJK SC", serif;
+.kw-workspace-guide .disease-guide-page h3,
+.kw-workspace-guide .disease-guide-page h4 {
+  font-family: inherit;
   font-weight: 600;
 }
 
@@ -6331,7 +6332,7 @@ button {
 .kw-shell-guide {
   height: calc(100vh - 28px);
   margin: 14px;
-  grid-template-columns: minmax(240px, min(320px, 24vw)) minmax(0, 1fr);
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
   overflow: hidden;
   border-radius: 20px;
   background: #fbf5e9;
@@ -6344,6 +6345,7 @@ button {
   border-right: 1px solid #d8c6a2;
   background: #eee1c5;
   box-shadow: none;
+  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
 }
 
 .kw-shell-guide .kw-brand {
@@ -6351,9 +6353,10 @@ button {
   padding: 0 28px;
   border-bottom: 0;
   color: #2d281f;
-  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
+  font-family: "Hannotate SC", "HanziPen SC", "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", sans-serif;
   font-size: 27px;
-  font-weight: 700;
+  font-weight: 600;
+  line-height: 1.1;
 }
 
 .kw-shell-guide .kw-logo {
@@ -6784,4 +6787,279 @@ button {
     line-height: 1.5;
   }
   .kw-shell-guide .disease-guide-point-answer { font-size: 19px; }
+}
+
+/* Keep research tools discoverable without making them compete with the main path. */
+.kw-shell-guide .kw-nav-section {
+  gap: 2px;
+  margin-top: 26px;
+  padding-top: 20px;
+}
+
+.kw-shell-guide .kw-nav-section-heading {
+  padding: 0 20px 10px;
+  color: #a08d69;
+}
+
+.kw-shell-guide .kw-nav-section-label {
+  padding: 0;
+  color: #756548;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+.kw-shell-guide .kw-nav-section > .kw-nav-item {
+  height: 48px;
+  padding: 0 20px 0 34px;
+  border-radius: 10px;
+  color: #887858;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.kw-shell-guide .kw-nav-section > .kw-nav-item svg {
+  display: none;
+}
+
+.kw-shell-guide .kw-nav-section > .kw-nav-item:hover {
+  background: rgba(251, 245, 233, 0.52);
+  color: #3c3428;
+}
+
+.kw-shell-guide .kw-nav-section > .kw-nav-item.active {
+  background: rgba(251, 245, 233, 0.76);
+  color: #3c3428;
+  box-shadow: none;
+}
+
+.kw-shell-guide .kw-nav-section > .kw-nav-item.active::before {
+  top: 12px;
+  bottom: 12px;
+  left: 18px;
+  width: 2px;
+  border-radius: 2px;
+  background: #b1583a;
+}
+
+/* The two primary destinations should read as the main navigation. */
+.kw-shell-guide .kw-nav > .kw-nav-item {
+  color: #4c412f;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.kw-shell-guide .kw-nav > .kw-nav-item:hover {
+  color: #2d281f;
+}
+
+.kw-shell-guide .kw-nav-section-label {
+  color: #6f5e43;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.kw-shell-guide .kw-nav-section > .kw-nav-item {
+  color: #8b7b60;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.kw-shell-guide .kw-nav-section > .kw-nav-item:hover,
+.kw-shell-guide .kw-nav-section > .kw-nav-item.active {
+  color: #4c412f;
+}
+
+/* Use one calm type system for the guide title, sections, and questions. */
+.kw-shell-guide .disease-guide-page,
+.kw-shell-guide .disease-guide-page h2,
+.kw-shell-guide .disease-guide-page h3,
+.kw-shell-guide .disease-guide-page h4,
+.kw-shell-guide .disease-guide-page button {
+  font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+}
+
+.kw-shell-guide .disease-guide-header h2 {
+  margin: 15px 0 19px;
+  color: #2d281f;
+  font-size: 46px;
+  font-weight: 750;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+
+.kw-shell-guide .disease-guide-header > p {
+  max-width: 36ch;
+  color: #6d5d48;
+  font-size: 20px;
+  font-weight: 450;
+  line-height: 1.7;
+}
+
+.kw-shell-guide .disease-guide-overview h3,
+.kw-shell-guide .disease-guide-section-heading h3 {
+  color: #2d281f;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.kw-shell-guide .disease-guide-topic > summary strong,
+.kw-shell-guide .disease-guide-point-question {
+  color: #2d281f;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.kw-shell-guide .disease-guide-point-answer {
+  color: #342d24;
+  font-size: 18px;
+  line-height: 1.75;
+}
+
+.kw-shell-guide .disease-guide-point-explanation,
+.kw-shell-guide .disease-guide-point small {
+  color: #6d5d48;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+@media (max-width: 900px) {
+  .kw-shell-guide {
+    height: 100vh;
+    min-height: 0;
+    display: block;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .kw-shell-guide .kw-sidebar {
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .kw-shell-guide .kw-main {
+    height: auto;
+    min-height: 0;
+  }
+
+  .kw-shell-guide .kw-content {
+    overflow: visible;
+  }
+
+  .kw-shell-guide .kw-nav {
+    gap: 5px;
+    padding: 8px 16px 18px;
+  }
+
+  .kw-shell-guide .kw-nav-item {
+    height: 46px;
+    padding-inline: 16px;
+    font-size: 16px;
+  }
+
+  .kw-shell-guide .kw-nav-section {
+    margin-top: 18px;
+    padding-top: 16px;
+  }
+
+  .kw-shell-guide .kw-nav-section-heading { padding: 0 16px 8px; }
+  .kw-shell-guide .kw-nav-section-label { font-size: 17px; }
+  .kw-shell-guide .kw-nav-section > .kw-nav-item {
+    height: 43px;
+    padding-inline: 28px 16px;
+    font-size: 15px;
+  }
+}
+
+@media (min-width: 761px) and (max-width: 900px) {
+  .kw-shell-guide .kw-nav-section-heading { padding-inline: 16px; }
+}
+
+/* Keep guide headings on one readable Chinese sans-serif scale. */
+.kw-shell-guide .disease-guide-overview h3,
+.kw-shell-guide .disease-guide-section-heading h3 {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.kw-shell-guide .disease-guide-topic > summary strong {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.kw-shell-guide .disease-guide-point-question {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.kw-shell-guide .disease-guide-term > summary {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+@media (max-width: 520px) {
+  .kw-shell-guide .kw-nav > .kw-nav-item { font-size: 17px; }
+  .kw-shell-guide .kw-nav-section-label { font-size: 16px; }
+  .kw-shell-guide .disease-guide-overview h3,
+  .kw-shell-guide .disease-guide-section-heading h3 { font-size: 22px; }
+  .kw-shell-guide .disease-guide-topic > summary strong,
+  .kw-shell-guide .disease-guide-point-question { font-size: 19px; }
+  .kw-shell-guide .disease-guide-header h2 { font-size: 36px; }
+  .kw-shell-guide .disease-guide-header > p { font-size: 17px; }
+  .kw-shell-guide .disease-guide-point-answer { font-size: 17px; }
+}
+
+/* Final guide type scale: one title treatment for search and reading pages. */
+.kw-shell-guide .disease-guide-search-hero h2,
+.kw-shell-guide .disease-guide-header h2 {
+  color: #3a3026;
+  font-family: "Hannotate SC", "HanziPen SC", "Noto Sans CJK SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 44px;
+  font-weight: 500;
+  line-height: 1.25;
+  letter-spacing: 0;
+  font-synthesis: none;
+}
+
+.kw-shell-guide .disease-guide-search-hero > p,
+.kw-shell-guide .disease-guide-header > p {
+  color: #71624f;
+  font-family: "Noto Sans CJK SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1.75;
+}
+
+.kw-shell-guide .disease-guide-eyebrow,
+.kw-shell-guide .disease-guide-section-kicker {
+  color: #b1583a;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.kw-shell-guide .disease-guide-overview h3,
+.kw-shell-guide .disease-guide-section-heading h3 {
+  color: #3a3026;
+  font-size: 22px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+@media (max-width: 520px) {
+  .kw-shell-guide .disease-guide-search-hero h2,
+  .kw-shell-guide .disease-guide-header h2 { font-size: 35px; }
+  .kw-shell-guide .disease-guide-search-hero > p,
+  .kw-shell-guide .disease-guide-header > p { font-size: 17px; }
+  .kw-shell-guide .disease-guide-overview h3,
+  .kw-shell-guide .disease-guide-section-heading h3 { font-size: 22px; }
 }
