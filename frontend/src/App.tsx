@@ -140,22 +140,37 @@ function App() {
   }, [authReady, needsWorkspace, logoutInProgress, user?.id, workspaceScope]);
 
   return (
-    <div className="kw-shell">
+    <div className={`kw-shell${activeTab === "explore" ? " kw-shell-guide" : ""}`}>
       <aside className="kw-sidebar">
         <div className="kw-brand">
           <div className="kw-logo">
-            <Zap size={21} />
+            {activeTab === "explore" ? <Network size={21} /> : <Zap size={21} />}
           </div>
           <span>GraphMind</span>
         </div>
 
         <nav className="kw-nav" aria-label="Primary">
           {primaryTabs.map((tab) => <NavItem key={tab.id} tab={tab} activeTab={activeTab} onSelect={selectTab} />)}
-          <div className="kw-nav-section">
-            <span className="kw-nav-section-label">研究工具</span>
-            {researchTabs.map((tab) => <NavItem key={tab.id} tab={tab} activeTab={activeTab} onSelect={selectTab} />)}
-          </div>
+          {activeTab === "explore" ? (
+            <details className="kw-guide-tools">
+              <summary>研究工具</summary>
+              <div className="kw-guide-tools-menu">
+                {researchTabs.map((tab) => <NavItem key={tab.id} tab={tab} activeTab={activeTab} onSelect={selectTab} />)}
+              </div>
+            </details>
+          ) : (
+            <div className="kw-nav-section">
+              <span className="kw-nav-section-label">研究工具</span>
+              {researchTabs.map((tab) => <NavItem key={tab.id} tab={tab} activeTab={activeTab} onSelect={selectTab} />)}
+            </div>
+          )}
         </nav>
+
+        {activeTab === "explore" && (
+          <div className="kw-guide-account">
+            <AuthControl onSignIn={() => setAuthOpen(true)} />
+          </div>
+        )}
 
         <div className="kw-side-footer">
           <details className="kw-developer-tools">

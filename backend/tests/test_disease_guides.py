@@ -42,6 +42,10 @@ def test_fabry_guide_has_sources_and_review_dates_for_every_claim() -> None:
                 assert set(term.context.source_ids) <= source_ids
         for point in topic.key_points:
             assert set(point.source_ids) <= source_ids
+            if topic.id != "research_progress":
+                assert point.question
+                if point.explanation:
+                    assert set(point.explanation.source_ids) <= set(point.source_ids)
             if point.research_context:
                 for claim in (
                     point.research_context.goal,
@@ -76,7 +80,15 @@ def test_fabry_guide_retains_x_linked_inheritance_context() -> None:
     inheritance = next(point for point in what_is.key_points if point.id == "what-is-inheritance")
 
     assert "X 染色体" in inheritance.text
-    assert "女性" in inheritance.text
+    assert "母亲" in inheritance.text
+    assert "50%" in inheritance.text
+    assert "父亲" in inheritance.text
+    assert "所有女儿" in inheritance.text
+    assert "儿子" in inheritance.text
+    assert inheritance.explanation
+    assert "女性" in inheritance.explanation.text
+    assert "继承变异不代表" in inheritance.explanation.text
+    assert inheritance.explanation.source_ids == ["genereviews-fabry"]
     assert set(inheritance.source_ids) <= source_ids
 
 
@@ -89,6 +101,22 @@ def test_fabry_guide_explains_required_terms_and_research_context() -> None:
     assert all(term.definition.source_ids for term in what_is.terms)
     assert all(point.research_context for point in research.key_points)
     assert {point.research_context.evidence_kind for point in research.key_points} == {"registry"}
+    assert [point.research_context.title for point in research.key_points] == [
+        "研究登记入口",
+        "PRX-102 儿童与青少年研究",
+        "EXG110 基因治疗研究",
+    ]
+
+    gene_therapy = next(point for point in research.key_points if point.id == "research-gene-therapy")
+    assert gene_therapy.research_context.goal.text == (
+        "研究一次静脉给予 EXG110 的安全性和耐受性，并观察肾脏、心脏、疼痛和胃肠道等指标的变化。"
+    )
+    assert "提高相关酶活性" not in gene_therapy.research_context.goal.text
+    assert "I/II 期" in gene_therapy.research_context.current.text
+    assert "成人" in gene_therapy.research_context.current.text
+    assert "截至 2026-10-01 核查" in gene_therapy.research_context.current.text
+    assert "尚未招募" in gene_therapy.research_context.current.text
+    assert "尚未核对到完整结果" in gene_therapy.research_context.current.text
 
 
 def test_fabry_chaperone_entry_uses_current_japan_scope_and_label() -> None:
@@ -122,6 +150,8 @@ def test_old_guide_payload_without_optional_reading_fields_remains_compatible() 
     for topic in payload["topics"]:
         topic.pop("terms", None)
         for point in topic["key_points"]:
+            point.pop("question", None)
+            point.pop("explanation", None)
             point.pop("research_context", None)
 
     restored = DiseaseGuide.model_validate(payload)
@@ -129,6 +159,36 @@ def test_old_guide_payload_without_optional_reading_fields_remains_compatible() 
     assert restored.sources[0].language == ""
     assert restored.topics[0].terms == []
     assert restored.topics[-1].key_points[0].research_context is None
+
+
+def test_old_research_context_without_title_remains_compatible() -> None:
+    payload = load_guides()[('mesh:D000795', 'zh-CN')].model_dump(mode="json")
+    for point in payload["topics"][-1]["key_points"]:
+        point["research_context"].pop("title", None)
+
+    restored = DiseaseGuide.model_validate(payload)
+
+    assert restored.topics[-1].key_points[0].research_context.title == ""
+
+
+def test_guide_rejects_explanation_sources_not_on_the_parent_point() -> None:
+    payload = load_guides()[('mesh:D000795', 'zh-CN')].model_dump(mode="json")
+    point = payload["topics"][0]["key_points"][0]
+    point["source_ids"] = ["medlineplus-genetics"]
+    point["explanation"]["source_ids"] = ["genereviews-fabry"]
+
+    with pytest.raises(ValidationError, match="explanation sources"):
+        DiseaseGuide.model_validate(payload)
+
+
+def test_guide_rejects_explanation_references_to_unknown_sources() -> None:
+    payload = load_guides()[('mesh:D000795', 'zh-CN')].model_dump(mode="json")
+    point = payload["topics"][0]["key_points"][0]
+    point["source_ids"] = ["missing-source"]
+    point["explanation"]["source_ids"] = ["missing-source"]
+
+    with pytest.raises(ValidationError, match="unknown sources"):
+        DiseaseGuide.model_validate(payload)
 
 
 def test_guide_rejects_duplicate_term_ids() -> None:

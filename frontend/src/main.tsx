@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import './styles/index.css'
+import './styles/guideEditorial.css'
 import App from './App.tsx'
 import { AUTH_SESSION_CHANGED_EVENT } from './services/authSession'
 
